@@ -1,0 +1,56 @@
+[base]
+title = ""
+author = "<YOUR_NAME>"
+email = "user@noreply.tola"
+description = ""
+language = "zh-Hans"
+copyright = ""
+
+[build]
+base_path = ""
+content = "content"
+output = "public"
+assets = "assets"
+minify = true
+clear = false
+
+[build.rss]
+enable = false
+path = "feed.xml"
+
+[build.slug]
+path = "safe"
+fragment = "on"
+
+[build.typst]
+command = ["typst"]
+
+[build.typst.svg]
+extract_type = "embedded"
+inline_max_size = "20KB"
+dpi = 96.0
+
+[build.tailwind]
+enable = false
+command = ["tailwindcss"]
+
+[serve]
+interface = "127.0.0.1"
+port = 5277
+watch = true
+
+[deploy]
+provider = "github"
+force = false
+
+[deploy.github]
+url = "https://github.com/alice/alice.github.io"
+branch = "main"
+
+[deploy.cloudflare]
+provider = "github"
+
+[deploy.vercal]
+provider = "github"
+
+[extra]

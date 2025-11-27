@@ -1,13 +1,7 @@
-/~
 .DS_Store
 /target
 /public
 /content
-/assets
 /templates
 /utils
 /result
-/typst_blog
-/a
-/b
-/c

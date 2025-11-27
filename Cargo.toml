@@ -11,12 +11,8 @@ categories = ["command-line-utilities"]
 license = "MIT"
 exclude = [
     "/target",
-    "/typst_blog",
-    "/result",
     "/screenshots",
-    "/a",
-    "/b",
-    "/c",
+    "/result",
 ]
 
 # Reduce the size of binary file
