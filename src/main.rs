@@ -52,7 +52,7 @@ fn load_config(cli: &'static Cli) -> Result<SiteConfig> {
     config.update_with_cli(cli);
 
     // Validate config state based on command
-    let config_exists = config.get_root().join(&cli.config).exists();
+    let config_exists = config.config_path.exists();
     match (cli.is_init(), config_exists) {
         (true, true) => bail!(
             "Config file already exists. Remove it manually or init in a different path."

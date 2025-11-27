@@ -15,13 +15,15 @@ use gix::ThreadSafeRepository;
 use std::{ffi::OsStr, fs};
 
 /// Build the entire site, processing content and assets in parallel
-pub fn build_site(config: &'static SiteConfig, should_clear: bool) -> Result<ThreadSafeRepository> {
+///
+/// If `force_rebuild` is true, skips timestamp checks and rebuilds all content.
+pub fn build_site(config: &'static SiteConfig, force_rebuild: bool) -> Result<ThreadSafeRepository> {
     let output = &config.build.output;
     let content = &config.build.content;
     let assets = &config.build.assets;
 
     // Initialize or clear output directory with git repo
-    let repo = init_output_repo(output, should_clear)?;
+    let repo = init_output_repo(output, force_rebuild)?;
 
     // Process content and assets in parallel
     let (posts_result, assets_result) = rayon::join(
@@ -31,7 +33,7 @@ pub fn build_site(config: &'static SiteConfig, should_clear: bool) -> Result<Thr
                 content,
                 config,
                 &|path| path.starts_with(content),
-                &|path, cfg| process_content(path, cfg, false),
+                &|path, cfg| process_content(path, cfg, false, force_rebuild),
             )
             .context("Failed to compile posts")
         },
@@ -56,8 +58,8 @@ pub fn build_site(config: &'static SiteConfig, should_clear: bool) -> Result<Thr
 }
 
 /// Initialize output directory with git repository
-fn init_output_repo(output: &std::path::Path, should_clear: bool) -> Result<ThreadSafeRepository> {
-    match (output.exists(), should_clear) {
+fn init_output_repo(output: &std::path::Path, force_rebuild: bool) -> Result<ThreadSafeRepository> {
+    match (output.exists(), force_rebuild) {
         (true, true) => {
             fs::remove_dir_all(output).with_context(|| {
                 format!("Failed to clear output directory: {}", output.display())
