@@ -13,11 +13,15 @@ build_and_copy() {
     local result
 
     echo "⏳ Building $target..."
-    if result=$(nix build -j auto "./#$target" --no-link --print-out-paths 2>&1); then
+    if result=$(nix build -j auto "./#$target" --no-link --print-out-paths); then
         if [[ -f "$result/bin/tola" ]]; then
             cp "$result/bin/tola" "$RELEASE_DIR/$output"
+            tar -czvf "$RELEASE_DIR/$output.tar.gz" -C "$RELEASE_DIR" "$output"
+            rm "$RELEASE_DIR/$output"
         elif [[ -f "$result/bin/tola.exe" ]]; then
             cp "$result/bin/tola.exe" "$RELEASE_DIR/$output"
+            zip -j "$RELEASE_DIR/${output%.exe}.zip" "$RELEASE_DIR/$output"
+            rm "$RELEASE_DIR/$output"
         else
             echo "✗ Binary not found for $target" >&2
             return 1
