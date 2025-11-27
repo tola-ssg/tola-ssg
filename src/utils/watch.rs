@@ -13,11 +13,24 @@ use std::{
     time::Duration,
 };
 
+/// Type of file change detected
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeType {
+    /// Content file (.typ) changed
+    Content,
+    /// Asset file changed
+    Asset,
+    /// Template, utils, or config changed - requires full rebuild
+    FullRebuild,
+    /// Unknown file type
+    Unknown,
+}
+
 /// Process changed content files (.typ)
 pub fn process_watched_content(files: &[&PathBuf], config: &'static SiteConfig) -> Result<()> {
     files.par_iter().for_each(|path| {
         let path = normalize_path(path, config);
-        if let Err(e) = process_content(&path, config, true) {
+        if let Err(e) = process_content(&path, config, true, false) {
             log!("watch"; "{e}");
         }
     });
@@ -70,18 +83,19 @@ pub fn process_watched_files(files: &[PathBuf], config: &'static SiteConfig) -> 
     Ok(())
 }
 
-/// Normalize path relative to project root
-fn normalize_path(path: &Path, config: &SiteConfig) -> PathBuf {
-    let uses_relative_root = config.get_root().starts_with("./");
-    let stripped = path
-        .strip_prefix(env::current_dir().unwrap_or_default())
-        .unwrap_or(path);
-
-    if uses_relative_root {
-        Path::new("./").join(stripped)
-    } else {
-        stripped.to_path_buf()
-    }
+/// Normalize path to absolute for comparison with config paths
+fn normalize_path(path: &Path, _config: &SiteConfig) -> PathBuf {
+    // Config paths are already absolute/canonicalized
+    // Notify usually sends absolute paths, but canonicalize to be safe
+    path.canonicalize().unwrap_or_else(|_| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            env::current_dir()
+                .map(|cwd| cwd.join(path))
+                .unwrap_or_else(|_| path.to_path_buf())
+        }
+    })
 }
 
 /// Rebuild tailwind CSS
@@ -98,12 +112,8 @@ fn rebuild_tailwind(config: &'static SiteConfig) -> Result<()> {
         .to_str()
         .ok_or_else(|| anyhow!("Invalid tailwind input path"))?;
 
-    let input = input.canonicalize()?;
-    let output = config
-        .build
-        .output
-        .canonicalize()?
-        .join(relative_path);
+    // Config paths are already absolute
+    let output = config.build.output.join(relative_path);
 
     run_command!(
         config.get_root();
