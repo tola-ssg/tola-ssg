@@ -265,8 +265,464 @@ fn validate_base_config() {
     let config: SiteConfig = toml::from_str(config).unwrap();
 
     assert_eq!(config.base.title, "KawaYww");
-    assert_eq!(config.base.description, "KawaYww");
-    assert_eq!(config.base.title, "KawaYww");
+    assert_eq!(config.base.description, "KawaYww's Blog");
+    assert_eq!(config.base.url, Some("https://kawayww.com".to_string()));
+    assert_eq!(config.base.language, "zh_Hans");
+    assert_eq!(config.base.copyright, "2025 KawaYww");
+}
+
+#[test]
+fn test_base_config_defaults() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert_eq!(config.base.author, "<YOUR_NAME>");
+    assert_eq!(config.base.email, "user@noreply.tola");
+    assert_eq!(config.base.language, "zh-Hans");
+    assert_eq!(config.base.url, None);
+    assert_eq!(config.base.copyright, "");
+}
+
+#[test]
+fn test_build_config_defaults() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert_eq!(config.build.content, PathBuf::from("content"));
+    assert_eq!(config.build.output, PathBuf::from("public"));
+    assert_eq!(config.build.assets, PathBuf::from("assets"));
+    assert!(config.build.minify);
+    assert!(!config.build.clear);
+}
+
+#[test]
+fn test_build_rss_config() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build.rss]
+        enable = true
+        path = "custom-feed.xml"
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert!(config.build.rss.enable);
+    assert_eq!(config.build.rss.path, PathBuf::from("custom-feed.xml"));
+}
+
+#[test]
+fn test_build_slug_config() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build.slug]
+        path = "on"
+        fragment = "no"
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert!(matches!(config.build.slug.path, SlugMode::On));
+    assert!(matches!(config.build.slug.fragment, SlugMode::No));
+}
+
+#[test]
+fn test_build_typst_config() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build.typst]
+        command = ["typst-custom"]
+
+        [build.typst.svg]
+        extract_type = "magick"
+        inline_max_size = "50KB"
+        dpi = 144.0
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert_eq!(config.build.typst.command, vec!["typst-custom".to_string()]);
+    assert!(matches!(
+        config.build.typst.svg.extract_type,
+        ExtractSvgType::Magick
+    ));
+    assert_eq!(config.build.typst.svg.inline_max_size, "50KB");
+    assert_eq!(config.build.typst.svg.dpi, 144.0);
+}
+
+#[test]
+fn test_build_tailwind_config() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build.tailwind]
+        enable = true
+        input = "assets/styles/main.css"
+        command = ["tailwindcss-v4"]
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert!(config.build.tailwind.enable);
+    assert_eq!(
+        config.build.tailwind.input,
+        Some(PathBuf::from("assets/styles/main.css"))
+    );
+    assert_eq!(
+        config.build.tailwind.command,
+        vec!["tailwindcss-v4".to_string()]
+    );
+}
+
+#[test]
+fn test_serve_config() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [serve]
+        interface = "0.0.0.0"
+        port = 8080
+        watch = false
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert_eq!(config.serve.interface, "0.0.0.0");
+    assert_eq!(config.serve.port, 8080);
+    assert!(!config.serve.watch);
+}
+
+#[test]
+fn test_serve_config_defaults() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert_eq!(config.serve.interface, "127.0.0.1");
+    assert_eq!(config.serve.port, 5277);
+    assert!(config.serve.watch);
+}
+
+#[test]
+fn test_deploy_config() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [deploy]
+        provider = "github"
+        force = true
+
+        [deploy.github]
+        url = "https://github.com/user/user.github.io"
+        branch = "gh-pages"
+        token_path = "~/.github-token"
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert_eq!(config.deploy.provider, "github");
+    assert!(config.deploy.force);
+    assert_eq!(
+        config.deploy.github_provider.url,
+        "https://github.com/user/user.github.io"
+    );
+    assert_eq!(config.deploy.github_provider.branch, "gh-pages");
+    assert_eq!(
+        config.deploy.github_provider.token_path,
+        Some(PathBuf::from("~/.github-token"))
+    );
+}
+
+#[test]
+fn test_extra_fields() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [extra]
+        custom_field = "custom_value"
+        number_field = 42
+        nested = { key = "value" }
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert_eq!(
+        config.extra.get("custom_field").and_then(|v| v.as_str()),
+        Some("custom_value")
+    );
+    assert_eq!(
+        config.extra.get("number_field").and_then(|v| v.as_integer()),
+        Some(42)
+    );
+}
+
+#[test]
+fn test_unknown_field_rejection_in_base() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+        unknown_field = "should_fail"
+    "#;
+    let result: Result<SiteConfig, _> = toml::from_str(config);
+
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("unknown field"));
+}
+
+#[test]
+fn test_unknown_field_rejection_in_build() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build]
+        unknown_field = "should_fail"
+    "#;
+    let result: Result<SiteConfig, _> = toml::from_str(config);
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_unknown_field_rejection_in_serve() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [serve]
+        unknown_field = "should_fail"
+    "#;
+    let result: Result<SiteConfig, _> = toml::from_str(config);
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_get_inline_max_size_kb() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build.typst.svg]
+        inline_max_size = "20KB"
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert_eq!(config.get_inline_max_size(), 20 * 1024);
+}
+
+#[test]
+fn test_get_inline_max_size_mb() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build.typst.svg]
+        inline_max_size = "5MB"
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert_eq!(config.get_inline_max_size(), 5 * 1024 * 1024);
+}
+
+#[test]
+fn test_get_inline_max_size_bytes() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build.typst.svg]
+        inline_max_size = "100B"
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert_eq!(config.get_inline_max_size(), 100);
+}
+
+#[test]
+fn test_get_scale_default_dpi() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    // Default DPI is 96, so scale should be 1.0
+    assert_eq!(config.get_scale(), 1.0);
+}
+
+#[test]
+fn test_get_scale_custom_dpi() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build.typst.svg]
+        dpi = 192.0
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    // 192 / 96 = 2.0
+    assert_eq!(config.get_scale(), 2.0);
+}
+
+#[test]
+fn test_slug_mode_parsing() {
+    let config_on = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build.slug]
+        path = "on"
+        fragment = "on"
+    "#;
+    let config: SiteConfig = toml::from_str(config_on).unwrap();
+    assert!(matches!(config.build.slug.path, SlugMode::On));
+    assert!(matches!(config.build.slug.fragment, SlugMode::On));
+
+    let config_safe = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build.slug]
+        path = "safe"
+        fragment = "safe"
+    "#;
+    let config: SiteConfig = toml::from_str(config_safe).unwrap();
+    assert!(matches!(config.build.slug.path, SlugMode::Safe));
+    assert!(matches!(config.build.slug.fragment, SlugMode::Safe));
+
+    let config_no = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+
+        [build.slug]
+        path = "no"
+        fragment = "no"
+    "#;
+    let config: SiteConfig = toml::from_str(config_no).unwrap();
+    assert!(matches!(config.build.slug.path, SlugMode::No));
+    assert!(matches!(config.build.slug.fragment, SlugMode::No));
+}
+
+#[test]
+fn test_extract_svg_type_parsing() {
+    let types = [
+        ("builtin", ExtractSvgType::Builtin),
+        ("magick", ExtractSvgType::Magick),
+        ("ffmpeg", ExtractSvgType::Ffmpeg),
+        ("justsvg", ExtractSvgType::JustSvg),
+        ("embedded", ExtractSvgType::Embedded),
+    ];
+
+    for (str_type, expected) in types {
+        let config = format!(
+            r#"
+            [base]
+            title = "Test"
+            description = "Test blog"
+
+            [build.typst.svg]
+            extract_type = "{}"
+            "#,
+            str_type
+        );
+        let config: SiteConfig = toml::from_str(&config).unwrap();
+
+        assert!(
+            std::mem::discriminant(&config.build.typst.svg.extract_type)
+                == std::mem::discriminant(&expected),
+            "Failed for type: {}",
+            str_type
+        );
+    }
+}
+
+#[test]
+fn test_from_str() {
+    let config_str = r#"
+        [base]
+        title = "My Blog"
+        description = "A test blog"
+        author = "Test Author"
+    "#;
+    let result = SiteConfig::from_str(config_str);
+
+    assert!(result.is_ok());
+    let config = result.unwrap();
+    assert_eq!(config.base.title, "My Blog");
+    assert_eq!(config.base.author, "Test Author");
+}
+
+#[test]
+fn test_from_str_invalid_toml() {
+    let invalid_config = r#"
+        [base
+        title = "My Blog"
+    "#;
+    let result = SiteConfig::from_str(invalid_config);
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_get_root_default() {
+    let config = SiteConfig::default();
+    assert_eq!(config.get_root(), Path::new("./"));
+}
+
+#[test]
+fn test_set_root() {
+    let mut config = SiteConfig::default();
+    config.set_root(Path::new("/custom/path"));
+    assert_eq!(config.get_root(), Path::new("/custom/path"));
+}
+
+#[test]
+fn test_config_error_display() {
+    let io_err = ConfigError::Io(
+        PathBuf::from("test.toml"),
+        std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"),
+    );
+    let display = format!("{}", io_err);
+    assert!(display.contains("IO error"));
+    assert!(display.contains("test.toml"));
+
+    let validation_err = ConfigError::Validation("Test validation error".to_string());
+    let display = format!("{}", validation_err);
+    assert!(display.contains("Test validation error"));
 }
 
 /// `[build]` section in tola.toml

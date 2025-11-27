@@ -415,7 +415,7 @@ fn test_parse_element_from_typst_sequence() {
             { "func": "space" },
             { "func": "linebreak" },
             { "func": "space" },
-            { "func": "link", "dest": "https://example.com", "body": { func: "text", "text": "小鹤双拼" } },
+            { "func": "link", "dest": "https://example.com", "body": { "func": "text", "text": "小鹤双拼" } },
             { "func": "text", "text": "适合想提高打字速度, 但又不想投入巨量精力进行记忆, 追求高性价比的同学" },
             { "func": "space" },
             { "func": "unknown_func" }
@@ -437,13 +437,10 @@ fn test_parse_element_from_typst_sequence() {
                 TypstElement::Space,
                 TypstElement::Link {
                     dest: "https://example.com".to_string(),
-                    body: Box::new(TypstElement::Sequence {
-                        children: vec![TypstElement::Text {
-                            text: "小鹤双拼".to_string()
-                        }]
+                    body: Box::new(TypstElement::Text {
+                        text: "小鹤双拼".to_string()
                     }),
                 },
-                TypstElement::Space,
                 TypstElement::Text {
                     text: "适合想提高打字速度, 但又不想投入巨量精力进行记忆, 追求高性价比的同学"
                         .to_string()
@@ -453,4 +450,215 @@ fn test_parse_element_from_typst_sequence() {
             ]
         }
     );
+}
+
+#[test]
+fn test_datetime_utc_new() {
+    let dt = DateTimeUtc::new(2024, 6, 15, 14, 30, 45);
+    assert_eq!(dt.year, 2024);
+    assert_eq!(dt.month, 6);
+    assert_eq!(dt.day, 15);
+    assert_eq!(dt.hour, 14);
+    assert_eq!(dt.minute, 30);
+    assert_eq!(dt.second, 45);
+}
+
+#[test]
+fn test_datetime_utc_from_ymd() {
+    let dt = DateTimeUtc::from_ymd(2024, 12, 25);
+    assert_eq!(dt.year, 2024);
+    assert_eq!(dt.month, 12);
+    assert_eq!(dt.day, 25);
+    assert_eq!(dt.hour, 0);
+    assert_eq!(dt.minute, 0);
+    assert_eq!(dt.second, 0);
+}
+
+#[test]
+fn test_datetime_utc_validate_valid() {
+    // Valid date
+    assert!(DateTimeUtc::new(2024, 6, 15, 14, 30, 45).validate().is_ok());
+
+    // Edge cases - start of day
+    assert!(DateTimeUtc::new(2024, 1, 1, 0, 0, 0).validate().is_ok());
+
+    // Edge cases - end of day
+    assert!(DateTimeUtc::new(2024, 12, 31, 23, 59, 59).validate().is_ok());
+}
+
+#[test]
+fn test_datetime_utc_validate_invalid_month() {
+    // Month 0
+    assert!(DateTimeUtc::new(2024, 0, 15, 12, 0, 0).validate().is_err());
+
+    // Month 13
+    assert!(DateTimeUtc::new(2024, 13, 15, 12, 0, 0).validate().is_err());
+}
+
+#[test]
+fn test_datetime_utc_validate_invalid_day() {
+    // Day 0
+    assert!(DateTimeUtc::new(2024, 6, 0, 12, 0, 0).validate().is_err());
+
+    // Day 32 in a 31-day month
+    assert!(DateTimeUtc::new(2024, 1, 32, 12, 0, 0).validate().is_err());
+
+    // Day 31 in a 30-day month
+    assert!(DateTimeUtc::new(2024, 4, 31, 12, 0, 0).validate().is_err());
+
+    // Day 30 in February (leap year)
+    assert!(DateTimeUtc::new(2024, 2, 30, 12, 0, 0).validate().is_err());
+
+    // Day 29 in February (non-leap year)
+    assert!(DateTimeUtc::new(2023, 2, 29, 12, 0, 0).validate().is_err());
+}
+
+#[test]
+fn test_datetime_utc_validate_leap_year() {
+    // Leap year - Feb 29 is valid
+    assert!(DateTimeUtc::new(2024, 2, 29, 12, 0, 0).validate().is_ok());
+    assert!(DateTimeUtc::new(2000, 2, 29, 12, 0, 0).validate().is_ok()); // divisible by 400
+
+    // Non-leap year - Feb 29 is invalid
+    assert!(DateTimeUtc::new(2023, 2, 29, 12, 0, 0).validate().is_err());
+    assert!(DateTimeUtc::new(1900, 2, 29, 12, 0, 0).validate().is_err()); // divisible by 100 but not 400
+}
+
+#[test]
+fn test_datetime_utc_validate_invalid_hour() {
+    // Hour 24
+    assert!(DateTimeUtc::new(2024, 6, 15, 24, 0, 0).validate().is_err());
+}
+
+#[test]
+fn test_datetime_utc_validate_invalid_minute() {
+    // Minute 60
+    assert!(DateTimeUtc::new(2024, 6, 15, 12, 60, 0).validate().is_err());
+}
+
+#[test]
+fn test_datetime_utc_validate_invalid_second() {
+    // Second 60
+    assert!(DateTimeUtc::new(2024, 6, 15, 12, 30, 60).validate().is_err());
+}
+
+#[test]
+fn test_datetime_utc_to_rfc2822() {
+    // Test a known date
+    let dt = DateTimeUtc::new(2024, 1, 15, 10, 30, 45);
+    let rfc2822 = dt.to_rfc2822();
+
+    // Should contain date parts
+    assert!(rfc2822.contains("15"));
+    assert!(rfc2822.contains("Jan"));
+    assert!(rfc2822.contains("2024"));
+    assert!(rfc2822.contains("10:30:45"));
+    assert!(rfc2822.contains("GMT"));
+}
+
+#[test]
+fn test_datetime_utc_to_rfc2822_format() {
+    let dt = DateTimeUtc::new(2024, 6, 15, 14, 30, 45);
+    let rfc2822 = dt.to_rfc2822();
+
+    // Check the general format: "Day, DD Mon YYYY HH:MM:SS GMT"
+    let parts: Vec<&str> = rfc2822.split(' ').collect();
+    assert_eq!(parts.len(), 6);
+    assert!(parts[0].ends_with(','));
+    assert_eq!(parts[5], "GMT");
+}
+
+#[test]
+fn test_datetime_utc_all_months() {
+    let months = [
+        (1, "Jan"),
+        (2, "Feb"),
+        (3, "Mar"),
+        (4, "Apr"),
+        (5, "May"),
+        (6, "Jun"),
+        (7, "Jul"),
+        (8, "Aug"),
+        (9, "Sep"),
+        (10, "Oct"),
+        (11, "Nov"),
+        (12, "Dec"),
+    ];
+
+    for (month_num, month_name) in months {
+        let dt = DateTimeUtc::new(2024, month_num, 15, 12, 0, 0);
+        assert!(dt.validate().is_ok());
+        let rfc2822 = dt.to_rfc2822();
+        assert!(rfc2822.contains(month_name), "Month {} should contain {}", month_num, month_name);
+    }
+}
+
+#[test]
+fn test_typst_element_text() {
+    let json = r#"{ "func": "text", "text": "Hello World" }"#;
+    let elem: TypstElement = serde_json::from_str(json).unwrap();
+    assert!(matches!(elem, TypstElement::Text { text } if text == "Hello World"));
+}
+
+#[test]
+fn test_typst_element_space() {
+    let json = r#"{ "func": "space" }"#;
+    let elem: TypstElement = serde_json::from_str(json).unwrap();
+    assert!(matches!(elem, TypstElement::Space));
+}
+
+#[test]
+fn test_typst_element_linebreak() {
+    let json = r#"{ "func": "linebreak" }"#;
+    let elem: TypstElement = serde_json::from_str(json).unwrap();
+    assert!(matches!(elem, TypstElement::Linebreak));
+}
+
+#[test]
+fn test_typst_element_strike() {
+    let json = r#"{ "func": "strike", "text": "strikethrough" }"#;
+    let elem: TypstElement = serde_json::from_str(json).unwrap();
+    assert!(matches!(elem, TypstElement::Strike { text } if text == "strikethrough"));
+}
+
+#[test]
+fn test_typst_element_link() {
+    let json = r#"{ "func": "link", "dest": "https://example.com", "body": { "func": "text", "text": "link text" } }"#;
+    let elem: TypstElement = serde_json::from_str(json).unwrap();
+
+    if let TypstElement::Link { dest, body } = elem {
+        assert_eq!(dest, "https://example.com");
+        assert!(matches!(*body, TypstElement::Text { text } if text == "link text"));
+    } else {
+        panic!("Expected Link element");
+    }
+}
+
+#[test]
+fn test_typst_element_unknown_ignored() {
+    let json = r#"{ "func": "custom_unknown_func" }"#;
+    let elem: TypstElement = serde_json::from_str(json).unwrap();
+    assert!(matches!(elem, TypstElement::OtherIgnored));
+}
+
+#[test]
+fn test_typst_element_sequence() {
+    let json = r#"{
+        "func": "sequence",
+        "children": [
+            { "func": "text", "text": "Hello" },
+            { "func": "space" },
+            { "func": "text", "text": "World" }
+        ]
+    }"#;
+    let elem: TypstElement = serde_json::from_str(json).unwrap();
+
+    if let TypstElement::Sequence { children } = elem {
+        assert_eq!(children.len(), 3);
+        assert!(matches!(&children[0], TypstElement::Text { text } if text == "Hello"));
+        assert!(matches!(&children[1], TypstElement::Space));
+        assert!(matches!(&children[2], TypstElement::Text { text } if text == "World"));
+    } else {
+        panic!("Expected Sequence element");
+    }
 }

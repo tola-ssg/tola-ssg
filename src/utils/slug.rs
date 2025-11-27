@@ -43,3 +43,120 @@ fn sanitize_path(path: &Path) -> PathBuf {
         .map(|c| sanitize_text(&c.as_os_str().to_string_lossy()))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_text_removes_forbidden_chars() {
+        let input = "Hello<World>";
+        let result = sanitize_text(input);
+        assert_eq!(result, "HelloWorld");
+    }
+
+    #[test]
+    fn test_sanitize_text_removes_all_forbidden_chars() {
+        let input = "a<b>c:d|e?f*g#h\\i(j)k[l]m";
+        let result = sanitize_text(input);
+        assert_eq!(result, "abcdefghijklm");
+    }
+
+    #[test]
+    fn test_sanitize_text_replaces_whitespace() {
+        let input = "Hello World";
+        let result = sanitize_text(input);
+        assert_eq!(result, "Hello_World");
+    }
+
+    #[test]
+    fn test_sanitize_text_replaces_various_whitespace() {
+        let input = "Hello\tWorld\nTest";
+        let result = sanitize_text(input);
+        // \t and \n are forbidden chars, so they are removed
+        assert_eq!(result, "HelloWorldTest");
+    }
+
+    #[test]
+    fn test_sanitize_text_trims() {
+        let input = "  Hello World  ";
+        let result = sanitize_text(input);
+        assert_eq!(result, "Hello_World");
+    }
+
+    #[test]
+    fn test_sanitize_text_preserves_unicode() {
+        let input = "你好世界";
+        let result = sanitize_text(input);
+        assert_eq!(result, "你好世界");
+    }
+
+    #[test]
+    fn test_sanitize_text_complex_input() {
+        let input = "  Hello (World) [Test]: #anchor?  ";
+        let result = sanitize_text(input);
+        assert_eq!(result, "Hello_World_Test_anchor");
+    }
+
+    #[test]
+    fn test_sanitize_path_simple() {
+        let path = Path::new("content/posts/hello-world");
+        let result = sanitize_path(path);
+        assert_eq!(result, PathBuf::from("content/posts/hello-world"));
+    }
+
+    #[test]
+    fn test_sanitize_path_with_forbidden_chars() {
+        let path = Path::new("content/posts/hello<world>");
+        let result = sanitize_path(path);
+        assert_eq!(result, PathBuf::from("content/posts/helloworld"));
+    }
+
+    #[test]
+    fn test_sanitize_path_with_spaces() {
+        let path = Path::new("content/my posts/hello world");
+        let result = sanitize_path(path);
+        assert_eq!(result, PathBuf::from("content/my_posts/hello_world"));
+    }
+
+    #[test]
+    fn test_forbidden_chars_constant() {
+        // Verify all expected forbidden characters are present
+        assert!(FORBIDDEN_CHARS.contains(&'<'));
+        assert!(FORBIDDEN_CHARS.contains(&'>'));
+        assert!(FORBIDDEN_CHARS.contains(&':'));
+        assert!(FORBIDDEN_CHARS.contains(&'|'));
+        assert!(FORBIDDEN_CHARS.contains(&'?'));
+        assert!(FORBIDDEN_CHARS.contains(&'*'));
+        assert!(FORBIDDEN_CHARS.contains(&'#'));
+        assert!(FORBIDDEN_CHARS.contains(&'\\'));
+        assert!(FORBIDDEN_CHARS.contains(&'('));
+        assert!(FORBIDDEN_CHARS.contains(&')'));
+        assert!(FORBIDDEN_CHARS.contains(&'['));
+        assert!(FORBIDDEN_CHARS.contains(&']'));
+        assert!(FORBIDDEN_CHARS.contains(&'\t'));
+        assert!(FORBIDDEN_CHARS.contains(&'\r'));
+        assert!(FORBIDDEN_CHARS.contains(&'\n'));
+    }
+
+    #[test]
+    fn test_sanitize_text_empty_string() {
+        let input = "";
+        let result = sanitize_text(input);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_sanitize_text_only_forbidden_chars() {
+        let input = "<>:?*#";
+        let result = sanitize_text(input);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_sanitize_text_mixed_content() {
+        let input = "My Article (2024) - Part #1";
+        let result = sanitize_text(input);
+        assert_eq!(result, "My_Article_2024_-_Part_1");
+    }
+}
