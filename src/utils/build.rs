@@ -677,6 +677,13 @@ fn process_head_in_html(
         writer.write_event(Event::Start(elem))?;
     }
 
+    // Inject custom head elements from config
+    for extra_element in &config.base.head_extra {
+        writer
+            .get_mut()
+            .write_all(extra_element.as_bytes())?;
+    }
+
     writer.write_event(Event::End(BytesEnd::new("head")))?;
     Ok(())
 }

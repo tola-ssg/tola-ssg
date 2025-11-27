@@ -250,6 +250,12 @@ pub struct BaseConfig {
     /// Copyright notice
     #[serde(default)]
     pub copyright: String,
+
+    /// Extra HTML elements to insert into the `<head>` section.
+    /// Elements are inserted as raw HTML without escaping.
+    /// e.g.: `<meta name="darkreader-lock">`
+    #[serde(default)]
+    pub head_extra: Vec<String>,
 }
 
 #[test]
@@ -723,6 +729,39 @@ fn test_config_error_display() {
     let validation_err = ConfigError::Validation("Test validation error".to_string());
     let display = format!("{}", validation_err);
     assert!(display.contains("Test validation error"));
+}
+
+#[test]
+fn validate_head_extra_config() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+        head_extra = [
+            '<meta name="darkreader-lock">',
+            '<meta name="custom-meta" content="value">'
+        ]
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert_eq!(config.base.head_extra.len(), 2);
+    assert_eq!(config.base.head_extra[0], r#"<meta name="darkreader-lock">"#);
+    assert_eq!(
+        config.base.head_extra[1],
+        r#"<meta name="custom-meta" content="value">"#
+    );
+}
+
+#[test]
+fn validate_head_extra_default_empty() {
+    let config = r#"
+        [base]
+        title = "Test"
+        description = "Test blog"
+    "#;
+    let config: SiteConfig = toml::from_str(config).unwrap();
+
+    assert!(config.base.head_extra.is_empty());
 }
 
 /// `[build]` section in tola.toml
