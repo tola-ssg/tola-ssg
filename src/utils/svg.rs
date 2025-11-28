@@ -1,17 +1,19 @@
-//! SVG extraction and processing utilities.
+//! SVG extraction, optimization, and compression.
 //!
-//! Handles SVG extraction from HTML, optimization, and compression to various formats.
+//! This module handles:
+//! - Extracting SVG elements from Typst-generated HTML
+//! - Optimizing SVGs using usvg
+//! - Compressing to AVIF using various backends (builtin, magick, ffmpeg)
 
 use anyhow::{Context, Result};
-use quick_xml::{
-    Reader, Writer,
-    events::{BytesStart, Event, attributes::Attribute},
-};
+use quick_xml::events::attributes::Attribute;
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader, Writer};
 use rayon::prelude::*;
+use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::io::{Cursor, Write};
 use std::path::Path;
-use std::str;
 
 use crate::config::{ExtractSvgType, SiteConfig};
 use crate::{log, run_command_with_stdin};
@@ -20,45 +22,61 @@ use crate::{log, run_command_with_stdin};
 // Constants
 // ============================================================================
 
-const PADDING_TOP_FOR_SVG: f32 = 5.0;
-const PADDING_BOTTOM_FOR_SVG: f32 = 4.0;
+/// Padding adjustments for SVG viewBox (typst HTML output quirks)
+const SVG_PADDING_TOP: f32 = 5.0;
+const SVG_PADDING_BOTTOM: f32 = 4.0;
 
 // ============================================================================
-// Types
+// Core Types
 // ============================================================================
 
-/// Extracted SVG data with dimensions
+/// Extracted SVG with optimized data and metadata
 pub struct Svg {
+    /// Optimized SVG content
     pub data: Vec<u8>,
+    /// Dimensions (width, height) in pixels
     pub size: (f32, f32),
+    /// Sequential index for naming
     pub index: usize,
 }
 
 impl Svg {
-    pub fn new(data: Vec<u8>, size: (f32, f32), index: usize) -> Self {
+    /// Create new SVG with the given data, size, and index
+    #[inline]
+    pub const fn new(data: Vec<u8>, size: (f32, f32), index: usize) -> Self {
         Self { data, size, index }
     }
 
-    /// Determine output filename based on extract type and size
-    pub fn output_filename(&self, config: &SiteConfig) -> String {
-        let use_svg = matches!(config.build.typst.svg.extract_type, ExtractSvgType::JustSvg)
-            || self.data.len() < config.get_inline_max_size();
-
-        if use_svg {
-            format!("svg-{}.svg", self.index)
+    /// Determine the output format based on config and file size
+    #[inline]
+    fn output_format(&self, config: &SiteConfig) -> OutputFormat {
+        if matches!(config.build.typst.svg.extract_type, ExtractSvgType::JustSvg)
+            || self.data.len() < config.get_inline_max_size()
+        {
+            OutputFormat::Svg
         } else {
-            format!("svg-{}.avif", self.index)
+            OutputFormat::Avif
         }
     }
 
-    /// Check if this SVG should be kept as SVG (not compressed to AVIF)
-    pub fn should_keep_as_svg(&self, config: &SiteConfig) -> bool {
-        matches!(config.build.typst.svg.extract_type, ExtractSvgType::JustSvg)
-            || self.data.len() < config.get_inline_max_size()
+    /// Generate output filename (e.g., "svg-0.svg" or "svg-0.avif")
+    #[inline]
+    pub fn filename(&self, config: &SiteConfig) -> String {
+        match self.output_format(config) {
+            OutputFormat::Svg => format!("svg-{}.svg", self.index),
+            OutputFormat::Avif => format!("svg-{}.avif", self.index),
+        }
     }
 }
 
-/// Context for HTML processing, avoiding repeated config access
+/// Output format for extracted SVGs
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OutputFormat {
+    Svg,
+    Avif,
+}
+
+/// Processing context for HTML transformation
 pub struct HtmlContext<'a> {
     pub config: &'static SiteConfig,
     pub html_path: &'a Path,
@@ -84,47 +102,58 @@ impl<'a> HtmlContext<'a> {
 // SVG Extraction
 // ============================================================================
 
-/// Extract SVG element from XML reader, returning optimized SVG data
+/// Extract and optimize an SVG element, writing an img placeholder to the output
 pub fn extract_svg_element(
     reader: &mut Reader<&[u8]>,
     writer: &mut Writer<Cursor<Vec<u8>>>,
     elem: &BytesStart<'_>,
     ctx: &mut HtmlContext<'_>,
 ) -> Result<Option<Svg>> {
-    // Filter and transform SVG attributes
-    let attrs: Vec<_> = elem
-        .attributes()
-        .flatten()
-        .filter_map(|attr| match attr.key.as_ref() {
-            b"height" => adjust_height_attr(attr).ok(),
-            b"viewBox" => adjust_viewbox_attr(attr).ok(),
-            _ => Some(attr),
-        })
-        .collect();
+    // Transform SVG attributes (adjust height/viewBox for typst quirks)
+    let attrs = transform_svg_attrs(elem)?;
 
-    // Capture SVG content
-    let svg_content = capture_svg_content(reader, &attrs)?;
+    // Capture complete SVG content
+    let raw_svg = capture_svg_content(reader, &attrs)?;
 
-    // Parse and optimize SVG
-    let (svg_data, size) = optimize_svg(&svg_content, ctx.config)?;
+    // Optimize with usvg
+    let (optimized_data, size) = optimize_svg(&raw_svg, ctx.config)?;
 
-    // Write img placeholder to HTML
-    let svg_index = ctx.svg_count;
+    // Create SVG and write placeholder
+    let svg = Svg::new(optimized_data, size, ctx.svg_count);
     ctx.svg_count += 1;
 
-    let svg = Svg::new(svg_data, size, svg_index);
-    write_svg_img_placeholder(writer, &svg, ctx)?;
+    write_img_placeholder(writer, &svg, ctx)?;
 
     Ok(Some(svg))
 }
 
-/// Capture SVG content from reader into a byte buffer
-pub fn capture_svg_content(reader: &mut Reader<&[u8]>, attrs: &[Attribute<'_>]) -> Result<Vec<u8>> {
-    let mut svg_writer = Writer::new(Cursor::new(Vec::with_capacity(4096)));
+/// Transform SVG attributes (height, viewBox adjustments)
+fn transform_svg_attrs<'a>(elem: &'a BytesStart<'_>) -> Result<Vec<Attribute<'a>>> {
+    let attrs = elem.attributes();
+    // SVG typically has ~5-8 attributes
+    let mut result = Vec::with_capacity(8);
+    for attr in attrs.flatten() {
+        let transformed = match attr.key.as_ref() {
+            b"height" => adjust_height(attr)?,
+            b"viewBox" => adjust_viewbox(attr)?,
+            _ => attr,
+        };
+        result.push(transformed);
+    }
+    Ok(result)
+}
+
+/// Capture complete SVG element content from reader
+fn capture_svg_content(reader: &mut Reader<&[u8]>, attrs: &[Attribute<'_>]) -> Result<Vec<u8>> {
+    // Typst SVGs typically range from 4KB to 64KB
+    let mut svg_writer = Writer::new(Cursor::new(Vec::with_capacity(16384)));
+
+    // Write opening tag with transformed attributes
     svg_writer.write_event(Event::Start(
         BytesStart::new("svg").with_attributes(attrs.iter().cloned()),
     ))?;
 
+    // Capture nested content
     let mut depth = 1u32;
     loop {
         let event = reader.read_event()?;
@@ -146,54 +175,45 @@ pub fn capture_svg_content(reader: &mut Reader<&[u8]>, attrs: &[Attribute<'_>]) 
     Ok(svg_writer.into_inner().into_inner())
 }
 
-/// Optimize SVG content using usvg
-pub fn optimize_svg(svg_content: &[u8], config: &SiteConfig) -> Result<(Vec<u8>, (f32, f32))> {
-    let opt = usvg::Options {
+/// Optimize SVG using usvg, returning optimized bytes and dimensions
+fn optimize_svg(content: &[u8], config: &SiteConfig) -> Result<(Vec<u8>, (f32, f32))> {
+    let options = usvg::Options {
         dpi: config.build.typst.svg.dpi,
         ..Default::default()
     };
-    let tree = usvg::Tree::from_data(svg_content, &opt).context("Failed to parse SVG")?;
 
-    let write_opt = usvg::WriteOptions {
+    let tree = usvg::Tree::from_data(content, &options).context("Failed to parse SVG")?;
+
+    let write_options = usvg::WriteOptions {
         indent: usvg::Indent::None,
         ..Default::default()
     };
-    let optimized = tree.to_string(&write_opt);
-    let size = parse_svg_dimensions(&optimized).unwrap_or((0.0, 0.0));
+
+    let optimized = tree.to_string(&write_options);
+    let size = parse_dimensions(&optimized).unwrap_or((0.0, 0.0));
 
     Ok((optimized.into_bytes(), size))
 }
 
-/// Write an img element as placeholder for extracted SVG
-pub fn write_svg_img_placeholder(
+/// Write img element as placeholder for extracted SVG
+fn write_img_placeholder(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     svg: &Svg,
     ctx: &HtmlContext<'_>,
 ) -> Result<()> {
-    use std::fmt::Write as FmtWrite;
+    let filename = svg.filename(ctx.config);
+    let output_dir = ctx.html_path.parent().context("Invalid html path")?;
 
-    let svg_filename = svg.output_filename(ctx.config);
-    let svg_path = ctx.html_path.parent().unwrap().join(&svg_filename);
+    // Build src attribute
+    let src = build_src_path(output_dir, &filename, &ctx.config.build.output);
 
-    // Build src path, avoiding format! where possible
-    let src = match svg_path.strip_prefix(&ctx.config.build.output) {
-        Ok(p) => {
-            let mut s = String::with_capacity(p.as_os_str().len() + 1);
-            s.push('/');
-            let _ = write!(s, "{}", p.display());
-            s
-        }
-        Err(_) => svg_filename,
-    };
-
-    // Pre-calculate dimensions once
+    // Build style attribute with scaled dimensions
     let scale = ctx.config.get_scale();
     let (w, h) = (svg.size.0 / scale, svg.size.1 / scale);
-
-    // Build style string with pre-allocated capacity
     let mut style = String::with_capacity(40);
     let _ = write!(style, "width:{w}px;height:{h}px;");
 
+    // Write img element
     let mut img = BytesStart::new("img");
     img.push_attribute(("src", src.as_str()));
     img.push_attribute(("style", style.as_str()));
@@ -202,40 +222,63 @@ pub fn write_svg_img_placeholder(
     Ok(())
 }
 
+/// Build the src path for an SVG file
+fn build_src_path(output_dir: &Path, filename: &str, output_root: &Path) -> String {
+    let full_path = output_dir.join(filename);
+
+    match full_path.strip_prefix(output_root) {
+        Ok(relative) => {
+            let mut src = String::with_capacity(relative.as_os_str().len() + 1);
+            src.push('/');
+            let _ = write!(src, "{}", relative.display());
+            src
+        }
+        Err(_) => filename.to_string(),
+    }
+}
+
 // ============================================================================
 // SVG Attribute Adjustments
 // ============================================================================
 
-/// Adjust height attribute for SVG element
-pub fn adjust_height_attr(attr: Attribute<'_>) -> Result<Attribute<'_>> {
-    let height_str = str::from_utf8(attr.value.as_ref())?;
-    let height: f32 = height_str.trim_end_matches("pt").parse()?;
-    let new_height = height + PADDING_TOP_FOR_SVG;
+/// Adjust height attribute (add top padding)
+fn adjust_height(attr: Attribute<'_>) -> Result<Attribute<'_>> {
+    let value = std::str::from_utf8(attr.value.as_ref())?;
+    let height: f32 = value.trim_end_matches("pt").parse()?;
 
     Ok(Attribute {
         key: attr.key,
-        value: format!("{new_height}pt").into_bytes().into(),
+        value: format!("{}pt", height + SVG_PADDING_TOP).into_bytes().into(),
     })
 }
 
-/// Adjust viewBox attribute for SVG element
-pub fn adjust_viewbox_attr(attr: Attribute<'_>) -> Result<Attribute<'_>> {
-    let viewbox_str = str::from_utf8(attr.value.as_ref())?;
-    let parts: Vec<f32> = viewbox_str
-        .split_whitespace()
-        .filter_map(|s| s.parse().ok())
-        .collect();
+/// Adjust viewBox attribute (expand for padding)
+fn adjust_viewbox(attr: Attribute<'_>) -> Result<Attribute<'_>> {
+    let value = std::str::from_utf8(attr.value.as_ref())?;
+    
+    // Parse 4 values without allocating a Vec
+    let mut iter = value.split_whitespace();
+    let (v0, v1, v2, v3) = match (iter.next(), iter.next(), iter.next(), iter.next()) {
+        (Some(a), Some(b), Some(c), Some(d)) => (
+            a.parse::<f32>().ok(),
+            b.parse::<f32>().ok(),
+            c.parse::<f32>().ok(),
+            d.parse::<f32>().ok(),
+        ),
+        _ => anyhow::bail!("Invalid viewBox: expected 4 values"),
+    };
 
-    if parts.len() != 4 {
-        anyhow::bail!("Invalid viewBox format");
-    }
+    let (v0, v1, v2, v3) = match (v0, v1, v2, v3) {
+        (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
+        _ => anyhow::bail!("Invalid viewBox: failed to parse values"),
+    };
 
     let new_viewbox = format!(
         "{} {} {} {}",
-        parts[0],
-        parts[1] - PADDING_TOP_FOR_SVG,
-        parts[2],
-        parts[3] + PADDING_BOTTOM_FOR_SVG + PADDING_TOP_FOR_SVG
+        v0,
+        v1 - SVG_PADDING_TOP,
+        v2,
+        v3 + SVG_PADDING_TOP + SVG_PADDING_BOTTOM
     );
 
     Ok(Attribute {
@@ -248,23 +291,24 @@ pub fn adjust_viewbox_attr(attr: Attribute<'_>) -> Result<Attribute<'_>> {
 // SVG Dimension Parsing
 // ============================================================================
 
-/// Parse width and height from SVG string (fast string search, no regex)
-pub fn parse_svg_dimensions(svg_data: &str) -> Option<(f32, f32)> {
-    let width = extract_attr_value(svg_data, "width=\"")?.parse().ok()?;
-    let height = extract_attr_value(svg_data, "height=\"")?.parse().ok()?;
+/// Parse width and height from SVG string (fast byte search)
+fn parse_dimensions(svg: &str) -> Option<(f32, f32)> {
+    let width = extract_attr(svg, r#"width=""#)?.parse().ok()?;
+    let height = extract_attr(svg, r#"height=""#)?.parse().ok()?;
     Some((width, height))
 }
 
-/// Extract attribute value from string
+/// Extract attribute value between prefix and closing quote
 #[inline]
-pub fn extract_attr_value<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+fn extract_attr<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
     let start = s.find(prefix)? + prefix.len();
-    let end = s[start..].find('"')? + start;
+    // Use bytes iterator for faster quote search
+    let end = start + s.as_bytes()[start..].iter().position(|&b| b == b'"')?;
     Some(&s[start..end])
 }
 
 // ============================================================================
-// SVG Compression (Parallel)
+// SVG Compression
 // ============================================================================
 
 /// Compress multiple SVGs in parallel
@@ -273,58 +317,57 @@ pub fn compress_svgs_parallel(
     html_path: &Path,
     config: &'static SiteConfig,
 ) -> Result<()> {
-    let parent = html_path.parent().context("Invalid html path")?;
+    let output_dir = html_path.parent().context("Invalid html path")?;
     let relative_path = html_path
         .strip_prefix(&config.build.output)
         .map(|p| p.to_string_lossy())
         .unwrap_or_default();
-    let relative_path = relative_path.trim_end_matches("index.html");
+    let log_prefix = relative_path.trim_end_matches("index.html");
     let scale = config.get_scale();
 
     svgs.par_iter().try_for_each(|svg| {
-        log!("svg"; "in {relative_path}: compress svg-{}", svg.index);
+        let output_path = output_dir.join(svg.filename(config));
+        log!("svg"; "in {log_prefix}: compressing svg-{}", svg.index);
 
-        let svg_path = parent.join(svg.output_filename(config));
-        compress_single_svg(svg, &svg_path, scale, config)?;
+        compress_svg(svg, &output_path, scale, config)?;
 
-        log!("svg"; "in {relative_path}: finish compressing svg-{}", svg.index);
+        log!("svg"; "in {log_prefix}: done svg-{}", svg.index);
         Ok(())
     })
 }
 
-/// Compress a single SVG to the appropriate output format
-pub fn compress_single_svg(
-    svg: &Svg,
-    output_path: &Path,
-    scale: f32,
-    config: &SiteConfig,
-) -> Result<()> {
-    if svg.should_keep_as_svg(config) {
+/// Compress a single SVG based on configuration
+fn compress_svg(svg: &Svg, output_path: &Path, scale: f32, config: &SiteConfig) -> Result<()> {
+    // Small SVGs or JustSvg mode: write as-is
+    if svg.output_format(config) == OutputFormat::Svg {
         return fs::write(output_path, &svg.data).map_err(Into::into);
     }
 
+    // Compress to AVIF using configured backend
     match &config.build.typst.svg.extract_type {
-        ExtractSvgType::Embedded => Ok(()),
-        ExtractSvgType::JustSvg => fs::write(output_path, &svg.data).map_err(Into::into),
-        ExtractSvgType::Magick => compress_with_magick(output_path, &svg.data, scale),
-        ExtractSvgType::Ffmpeg => compress_with_ffmpeg(output_path, &svg.data),
-        ExtractSvgType::Builtin => compress_with_builtin(output_path, &svg.data, svg.size, scale),
+        ExtractSvgType::Embedded | ExtractSvgType::JustSvg => {
+            // Already handled above
+            Ok(())
+        }
+        ExtractSvgType::Magick => compress_magick(output_path, &svg.data, scale),
+        ExtractSvgType::Ffmpeg => compress_ffmpeg(output_path, &svg.data),
+        ExtractSvgType::Builtin => compress_builtin(output_path, &svg.data, svg.size, scale),
     }
 }
 
-/// Compress SVG using ImageMagick
-pub fn compress_with_magick(output_path: &Path, svg_data: &[u8], scale: f32) -> Result<()> {
+/// Compress using ImageMagick
+fn compress_magick(output: &Path, data: &[u8], scale: f32) -> Result<()> {
     let density = (scale * 96.0).to_string();
     let mut stdin = run_command_with_stdin!(
         ["magick"];
-        "-background", "none", "-density", density, "-", output_path
+        "-background", "none", "-density", density, "-", output
     )?;
-    stdin.write_all(svg_data)?;
+    stdin.write_all(data)?;
     Ok(())
 }
 
-/// Compress SVG using FFmpeg
-pub fn compress_with_ffmpeg(output_path: &Path, svg_data: &[u8]) -> Result<()> {
+/// Compress using FFmpeg
+fn compress_ffmpeg(output: &Path, data: &[u8]) -> Result<()> {
     let mut stdin = run_command_with_stdin!(
         ["ffmpeg"];
         "-f", "svg_pipe",
@@ -341,32 +384,31 @@ pub fn compress_with_ffmpeg(output_path: &Path, svg_data: &[u8]) -> Result<()> {
         "-still-picture", "1",
         "-strict", "experimental",
         "-c:v", "libaom-av1",
-        "-y", output_path
+        "-y", output
     )?;
-    stdin.write_all(svg_data)?;
+    stdin.write_all(data)?;
     Ok(())
 }
 
-/// Compress SVG using built-in ravif encoder
-pub fn compress_with_builtin(
-    output_path: &Path,
-    svg_data: &[u8],
-    size: (f32, f32),
-    scale: f32,
-) -> Result<()> {
+/// Compress using built-in ravif encoder
+fn compress_builtin(output: &Path, data: &[u8], size: (f32, f32), scale: f32) -> Result<()> {
     let (width, height) = ((size.0 * scale) as usize, (size.1 * scale) as usize);
+    let pixel_count = width * height;
 
-    let pixmap: Vec<_> = svg_data
-        .chunks(4)
-        .map(|chunk| ravif::RGBA8::new(chunk[0], chunk[1], chunk[2], chunk[3]))
-        .collect();
+    // Pre-allocate with exact capacity
+    let mut pixmap = Vec::with_capacity(pixel_count);
+    
+    // Use chunks_exact for better optimization
+    for c in data.chunks_exact(4) {
+        pixmap.push(ravif::RGBA8::new(c[0], c[1], c[2], c[3]));
+    }
 
-    let img = ravif::Encoder::new()
+    let encoded = ravif::Encoder::new()
         .with_quality(90.0)
         .with_speed(4)
         .encode_rgba(ravif::Img::new(&pixmap, width, height))?;
 
-    fs::write(output_path, img.avif_file)?;
+    fs::write(output, encoded.avif_file)?;
     Ok(())
 }
 
@@ -377,63 +419,210 @@ pub fn compress_with_builtin(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    // ------------------------------------------------------------------------
+    // Dimension Parsing Tests
+    // ------------------------------------------------------------------------
 
     #[test]
-    fn test_parse_svg_dimensions_valid() {
-        let svg = r#"<svg width="100" height="50" xmlns="http://www.w3.org/2000/svg"></svg>"#;
-        let dims = parse_svg_dimensions(svg);
-        assert_eq!(dims, Some((100.0, 50.0)));
+    fn test_parse_dimensions() {
+        // Valid cases
+        assert_eq!(
+            parse_dimensions(r#"<svg width="100" height="50" xmlns="...">"#),
+            Some((100.0, 50.0))
+        );
+        assert_eq!(
+            parse_dimensions(r#"<svg width="123.5" height="67.8">"#),
+            Some((123.5, 67.8))
+        );
+        // Reversed order should still work
+        assert_eq!(
+            parse_dimensions(r#"<svg height="200" width="300">"#),
+            Some((300.0, 200.0))
+        );
+
+        // Missing attributes
+        assert_eq!(parse_dimensions(r#"<svg height="50">"#), None);
+        assert_eq!(parse_dimensions(r#"<svg width="100">"#), None);
+        assert_eq!(parse_dimensions(r#"<svg>"#), None);
+
+        // Invalid values
+        assert_eq!(parse_dimensions(r#"<svg width="abc" height="50">"#), None);
     }
 
     #[test]
-    fn test_parse_svg_dimensions_with_decimals() {
-        let svg = r#"<svg width="123.5" height="67.8" xmlns="http://www.w3.org/2000/svg"></svg>"#;
-        let dims = parse_svg_dimensions(svg);
-        assert_eq!(dims, Some((123.5, 67.8)));
+    fn test_extract_attr() {
+        let s = r#"<svg width="100" height="50" class="icon">"#;
+        assert_eq!(extract_attr(s, r#"width=""#), Some("100"));
+        assert_eq!(extract_attr(s, r#"height=""#), Some("50"));
+        assert_eq!(extract_attr(s, r#"class=""#), Some("icon"));
+        assert_eq!(extract_attr(s, r#"id=""#), None);
+
+        // Edge cases
+        assert_eq!(extract_attr(r#"width="0""#, r#"width=""#), Some("0"));
+        assert_eq!(extract_attr(r#"width="""#, r#"width=""#), Some(""));
+    }
+
+    // ------------------------------------------------------------------------
+    // ViewBox Adjustment Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_adjust_viewbox_valid() {
+        let attr = Attribute {
+            key: quick_xml::name::QName(b"viewBox"),
+            value: b"0 0 100 200".as_slice().into(),
+        };
+        let result = adjust_viewbox(attr).unwrap();
+        let value = std::str::from_utf8(&result.value).unwrap();
+
+        // Check padding adjustments: y -= 5, height += 9
+        assert!(value.contains("0 -5 100 209"));
     }
 
     #[test]
-    fn test_parse_svg_dimensions_missing_width() {
-        let svg = r#"<svg height="50" xmlns="http://www.w3.org/2000/svg"></svg>"#;
-        let dims = parse_svg_dimensions(svg);
-        assert_eq!(dims, None);
+    fn test_adjust_viewbox_with_decimals() {
+        let attr = Attribute {
+            key: quick_xml::name::QName(b"viewBox"),
+            value: b"0.5 1.5 100.5 200.5".as_slice().into(),
+        };
+        let result = adjust_viewbox(attr).unwrap();
+        let value = std::str::from_utf8(&result.value).unwrap();
+        assert!(value.starts_with("0.5 -3.5")); // 1.5 - 5.0 = -3.5
     }
 
     #[test]
-    fn test_parse_svg_dimensions_missing_height() {
-        let svg = r#"<svg width="100" xmlns="http://www.w3.org/2000/svg"></svg>"#;
-        let dims = parse_svg_dimensions(svg);
-        assert_eq!(dims, None);
+    fn test_adjust_viewbox_invalid() {
+        // Not enough values
+        let attr = Attribute {
+            key: quick_xml::name::QName(b"viewBox"),
+            value: b"0 0 100".as_slice().into(),
+        };
+        assert!(adjust_viewbox(attr).is_err());
+
+        // Non-numeric values
+        let attr = Attribute {
+            key: quick_xml::name::QName(b"viewBox"),
+            value: b"a b c d".as_slice().into(),
+        };
+        assert!(adjust_viewbox(attr).is_err());
+    }
+
+    // ------------------------------------------------------------------------
+    // Height Adjustment Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_adjust_height() {
+        let attr = Attribute {
+            key: quick_xml::name::QName(b"height"),
+            value: b"100pt".as_slice().into(),
+        };
+        let result = adjust_height(attr).unwrap();
+        let value = std::str::from_utf8(&result.value).unwrap();
+        assert_eq!(value, "105pt"); // 100 + 5 padding
     }
 
     #[test]
-    fn test_extract_attr_value_found() {
-        let s = r#"<svg width="100" height="50">"#;
-        assert_eq!(extract_attr_value(s, "width=\""), Some("100"));
-        assert_eq!(extract_attr_value(s, "height=\""), Some("50"));
+    fn test_adjust_height_decimal() {
+        let attr = Attribute {
+            key: quick_xml::name::QName(b"height"),
+            value: b"50.5pt".as_slice().into(),
+        };
+        let result = adjust_height(attr).unwrap();
+        let value = std::str::from_utf8(&result.value).unwrap();
+        assert_eq!(value, "55.5pt");
     }
 
-    #[test]
-    fn test_extract_attr_value_not_found() {
-        let s = r#"<svg width="100">"#;
-        assert_eq!(extract_attr_value(s, "height=\""), None);
-    }
+    // ------------------------------------------------------------------------
+    // Path Building Tests
+    // ------------------------------------------------------------------------
 
     #[test]
-    fn test_svg_output_filename() {
+    fn test_build_src_path() {
+        // Normal case: output inside root
+        let src = build_src_path(
+            &PathBuf::from("/site/output/posts"),
+            "svg-0.svg",
+            &PathBuf::from("/site/output"),
+        );
+        assert_eq!(src, "/posts/svg-0.svg");
+
+        // Nested path
+        let src = build_src_path(
+            &PathBuf::from("/site/output/blog/2024/post"),
+            "svg-1.avif",
+            &PathBuf::from("/site/output"),
+        );
+        assert_eq!(src, "/blog/2024/post/svg-1.avif");
+
+        // Fallback: output outside root
+        let src = build_src_path(
+            &PathBuf::from("/other/path"),
+            "svg-0.svg",
+            &PathBuf::from("/site/output"),
+        );
+        assert_eq!(src, "svg-0.svg");
+    }
+
+    // ------------------------------------------------------------------------
+    // Output Format Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_output_format() {
         let config = Box::leak(Box::new(SiteConfig::default()));
-        let svg = Svg::new(vec![0; 100], (100.0, 50.0), 3);
-        let filename = svg.output_filename(config);
-        // Default config should use JustSvg or small size threshold
-        assert!(filename.ends_with(".svg") || filename.ends_with(".avif"));
-        assert!(filename.contains("svg-3"));
+        let inline_max = config.get_inline_max_size();
+
+        // Small SVG -> Svg format
+        let small = Svg::new(vec![0; inline_max - 1], (10.0, 10.0), 0);
+        assert_eq!(small.output_format(config), OutputFormat::Svg);
+
+        // Large SVG -> Avif format (when not JustSvg mode)
+        let large = Svg::new(vec![0; inline_max + 1], (100.0, 100.0), 1);
+        assert_eq!(large.output_format(config), OutputFormat::Avif);
     }
 
     #[test]
-    fn test_svg_should_keep_as_svg_small_size() {
+    fn test_svg_filename() {
         let config = Box::leak(Box::new(SiteConfig::default()));
-        // Create a very small SVG that should stay as SVG
-        let svg = Svg::new(vec![0; 10], (10.0, 10.0), 0);
-        assert!(svg.should_keep_as_svg(config));
+
+        // Small SVG gets .svg extension
+        let small = Svg::new(vec![0; 10], (10.0, 10.0), 5);
+        assert_eq!(small.filename(config), "svg-5.svg");
+
+        // Large SVG gets .avif extension
+        let large = Svg::new(vec![0; 100_000], (100.0, 100.0), 3);
+        assert_eq!(large.filename(config), "svg-3.avif");
+    }
+
+    // ------------------------------------------------------------------------
+    // SVG Struct Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_svg_new() {
+        let data = vec![1, 2, 3, 4];
+        let svg = Svg::new(data.clone(), (100.5, 200.5), 42);
+
+        assert_eq!(svg.data, data);
+        assert_eq!(svg.size, (100.5, 200.5));
+        assert_eq!(svg.index, 42);
+    }
+
+    // ------------------------------------------------------------------------
+    // HtmlContext Tests
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_html_context_extract_svg_flag() {
+        let mut config = SiteConfig::default();
+
+        // Embedded mode: don't extract
+        config.build.typst.svg.extract_type = ExtractSvgType::Embedded;
+        let config = Box::leak(Box::new(config));
+        let ctx = HtmlContext::new(config, Path::new("/test.html"));
+        assert!(!ctx.extract_svg);
     }
 }
