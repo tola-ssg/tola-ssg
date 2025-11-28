@@ -384,10 +384,9 @@ impl RssFeed {
         log!(true; "rss"; "generating rss feed started");
 
         let posts_paths = collect_files(
-            &crate::utils::build::CONTENT_CACHE,
             &config.build.content,
-            &|path| path.extension().is_some_and(|ext| ext == "typ"),
-        )?;
+            |path| path.extension().is_some_and(|ext| ext == "typ"),
+        );
 
         let posts: Vec<PostMeta> = posts_paths
             .par_iter()

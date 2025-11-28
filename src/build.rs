@@ -6,7 +6,7 @@ use crate::{
     config::SiteConfig,
     log,
     utils::{
-        build::{ASSETS_CACHE, CONTENT_CACHE, process_asset, process_content, process_files},
+        build::{process_asset, process_content, process_files},
         git,
     },
 };
@@ -32,16 +32,15 @@ pub fn build_site(
     let (posts_result, assets_result) = rayon::join(
         || {
             process_files(
-                &CONTENT_CACHE,
                 content,
                 config,
-                &|path| path.starts_with(content),
-                &|path, cfg| process_content(path, cfg, false, force_rebuild),
+                |path| path.starts_with(content),
+                |path, cfg| process_content(path, cfg, false, force_rebuild),
             )
             .context("Failed to compile posts")
         },
         || {
-            process_files(&ASSETS_CACHE, assets, config, &|_| true, &|path, cfg| {
+            process_files(assets, config, |_| true, |path, cfg| {
                 process_asset(path, cfg, false, false)
             })
             .context("Failed to copy assets")

@@ -14,15 +14,12 @@ use crate::{
     utils::slug::slugify_path,
 };
 use anyhow::{Context, Result, anyhow};
-use dashmap::DashSet;
-use lru::LruCache;
+use jwalk::WalkDir;
 use quick_xml::{
     Reader, Writer,
     events::{BytesEnd, BytesStart, Event},
 };
 use rayon::prelude::*;
-use std::num::NonZeroUsize;
-use std::sync::{Arc, LazyLock, Mutex};
 use std::{
     fs,
     io::Cursor,
@@ -30,125 +27,42 @@ use std::{
 };
 
 // ============================================================================
-// Types and Constants
-// ============================================================================
-
-type DirCache = LazyLock<Mutex<LruCache<PathBuf, Arc<Vec<PathBuf>>>>>;
-type CreatedDirCache = LazyLock<DashSet<PathBuf>>;
-
-static CREATED_DIRS: CreatedDirCache = LazyLock::new(DashSet::new);
-
-pub static CONTENT_CACHE: DirCache =
-    LazyLock::new(|| Mutex::new(LruCache::new(NonZeroUsize::new(50).unwrap())));
-pub static ASSETS_CACHE: DirCache =
-    LazyLock::new(|| Mutex::new(LruCache::new(NonZeroUsize::new(50).unwrap())));
-
-pub const IGNORED_FILE_NAME: &[&str] = &[".DS_Store"];
-
-// ============================================================================
 // Directory Operations
 // ============================================================================
 
-pub fn _copy_dir_recursively(src: &Path, dst: &Path) -> Result<()> {
-    if !dst.exists() {
-        fs::create_dir_all(dst).context("[Utils] Failed to create destination directory")?;
-    }
+/// Files to ignore during directory traversal
+const IGNORED_FILES: &[&str] = &[".DS_Store"];
 
-    for entry in fs::read_dir(src).context("[Utils] Failed to read source directory")? {
-        let entry = entry.context("[Utils] Invalid directory entry")?;
-        let entry_path = entry.path();
-        let dest_path = dst.join(entry.file_name());
-
-        if entry_path.is_dir() {
-            _copy_dir_recursively(&entry_path, &dest_path)?;
-        } else {
-            fs::copy(&entry_path, &dest_path).with_context(|| {
-                format!("[Utils] Failed to copy {entry_path:?} to {dest_path:?}")
-            })?;
-            log!("assets"; "{}", dest_path.display());
-        }
-    }
-
-    Ok(())
-}
-
-fn collect_files_vec<P>(
-    dir_cache: &DirCache,
-    dir: &Path,
-    should_collect: &P,
-) -> Result<Vec<PathBuf>>
+/// Collect files from a directory using parallel directory traversal (jwalk)
+pub fn collect_files<P>(dir: &Path, should_collect: P) -> Vec<PathBuf>
 where
-    P: Fn(&PathBuf) -> bool + Sync,
+    P: Fn(&Path) -> bool + Send + Sync,
 {
-    if let Some(cached) = dir_cache.lock().unwrap().get(dir) {
-        return Ok((**cached).clone());
-    }
-
-    let paths: Vec<PathBuf> = fs::read_dir(dir)?
+    WalkDir::new(dir)
+        .into_iter()
         .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .collect();
-
-    let parts: Vec<Vec<PathBuf>> = paths
-        .par_iter()
-        .map(|path| -> Result<Vec<_>> {
-            let file_name = path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or_default();
-
-            if path.is_dir() {
-                collect_files_vec(dir_cache, path, should_collect)
-            } else if path.is_file()
-                && should_collect(path)
-                && !IGNORED_FILE_NAME.contains(&file_name)
-            {
-                Ok(vec![path.clone()])
-            } else {
-                Ok(Vec::new())
-            }
+        .filter(|e| e.file_type().is_file())
+        .filter(|e| {
+            let name = e.file_name().to_str().unwrap_or_default();
+            !IGNORED_FILES.contains(&name) && should_collect(&e.path())
         })
-        .collect::<Result<_>>()?;
-
-    let files: Vec<_> = parts.into_iter().flatten().collect();
-
-    dir_cache
-        .lock()
-        .unwrap()
-        .put(dir.to_path_buf(), Arc::new(files.clone()));
-
-    Ok(files)
+        .map(|e| e.path())
+        .collect()
 }
 
-pub fn collect_files<P>(dir_cache: &DirCache, dir: &Path, p: &P) -> Result<Arc<Vec<PathBuf>>>
-where
-    P: Fn(&PathBuf) -> bool + Sync,
-{
-    let files = collect_files_vec(dir_cache, dir, p)?;
-    Ok(Arc::new(files))
-}
-
+/// Process files in parallel with the given processor function
 pub fn process_files<P, F>(
-    dir_cache: &DirCache,
     dir: &Path,
     config: &'static SiteConfig,
-    should_process: &P,
-    f: &F,
+    should_process: P,
+    processor: F,
 ) -> Result<()>
 where
-    P: Fn(&PathBuf) -> bool + Sync,
+    P: Fn(&Path) -> bool + Send + Sync,
     F: Fn(&Path, &'static SiteConfig) -> Result<()> + Sync,
 {
-    let files = collect_files(dir_cache, dir, should_process)?;
-    files.par_iter().try_for_each(|path| f(path, config))?;
-    Ok(())
-}
-
-fn ensure_dir_exists(path: &Path) -> Result<()> {
-    if CREATED_DIRS.insert(path.to_path_buf()) {
-        fs::create_dir_all(path)?;
-    }
-    Ok(())
+    let files = collect_files(dir, should_process);
+    files.par_iter().try_for_each(|path| processor(path, config))
 }
 
 // ============================================================================
@@ -176,7 +90,11 @@ pub fn process_content(
         log!(should_log_newline; "content"; "{}", relative_asset_path);
 
         let output = output.join(relative_asset_path);
-        ensure_dir_exists(output.parent().unwrap())?;
+
+        // Ensure parent directory exists
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent)?;
+        }
 
         if !force_rebuild
             && let (Ok(src_meta), Ok(dst_meta)) = (content_path.metadata(), output.metadata())
@@ -202,7 +120,7 @@ pub fn process_content(
     log!(should_log_newline; "content"; "{}", relative_post_path);
 
     let output = output.join(relative_post_path);
-    fs::create_dir_all(&output).unwrap();
+    fs::create_dir_all(&output)?;
 
     let html_path = if content_path.file_name().is_some_and(|p| p == "index.typ") {
         config.build.output.join("index.html")

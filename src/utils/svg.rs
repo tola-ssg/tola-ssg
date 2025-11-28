@@ -170,16 +170,29 @@ pub fn write_svg_img_placeholder(
     svg: &Svg,
     ctx: &HtmlContext<'_>,
 ) -> Result<()> {
+    use std::fmt::Write as FmtWrite;
+
     let svg_filename = svg.output_filename(ctx.config);
     let svg_path = ctx.html_path.parent().unwrap().join(&svg_filename);
-    let src = svg_path
-        .strip_prefix(&ctx.config.build.output)
-        .map(|p| format!("/{}", p.display()))
-        .unwrap_or_else(|_| svg_filename);
 
+    // Build src path, avoiding format! where possible
+    let src = match svg_path.strip_prefix(&ctx.config.build.output) {
+        Ok(p) => {
+            let mut s = String::with_capacity(p.as_os_str().len() + 1);
+            s.push('/');
+            let _ = write!(s, "{}", p.display());
+            s
+        }
+        Err(_) => svg_filename,
+    };
+
+    // Pre-calculate dimensions once
     let scale = ctx.config.get_scale();
-    let (w, h) = svg.size;
-    let style = format!("width:{}px;height:{}px;", w / scale, h / scale);
+    let (w, h) = (svg.size.0 / scale, svg.size.1 / scale);
+
+    // Build style string with pre-allocated capacity
+    let mut style = String::with_capacity(40);
+    let _ = write!(style, "width:{w}px;height:{h}px;");
 
     let mut img = BytesStart::new("img");
     img.push_attribute(("src", src.as_str()));

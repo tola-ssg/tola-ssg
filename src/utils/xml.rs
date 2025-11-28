@@ -8,6 +8,7 @@ use quick_xml::{
     events::{BytesEnd, BytesStart, BytesText, Event, attributes::Attribute},
 };
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::io::{Cursor, Write};
 use std::str;
 
@@ -282,7 +283,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-static ASSET_TOP_LEVELS: OnceLock<Vec<OsString>> = OnceLock::new();
+static ASSET_TOP_LEVELS: OnceLock<HashSet<OsString>> = OnceLock::new();
 
 /// Get MIME type for icon based on file extension
 pub fn get_icon_mime_type(path: &Path) -> &'static str {
@@ -325,7 +326,7 @@ pub fn compute_stylesheet_href(input: &Path, config: &'static SiteConfig) -> Res
 }
 
 /// Get top-level asset directory names
-pub fn get_asset_top_levels(assets_dir: &Path) -> &'static [OsString] {
+fn get_asset_top_levels(assets_dir: &Path) -> &'static HashSet<OsString> {
     ASSET_TOP_LEVELS.get_or_init(|| {
         fs::read_dir(assets_dir)
             .map(|dir| dir.flatten().map(|entry| entry.file_name()).collect())
@@ -344,7 +345,7 @@ pub fn is_asset_link(path: &str, config: &'static SiteConfig) -> bool {
         .next()
         .unwrap_or_default();
 
-    asset_top_levels.iter().any(|name| name == first_component)
+    asset_top_levels.contains(first_component.as_ref() as &std::ffi::OsStr)
 }
 
 /// Check if a link is external (has a scheme like http:, mailto:, etc.)
