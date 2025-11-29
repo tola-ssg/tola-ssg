@@ -31,7 +31,7 @@
           mkPackage = targetPkgs:
             targetPkgs.rustPlatform.buildRustPackage {
               pname = "tola";
-              version = "0.5.16";
+              version = "0.5.17";
 
               src = ./.;
               cargoLock.lockFile = ./Cargo.lock;
