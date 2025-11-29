@@ -65,7 +65,7 @@ pub fn commit_all(repo: &ThreadSafeRepository, message: &str) -> Result<()> {
 
 /// Push commits to remote repository
 pub fn push(repo: &ThreadSafeRepository, config: &'static SiteConfig) -> Result<()> {
-    let github = &config.deploy.github_provider;
+    let github = &config.deploy.github;
     log!("git"; "pushing to `{}`", github.url);
 
     let repo_local = repo.to_thread_local();
