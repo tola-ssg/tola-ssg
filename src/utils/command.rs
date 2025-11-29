@@ -174,49 +174,103 @@ fn prepare(root: Option<&Path>, cmd: &[OsString], args: &[OsString]) -> Result<(
 }
 
 // ============================================================================
-// Output Logging
+// Output Filtering
 // ============================================================================
+
+/// Filter rule for CLI output noise.
+///
+/// Matches lines that start with a prefix AND contain all required keywords.
+/// This is more precise than keyword-only matching to avoid filtering user errors.
+struct FilterRule {
+    /// Line must start with one of these (case-insensitive, after trim).
+    starts_with: &'static [&'static str],
+    /// Line must also contain ALL of these keywords (case-insensitive).
+    contains: &'static [&'static str],
+}
+
+impl FilterRule {
+    const fn new(starts_with: &'static [&'static str], contains: &'static [&'static str]) -> Self {
+        Self { starts_with, contains }
+    }
+
+    fn matches(&self, line: &str) -> bool {
+        let lower = line.trim().to_ascii_lowercase();
+        // Must start with one of the prefixes
+        let has_prefix = self.starts_with.is_empty()
+            || self.starts_with.iter().any(|p| lower.starts_with(p));
+        // Must contain all keywords
+        let has_keywords = self.contains.iter().all(|kw| lower.contains(kw));
+        has_prefix && has_keywords
+    }
+}
 
 /// Output filter configuration.
 struct OutputFilter {
-    /// Prefixes to skip entirely (e.g., HTML, JSON output).
+    /// Lines matching any rule are filtered out.
+    line_rules: &'static [FilterRule],
+    /// Prefixes indicating non-output (HTML, JSON).
     skip_prefixes: &'static [&'static str],
-    /// Warning text to strip from error messages.
-    strip_warning: &'static str,
 }
 
 impl OutputFilter {
     const STDOUT: Self = Self {
-        skip_prefixes: &["<!DOCTYPE html>", "{"],
-        strip_warning: "",
+        line_rules: &[],
+        skip_prefixes: &["<!DOCTYPE", "{"],
     };
 
+    // Typst warning example:
+    //   warning: html export is under active development and incomplete
+    //    = hint: its behaviour may change at any time
+    //   warning: elem `xxx` was ignored during html export
+    //
+    // Tailwindcss example:
+    //   ≈ tailwindcss v4.0.0
     const STDERR: Self = Self {
-        skip_prefixes: &[
-            "warning: html export is under active development",
-            "warning: elem was ignored during paged export",
-            "≈ tailwindcss v",
+        line_rules: &[
+            // Typst warnings about experimental features
+            FilterRule::new(&["warning:"], &["html export"]),
+            FilterRule::new(&["warning:"], &["was ignored during", "export"]),
+            // Typst hints (always start with "= hint:")
+            FilterRule::new(&["= hint:"], &[]),
+            // Tailwindcss version banner (starts with ≈ or ~)
+            FilterRule::new(&["≈", "~"], &["tailwindcss"]),
         ],
-        strip_warning: "warning: html export is under active development and incomplete\n \
-             = hint: its behaviour may change at any time\n \
-             = hint: do not rely on this feature for production use cases\n \
-             = hint: see https://github.com/typst/typst/issues/5512 for more information\n",
+        skip_prefixes: &[],
     };
 
-    /// Check if output should be skipped.
-    #[inline]
+    /// Check if entire output block should be skipped.
     fn should_skip(&self, output: &str) -> bool {
         output.is_empty() || self.skip_prefixes.iter().any(|p| output.starts_with(p))
     }
 
-    /// Log non-empty lines.
+    /// Check if a line should be filtered.
+    fn should_filter_line(&self, line: &str) -> bool {
+        self.line_rules.iter().any(|r| r.matches(line))
+    }
+
+    /// Log non-filtered lines.
     fn log(&self, name: &str, output: &str) {
         if self.should_skip(output) {
             return;
         }
-        for line in output.lines().filter(|s| !s.trim().is_empty()) {
-            log!(name; "{line}");
+        for line in output.lines() {
+            if !line.trim().is_empty() && !self.should_filter_line(line) {
+                log!(name; "{line}");
+            }
         }
+    }
+
+    /// Extract error message, skipping filtered lines at start.
+    fn extract_error<'a>(&self, stderr: &'a str) -> &'a str {
+        stderr
+            .lines()
+            .find(|line| !line.trim().is_empty() && !self.should_filter_line(line))
+            .map(|first| {
+                let offset = first.as_ptr() as usize - stderr.as_ptr() as usize;
+                &stderr[offset..]
+            })
+            .unwrap_or(stderr)
+            .trim()
     }
 }
 
@@ -230,9 +284,9 @@ fn log_output(name: &str, output: &Output) -> Result<()> {
         .trim();
 
     if !output.status.success() {
-        let cleaned = stderr.trim_start_matches(OutputFilter::STDERR.strip_warning);
-        if !cleaned.is_empty() {
-            eprintln!("{cleaned}");
+        let error_msg = OutputFilter::STDERR.extract_error(stderr);
+        if !error_msg.is_empty() {
+            eprintln!("{error_msg}");
         }
         anyhow::bail!("Command `{name}` failed with {}", output.status);
     }
