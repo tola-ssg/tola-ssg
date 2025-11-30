@@ -355,7 +355,7 @@ impl RssFeed {
     /// Uses `Pages` for URL information, but queries typst for
     /// title/summary/date metadata in parallel.
     pub fn build(config: &'static SiteConfig, pages: &Pages) -> Result<Self> {
-        log!(true; "rss"; "generating rss feed from {} pages", pages.len());
+        log!(true; "rss"; "generating from {} pages", pages.len());
 
         // Parallel query for better performance
         let posts: Vec<PostMeta> = pages
@@ -407,7 +407,7 @@ impl RssFeed {
         }
         fs::write(rss_path, &xml)?;
 
-        log!("rss"; "{}", rss_path.display());
+        log!("rss"; "{}", config.build.rss.path.display());
         Ok(())
     }
 }

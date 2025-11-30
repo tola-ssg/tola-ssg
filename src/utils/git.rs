@@ -59,14 +59,14 @@ pub fn commit_all(repo: &ThreadSafeRepository, message: &str) -> Result<()> {
     let parent_ids = get_parent_commit_ids(repo)?;
     let commit_id = repo_local.commit("HEAD", message, tree_id, parent_ids)?;
 
-    log!("commit"; "created commit `{commit_id}` in repo `{}`", root.display());
+    log!("git"; "commit {commit_id}");
     Ok(())
 }
 
 /// Push commits to remote repository
 pub fn push(repo: &ThreadSafeRepository, config: &'static SiteConfig) -> Result<()> {
     let github = &config.deploy.github;
-    log!("git"; "pushing to `{}`", github.url);
+    log!("git"; "pushing to {}", github.url);
 
     let repo_local = repo.to_thread_local();
     let root = get_repo_root(&repo_local)?;

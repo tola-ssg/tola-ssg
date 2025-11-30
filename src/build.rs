@@ -75,7 +75,7 @@ fn init_output_repo(output: &Path, clean: bool) -> Result<ThreadSafeRepository> 
             git::create_repo(output)
         }
         (true, false) => git::open_repo(output).or_else(|_| {
-            log!("git"; "{output:?} is not a git repo, creating new now");
+            log!("git"; "initializing repo");
             git::create_repo(output)
         }),
         (false, _) => git::create_repo(output),
@@ -90,9 +90,9 @@ fn log_build_result(output: &Path) -> Result<()> {
         .count();
 
     if file_count == 0 {
-        log!("warn"; "Output directory is empty. Check if content files have .typ extension.");
+        log!("warn"; "output is empty, check if content has .typ files");
     } else {
-        log!("build"; "Successfully generated site in: {}", output.display());
+        log!("build"; "done");
     }
 
     Ok(())
