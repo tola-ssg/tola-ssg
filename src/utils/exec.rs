@@ -132,7 +132,11 @@ pub fn exec(root: Option<&Path>, cmd: &[OsString], args: &[OsString]) -> Result<
     Ok(output)
 }
 
-/// Spawn a command and return a handle to write to its stdin.
+/// Spawn a command and return handles to its stdin and the child process.
+///
+/// The caller should:
+/// 1. Write data to the returned `ChildStdin`
+/// 2. Pass both `ChildStdin` and `Child` to [`wait_child`] to close stdin and wait for completion
 ///
 /// # Errors
 /// Returns error if command fails to spawn.
@@ -140,19 +144,45 @@ pub fn spawn_with_stdin(
     root: Option<&Path>,
     cmd: &[OsString],
     args: &[OsString],
-) -> Result<ChildStdin> {
+) -> Result<(ChildStdin, Child)> {
     let (name, mut command) = prepare(root, cmd, args)?;
 
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
 
     let mut child: Child = command
         .spawn()
         .with_context(|| format!("Failed to spawn `{name}`"))?;
 
-    child.stdin.take().context("Failed to acquire stdin")
+    let stdin = child.stdin.take().context("Failed to acquire stdin")?;
+    Ok((stdin, child))
+}
+
+/// Wait for child process to complete and check exit status.
+///
+/// Takes ownership of `stdin` to ensure the pipe is closed before waiting.
+/// This is critical: the child process reads from stdin until EOF, so we must
+/// close the pipe (via `drop`) before `wait()`, otherwise it will deadlock.
+///
+/// Note: `drop(stdin)` must be explicit here. Using `_stdin` parameter name or
+/// `let _ = stdin` would defer the drop until function end, after `wait()`.
+///
+/// # Errors
+/// Returns error if process exits with non-zero status.
+pub fn wait_child(stdin: ChildStdin, mut child: Child, name: &str) -> Result<()> {
+    drop(stdin); // Must close stdin before wait, otherwise child blocks on read
+    let status = child.wait().context(format!("{name} process failed"))?;
+    if !status.success() {
+        let stderr = child
+            .stderr
+            .take()
+            .map(|s| std::io::read_to_string(s).unwrap_or_default())
+            .unwrap_or_default();
+        anyhow::bail!("{name} failed with {status}: {stderr}");
+    }
+    Ok(())
 }
 
 /// Prepare a Command from components.

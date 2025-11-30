@@ -16,6 +16,7 @@ use std::io::{Cursor, Write};
 use std::path::Path;
 
 use crate::config::{ExtractSvgType, SiteConfig};
+use crate::utils::exec::wait_child;
 use crate::{exec_with_stdin, log};
 
 // ============================================================================
@@ -327,10 +328,21 @@ pub fn compress_svgs_parallel(
     let log_prefix = relative_path.trim_end_matches("index.html");
     let scale = config.get_scale();
 
+    // Get HTML file's mtime for cache invalidation
+    let html_mtime = html_path.metadata().and_then(|m| m.modified()).ok();
+
     svgs.par_iter().try_for_each(|svg| {
         let output_path = output_dir.join(svg.filename(config));
-        log!("svg"; "{log_prefix}svg-{}", svg.index);
 
+        // Skip if output exists and is newer than HTML (content unchanged)
+        if let Some(html_time) = html_mtime
+            && let Ok(svg_time) = output_path.metadata().and_then(|m| m.modified())
+            && svg_time >= html_time
+        {
+            return Ok(());
+        }
+
+        log!("svg"; "{log_prefix}svg-{}", svg.index);
         compress_svg(svg, &output_path, scale, config)?;
 
         Ok(())
@@ -359,17 +371,17 @@ fn compress_svg(svg: &Svg, output_path: &Path, scale: f32, config: &SiteConfig) 
 /// Compress using ImageMagick
 fn compress_magick(output: &Path, data: &[u8], scale: f32) -> Result<()> {
     let density = (scale * 96.0).to_string();
-    let mut stdin = exec_with_stdin!(
+    let (mut stdin, child) = exec_with_stdin!(
         ["magick"];
         "-background", "none", "-density", density, "-", output
     )?;
     stdin.write_all(data)?;
-    Ok(())
+    wait_child(stdin, child, "magick")
 }
 
 /// Compress using FFmpeg
 fn compress_ffmpeg(output: &Path, data: &[u8]) -> Result<()> {
-    let mut stdin = exec_with_stdin!(
+    let (mut stdin, child) = exec_with_stdin!(
         ["ffmpeg"];
         "-f", "svg_pipe",
         "-frame_size", "1000000000",
@@ -384,11 +396,10 @@ fn compress_ffmpeg(output: &Path, data: &[u8]) -> Result<()> {
         "-pix_fmt", "gray",
         "-still-picture", "1",
         "-strict", "experimental",
-        "-c:v", "libaom-av1",
         "-y", output
     )?;
     stdin.write_all(data)?;
-    Ok(())
+    wait_child(stdin, child, "ffmpeg")
 }
 
 /// Compress using built-in ravif encoder
