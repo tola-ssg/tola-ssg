@@ -55,7 +55,9 @@ pub fn watch_for_changes_blocking(config: &'static SiteConfig) -> Result<()> {
             watcher.watch(&path, mode).with_context(|| {
                 format!("Failed to watch {}: {}", category.name(), path.display())
             })?;
-            log!("watch"; "watching for changes in {}: {}", category.name(), path.display());
+            let rel = path.strip_prefix(config.get_root()).unwrap_or(&path);
+            let suffix = if category.is_directory() { "/" } else { "" };
+            log!("watch"; "{}: {}{}", category.name(), rel.display(), suffix);
         }
     }
 
@@ -76,7 +78,7 @@ pub fn watch_for_changes_blocking(config: &'static SiteConfig) -> Result<()> {
         match rx.recv_timeout(timeout) {
             Ok(res) => {
                 match res {
-                    Err(e) => log!("watch"; "error: {e:?}"),
+                    Err(e) => log!("watch"; "error: {e}"),
                     Ok(event) if should_process_event(&event) => {
                         let now = Instant::now();
 
@@ -133,7 +135,7 @@ fn handle_event(paths: &[std::path::PathBuf], config: &'static SiteConfig) -> bo
 
     if let Some((trigger_path, category)) = rebuild_trigger {
         let reason = category.description(trigger_path);
-        log!("watch"; "{reason} changed, triggering full rebuild...");
+        log!("watch"; "{reason} changed, rebuilding...");
         // Full rebuild for template/utils/config changes, but no need to clean output
         if let Err(err) = crate::build::build_site(config) {
             log!("watch"; "full rebuild failed: {err}");

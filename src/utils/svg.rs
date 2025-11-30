@@ -329,11 +329,10 @@ pub fn compress_svgs_parallel(
 
     svgs.par_iter().try_for_each(|svg| {
         let output_path = output_dir.join(svg.filename(config));
-        log!("svg"; "in {log_prefix}: compressing svg-{}", svg.index);
+        log!("svg"; "{log_prefix}svg-{}", svg.index);
 
         compress_svg(svg, &output_path, scale, config)?;
 
-        log!("svg"; "in {log_prefix}: done svg-{}", svg.index);
         Ok(())
     })
 }

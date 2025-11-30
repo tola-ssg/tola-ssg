@@ -207,7 +207,7 @@ pub fn collect_pages(config: &'static SiteConfig) -> Pages {
         .filter_map(|typ_path| PageMeta::from_source(typ_path.clone(), config).ok())
         .collect();
 
-    log!(true; "pages"; "collected {} page entries", items.len());
+    log!(true; "pages"; "collected {} pages", items.len());
 
     Pages { items }
 }

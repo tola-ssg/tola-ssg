@@ -76,7 +76,7 @@ pub fn serve_site(config: &'static SiteConfig) -> Result<()> {
     })
     .context("Failed to set Ctrl+C handler")?;
 
-    log!("serve"; "serving site on http://{}", addr);
+    log!("serve"; "http://{}", addr);
 
     // Spawn file watcher thread
     if config.serve.watch {

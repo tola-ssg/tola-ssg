@@ -61,7 +61,7 @@ struct UrlEntry {
 impl Sitemap {
     /// Build sitemap from pre-collected page metadata.
     fn from_pages(pages: &Pages) -> Self {
-        log!(true; "sitemap"; "generating sitemap from {} pages", pages.len());
+        log!(true; "sitemap"; "generating from {} pages", pages.len());
 
         let urls: Vec<UrlEntry> = pages
             .iter()
@@ -104,7 +104,7 @@ impl Sitemap {
         fs::write(&output_path, &xml)
             .with_context(|| format!("Failed to write sitemap to {}", output_path.display()))?;
 
-        log!("sitemap"; "{}", output_path.display());
+        log!("sitemap"; "{}", config.build.sitemap.path.display());
         Ok(())
     }
 }
