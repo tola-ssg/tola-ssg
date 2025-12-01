@@ -16,7 +16,6 @@ use std::io::{Cursor, Write};
 use std::path::Path;
 
 use crate::config::{ExtractSvgType, SiteConfig};
-use crate::exec::wait_child;
 use crate::{exec_with_stdin, log};
 
 // ============================================================================
@@ -371,17 +370,19 @@ fn compress_svg(svg: &Svg, output_path: &Path, scale: f32, config: &SiteConfig) 
 /// Compress using ImageMagick
 fn compress_magick(output: &Path, data: &[u8], scale: f32) -> Result<()> {
     let density = (scale * 96.0).to_string();
-    let (mut stdin, child) = exec_with_stdin!(
+    let mut proc = exec_with_stdin!(
         ["magick"];
         "-background", "none", "-density", density, "-", output
     )?;
-    stdin.write_all(data)?;
-    wait_child(stdin, child, "magick")
+    if let Some(stdin) = proc.stdin() {
+        stdin.write_all(data)?;
+    }
+    proc.wait()
 }
 
 /// Compress using FFmpeg
 fn compress_ffmpeg(output: &Path, data: &[u8]) -> Result<()> {
-    let (mut stdin, child) = exec_with_stdin!(
+    let mut proc = exec_with_stdin!(
         ["ffmpeg"];
         "-f", "svg_pipe",
         "-frame_size", "1000000000",
@@ -398,8 +399,10 @@ fn compress_ffmpeg(output: &Path, data: &[u8]) -> Result<()> {
         "-strict", "experimental",
         "-y", output
     )?;
-    stdin.write_all(data)?;
-    wait_child(stdin, child, "ffmpeg")
+    if let Some(stdin) = proc.stdin() {
+        stdin.write_all(data)?;
+    }
+    proc.wait()
 }
 
 /// Compress using built-in ravif encoder

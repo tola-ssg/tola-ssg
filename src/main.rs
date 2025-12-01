@@ -5,7 +5,6 @@ mod cli;
 mod compiler;
 mod config;
 mod deploy;
-mod exec;
 mod generator;
 mod init;
 mod logger;

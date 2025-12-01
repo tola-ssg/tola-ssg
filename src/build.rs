@@ -38,9 +38,11 @@ pub fn build_site(config: &'static SiteConfig) -> Result<(ThreadSafeRepository, 
     // Calculate deps mtime once for all content files
     let deps_mtime = get_deps_mtime(config);
 
-    // Collect files first for progress tracking
-    let content_files = collect_all_files(content);
-    let asset_files = collect_all_files(assets);
+    // Collect files in parallel for faster startup
+    let (content_files, asset_files) = rayon::join(
+        || collect_all_files(content),
+        || collect_all_files(assets),
+    );
 
     // Extract .typ file references for later page collection
     let typ_files: Vec<&PathBuf> = content_files
@@ -57,40 +59,53 @@ pub fn build_site(config: &'static SiteConfig) -> Result<(ThreadSafeRepository, 
     // Shared flag to abort early on error and prevent duplicate error logs
     let has_error = AtomicBool::new(false);
 
+    // Helper to process files in parallel with error handling and progress tracking
+    fn process_files(
+        files: &[PathBuf],
+        idx: usize,
+        task: impl Fn(&PathBuf) -> Result<()> + Sync,
+        has_error: &AtomicBool,
+        progress: &ProgressBars,
+    ) -> Result<()> {
+        files.par_iter().try_for_each(|path| {
+            if has_error.load(Ordering::Relaxed) {
+                return Err(anyhow!("Aborted"));
+            }
+            if let Err(e) = task(path) {
+                if !has_error.swap(true, Ordering::Relaxed) {
+                    let relative_path = std::env::current_dir()
+                        .ok()
+                        .and_then(|cwd| path.strip_prefix(cwd).ok())
+                        .unwrap_or(path);
+                    log!("error"; "{}: {:#}", relative_path.display(), e);
+                }
+                return Err(anyhow!("Build failed"));
+            }
+            progress.inc(idx);
+            Ok(())
+        })
+    }
+
     // Process content and assets in parallel
     let clean = config.build.clean;
     let (posts_result, assets_result) = rayon::join(
         || {
-            content_files.par_iter().try_for_each(|path| {
-                if has_error.load(Ordering::Relaxed) {
-                    return Err(anyhow!("Aborted"));
-                }
-                let result = process_content(path, config, clean, deps_mtime, false);
-                if let Err(e) = result {
-                    if !has_error.swap(true, Ordering::Relaxed) {
-                        log!("error"; "{e}");
-                    }
-                    return Err(anyhow!("Build failed"));
-                }
-                progress.inc(0);
-                Ok(())
-            })
+            process_files(
+                &content_files,
+                0,
+                |p| process_content(p, config, clean, deps_mtime, false),
+                &has_error,
+                &progress,
+            )
         },
         || {
-            asset_files.par_iter().try_for_each(|path| {
-                if has_error.load(Ordering::Relaxed) {
-                    return Err(anyhow!("Aborted"));
-                }
-                let result = process_asset(path, config, false, false);
-                if let Err(e) = result {
-                    if !has_error.swap(true, Ordering::Relaxed) {
-                        log!("error"; "{e}");
-                    }
-                    return Err(anyhow!("Build failed"));
-                }
-                progress.inc(1);
-                Ok(())
-            })
+            process_files(
+                &asset_files,
+                1,
+                |p| process_asset(p, config, false),
+                &has_error,
+                &progress,
+            )
         },
     );
 
