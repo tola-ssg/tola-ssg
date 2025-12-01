@@ -98,7 +98,8 @@ impl PageMeta {
 
         // Strip content dir and .typ extension
         let relative = source
-            .strip_prefix(content_dir)?
+            .strip_prefix(content_dir)
+            .map_err(|_| anyhow!("File is not in content directory: {}", source.display()))?
             .to_str()
             .ok_or_else(|| anyhow!("Invalid path encoding"))?
             .strip_suffix(".typ")

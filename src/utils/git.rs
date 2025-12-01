@@ -99,15 +99,17 @@ struct Remote;
 impl Remote {
     /// Check if origin remote exists with matching URL
     fn origin_matches(repo: &Repository, expected_url: &str) -> Result<bool> {
-        if let Ok(remote) = repo.find_remote("origin") {
-            if let Some(url) = remote
-                .url(Direction::Push)
-                .or_else(|| remote.url(Direction::Fetch))
-            {
-                return Ok(url.to_bstring().to_string() == expected_url);
-            }
-        }
-        Ok(false)
+        let matches = repo
+            .find_remote("origin")
+            .ok()
+            .and_then(|remote| {
+                remote
+                    .url(Direction::Push)
+                    .or_else(|| remote.url(Direction::Fetch))
+                    .map(|url| url.to_bstring() == expected_url)
+            })
+            .unwrap_or(false);
+        Ok(matches)
     }
 
     /// Check if origin remote exists
@@ -214,9 +216,7 @@ impl IgnoreMatcher {
             // Example: "/root.log" matches "root.log" but NOT "src/root.log".
             // Example: "target/debug" has slash, so it matches path-relatively.
             if !has_internal_slash && !is_absolute {
-                if let Some(idx) = path.rfind('/') {
-                    match_path = &path[idx + 1..];
-                }
+                match_path = path.rsplit_once('/').map_or(match_path, |(_, name)| name);
             }
 
             let is_match = wildmatch(
@@ -228,11 +228,7 @@ impl IgnoreMatcher {
             if is_match {
                 // If it's a negative match (starts with !), we un-ignore it.
                 // Otherwise, we ignore it.
-                if mode & MODE_NEGATIVE != 0 {
-                    is_ignored = false;
-                } else {
-                    is_ignored = true;
-                }
+                is_ignored = mode & MODE_NEGATIVE == 0;
             }
         }
         is_ignored
