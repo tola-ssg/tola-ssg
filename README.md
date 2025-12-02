@@ -89,6 +89,16 @@ The philosophy of `tola`:
 }
 ```
 
+- for guix users, a `guix.scm` already exists in the repo root:
+
+```bash
+# Build from local checkout
+guix build -f guix.scm
+
+# Install from local checkout
+guix package -f guix.scm
+```
+
 ## Usage
 
 - `tola -h`:  
