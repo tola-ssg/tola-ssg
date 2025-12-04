@@ -31,14 +31,14 @@
 //! }
 //! ```
 
-use crate::{
-    config::SiteConfig,
-    log,
-    utils::slug::{slugify_path, remove_forbidden_chars},
-};
+use crate::{config::SiteConfig, log, utils::slug::slugify_path};
 use anyhow::{Result, anyhow};
 use rayon::prelude::*;
-use std::{fs, path::{Path, PathBuf}, time::SystemTime};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 
 // ============================================================================
 // Asset Metadata
@@ -194,41 +194,26 @@ impl PageMeta {
         let is_root_index = relative == "index";
 
         // Compute HTML output path
+        // Only slugify the relative path part to preserve output dir and index.html
         let html = if is_root_index {
             output_dir.join("index.html")
         } else {
-            output_dir.join(&relative).join("index.html")
+            let slugified_relative = slugify_path(Path::new(&relative), config);
+            output_dir.join(slugified_relative).join("index.html")
         };
-        let html = slugify_path(html, config);
 
-        // Compute URL path
-        let prefix_str = path_prefix.to_string_lossy();
-        let prefix_str = prefix_str.trim_matches('/');
+        // Compute URL path from the final HTML path to ensure consistency
+        let full_path_url = url_from_output_path(&html, config)?;
 
-        let url_path = if is_root_index {
-            if prefix_str.is_empty() {
-                "/".to_string()
-            } else {
-                format!("/{}/", prefix_str)
-            }
-        } else if relative.ends_with("/index") {
-            let rel = relative.trim_end_matches("/index");
-            if prefix_str.is_empty() {
-                format!("/{}/", rel)
-            } else {
-                format!("/{}/{}/", prefix_str, rel)
-            }
-        } else if prefix_str.is_empty() {
-            format!("/{}/", relative)
+        // Remove "index.html" for pretty URLs
+        let url_path = if full_path_url.ends_with("/index.html") {
+            full_path_url.trim_end_matches("index.html").to_string()
         } else {
-            format!("/{}/{}/", prefix_str, relative)
+            full_path_url
         };
-
-        // Sanitize url_path (remove forbidden chars)
-        let url_path = remove_forbidden_chars(&url_path);
 
         let full_url = format!("{}{}", base_url, url_path);
-        let lastmod = fs::metadata(&html).and_then(|m| m.modified()).ok();
+        let lastmod = fs::metadata(&source).and_then(|m| m.modified()).ok();
 
         Ok(Self {
             paths: PagePaths {
@@ -427,7 +412,10 @@ mod tests {
         };
 
         assert_eq!(page.paths.source, PathBuf::from("content/posts/hello.typ"));
-        assert_eq!(page.paths.html, PathBuf::from("public/posts/hello/index.html"));
+        assert_eq!(
+            page.paths.html,
+            PathBuf::from("public/posts/hello/index.html")
+        );
         assert_eq!(page.paths.relative, "posts/hello");
         assert_eq!(page.paths.url_path, "/posts/hello/");
         assert_eq!(page.paths.full_url, "https://example.com/posts/hello/");
@@ -470,6 +458,31 @@ mod tests {
         );
         assert_eq!(page.paths.url_path, "/blog/posts/hello/");
         assert_eq!(page.paths.full_url, "https://example.com/blog/posts/hello/");
+    }
+
+    #[test]
+    fn test_page_meta_case_mismatch() {
+        // Simulate a case where output dir has uppercase (e.g. "Public")
+        // but slug config enforces lowercase.
+        // The logic should preserve the output dir casing while slugifying the content path.
+        let mut config = SiteConfig::default();
+        config.build.output = PathBuf::from("Public");
+        config.build.content = PathBuf::from("content");
+
+        // Leak config to get 'static lifetime required by from_source
+        let config: &'static SiteConfig = Box::leak(Box::new(config));
+
+        let source = PathBuf::from("content/Posts/Hello.typ");
+        let page = PageMeta::from_source(source, config).unwrap();
+
+        // Output path: "Public" (preserved) + "posts/hello" (slugified) + "index.html"
+        assert_eq!(
+            page.paths.html,
+            PathBuf::from("Public/posts/hello/index.html")
+        );
+
+        // URL path: should be derived correctly despite "Public" vs "public" mismatch if we were slugifying everything
+        assert_eq!(page.paths.url_path, "/posts/hello/");
     }
 
     #[test]

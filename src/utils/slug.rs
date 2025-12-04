@@ -97,17 +97,6 @@ pub fn slugify_path(path: impl AsRef<Path>, config: &'static SiteConfig) -> Path
     }
 }
 
-/// Removes forbidden characters from a string.
-///
-/// This is a utility function for other modules (like `meta.rs`) that need to
-/// sanitize strings using the same rules as the slug module, but without
-/// applying full slugification logic (separators, case, etc.).
-pub fn remove_forbidden_chars(text: &str) -> String {
-    text.chars()
-        .filter(|c| !FORBIDDEN_CHARS.contains(c))
-        .collect()
-}
-
 // ============================================================================
 // Core Transformation Functions
 // ============================================================================
@@ -275,7 +264,6 @@ fn capitalize_words(text: &str) -> String {
     result
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,7 +285,10 @@ mod tests {
     #[test]
     fn test_sanitize_replaces_all_forbidden_chars() {
         // All forbidden chars replaced, consecutive separators collapsed
-        assert_eq!(sanitize("a<b>c:d|e?f*g#h\\i(j)k[l]m", SEP_UNDERSCORE), "a_b_c_d_e_f_g_h_i_j_k_l_m");
+        assert_eq!(
+            sanitize("a<b>c:d|e?f*g#h\\i(j)k[l]m", SEP_UNDERSCORE),
+            "a_b_c_d_e_f_g_h_i_j_k_l_m"
+        );
     }
 
     #[test]
@@ -308,7 +299,10 @@ mod tests {
     #[test]
     fn test_sanitize_replaces_various_whitespace() {
         // \t and \n are forbidden chars, replaced with separator
-        assert_eq!(sanitize("Hello\tWorld\nTest", SEP_UNDERSCORE), "Hello_World_Test");
+        assert_eq!(
+            sanitize("Hello\tWorld\nTest", SEP_UNDERSCORE),
+            "Hello_World_Test"
+        );
     }
 
     #[test]
@@ -324,7 +318,10 @@ mod tests {
     #[test]
     fn test_sanitize_complex_input() {
         // Forbidden chars replaced, consecutive separators collapsed
-        assert_eq!(sanitize("  Hello (World) [Test]: #anchor?  ", SEP_UNDERSCORE), "Hello_World_Test_anchor");
+        assert_eq!(
+            sanitize("  Hello (World) [Test]: #anchor?  ", SEP_UNDERSCORE),
+            "Hello_World_Test_anchor"
+        );
     }
 
     #[test]
@@ -341,7 +338,10 @@ mod tests {
     #[test]
     fn test_sanitize_mixed_content() {
         // () and # replaced with separator, consecutive collapsed
-        assert_eq!(sanitize("My Article (2024) - Part #1", SEP_UNDERSCORE), "My_Article_2024_-_Part_1");
+        assert_eq!(
+            sanitize("My Article (2024) - Part #1", SEP_UNDERSCORE),
+            "My_Article_2024_-_Part_1"
+        );
     }
 
     // ========================================================================
@@ -363,7 +363,10 @@ mod tests {
 
     #[test]
     fn test_collapse_consecutive_separators() {
-        assert_eq!(collapse_consecutive_separators("a--b--c", SEP_DASH), "a-b-c");
+        assert_eq!(
+            collapse_consecutive_separators("a--b--c", SEP_DASH),
+            "a-b-c"
+        );
         assert_eq!(collapse_consecutive_separators("--abc--", SEP_DASH), "abc");
         assert_eq!(collapse_consecutive_separators("------", SEP_DASH), "");
         assert_eq!(collapse_consecutive_separators("a-b-c", SEP_DASH), "a-b-c");
@@ -579,15 +582,30 @@ mod tests {
 
     #[test]
     fn test_apply_case_capitalize() {
-        assert_eq!(apply_case("hello world", &SlugCase::Capitalize), "Hello World");
-        assert_eq!(apply_case("hello-world", &SlugCase::Capitalize), "Hello-World");
-        assert_eq!(apply_case("hello_world", &SlugCase::Capitalize), "Hello_World");
-        assert_eq!(apply_case("HELLO WORLD", &SlugCase::Capitalize), "Hello World");
+        assert_eq!(
+            apply_case("hello world", &SlugCase::Capitalize),
+            "Hello World"
+        );
+        assert_eq!(
+            apply_case("hello-world", &SlugCase::Capitalize),
+            "Hello-World"
+        );
+        assert_eq!(
+            apply_case("hello_world", &SlugCase::Capitalize),
+            "Hello_World"
+        );
+        assert_eq!(
+            apply_case("HELLO WORLD", &SlugCase::Capitalize),
+            "Hello World"
+        );
     }
 
     #[test]
     fn test_apply_case_preserve() {
-        assert_eq!(apply_case("Hello World", &SlugCase::Preserve), "Hello World");
+        assert_eq!(
+            apply_case("Hello World", &SlugCase::Preserve),
+            "Hello World"
+        );
         assert_eq!(apply_case("hElLo", &SlugCase::Preserve), "hElLo");
     }
 
@@ -607,25 +625,28 @@ mod tests {
     #[test]
     fn test_forbidden_chars_constant() {
         // Verify all expected forbidden characters are present
-        let expected = ['<', '>', ':', '|', '?', '*', '#', '\\', '(', ')', '[', ']', '\t', '\r', '\n'];
+        let expected = [
+            '<', '>', ':', '|', '?', '*', '#', '\\', '(', ')', '[', ']', '\t', '\r', '\n',
+        ];
         for c in &expected {
-            assert!(FORBIDDEN_CHARS.contains(c), "Missing forbidden char: {:?}", c);
+            assert!(
+                FORBIDDEN_CHARS.contains(c),
+                "Missing forbidden char: {:?}",
+                c
+            );
         }
-    }
-
-    #[test]
-    fn test_remove_forbidden_chars() {
-        assert_eq!(remove_forbidden_chars("Hello<World>"), "HelloWorld");
-        assert_eq!(remove_forbidden_chars("a<b>c:d|e?f*g#h\\i(j)k[l]m"), "abcdefghijklm");
-        assert_eq!(remove_forbidden_chars("Hello World"), "Hello World");
-        assert_eq!(remove_forbidden_chars("Hello\tWorld\nTest"), "HelloWorldTest");
     }
 
     // ========================================================================
     // Integration tests with SiteConfig
     // ========================================================================
 
-    fn make_config(path_mode: &str, fragment_mode: &str, case: &str, sep: char) -> &'static SiteConfig {
+    fn make_config(
+        path_mode: &str,
+        fragment_mode: &str,
+        case: &str,
+        sep: char,
+    ) -> &'static SiteConfig {
         let sep_str = if sep == '-' { "dash" } else { "underscore" };
         let toml = format!(
             r#"
@@ -671,18 +692,30 @@ mod tests {
     fn test_slugify_path_modes() {
         // Full mode
         let config = make_config("full", "safe", "lower", SEP_DASH);
-        assert_eq!(slugify_path("content/My Posts/Hello", config), PathBuf::from("content/my-posts/hello"));
+        assert_eq!(
+            slugify_path("content/My Posts/Hello", config),
+            PathBuf::from("content/my-posts/hello")
+        );
 
         // Safe mode
         let config = make_config("safe", "safe", "preserve", SEP_UNDERSCORE);
-        assert_eq!(slugify_path("content/My Posts/Hello", config), PathBuf::from("content/My_Posts/Hello"));
+        assert_eq!(
+            slugify_path("content/My Posts/Hello", config),
+            PathBuf::from("content/My_Posts/Hello")
+        );
 
         // Ascii mode
         let config = make_config("ascii", "safe", "lower", SEP_DASH);
-        assert_eq!(slugify_path("content/My Posts/München", config), PathBuf::from("content/my-posts/munchen"));
+        assert_eq!(
+            slugify_path("content/My Posts/München", config),
+            PathBuf::from("content/my-posts/munchen")
+        );
 
         // No mode
         let config = make_config("no", "safe", "preserve", SEP_DASH);
-        assert_eq!(slugify_path("content/My Posts/Hello", config), PathBuf::from("content/My Posts/Hello"));
+        assert_eq!(
+            slugify_path("content/My Posts/Hello", config),
+            PathBuf::from("content/My Posts/Hello")
+        );
     }
 }
