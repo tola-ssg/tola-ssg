@@ -5,7 +5,7 @@
 //! | Section     | Purpose                                      |
 //! |-------------|----------------------------------------------|
 //! | `[base]`    | Site metadata (title, author, url)           |
-//! | `[build]`   | Build paths, typst, tailwind, RSS, etc.      |
+//! | `[build]`   | Build paths, typst, tailwind, rss, etc.      |
 //! | `[serve]`   | Development server (port, interface, watch)  |
 //! | `[deploy]`  | Deployment targets (GitHub, Cloudflare)      |
 //! | `[extra]`   | User-defined custom fields                   |
@@ -49,7 +49,7 @@ pub use error::ConfigError;
 use base::BaseConfig;
 use serve::ServeConfig;
 
-use crate::cli::{Cli, Commands};
+use crate::cli::{BuildArgs, Cli, Commands};
 use anyhow::{Context, Result, bail};
 use educe::Educe;
 use serde::{Deserialize, Serialize};
@@ -60,7 +60,7 @@ use std::{
 };
 
 // ============================================================================
-// Helper Functions
+// helper functions
 // ============================================================================
 
 /// Parse a human-readable size string into bytes.
@@ -91,7 +91,7 @@ fn parse_size_string(s: &str) -> usize {
 }
 
 // ============================================================================
-// Root Configuration
+// root configuration
 // ============================================================================
 
 /// Root configuration structure representing tola.toml
@@ -176,80 +176,114 @@ impl SiteConfig {
         self.build.typst.svg.dpi / 96.0
     }
 
-    /// Update configuration with CLI arguments
+    // ========================================================================
+    // cli configuration updates
+    // ========================================================================
+
+    /// Update configuration with CLI arguments.
+    ///
+    /// Processing order:
+    /// 1. Store CLI reference
+    /// 2. Resolve root path
+    /// 3. Normalize all paths relative to root
+    /// 4. Apply command-specific options
     pub fn update_with_cli(&mut self, cli: &'static Cli) {
         self.cli = Some(cli);
 
-        // Determine the final root path based on command
-        let root = match &cli.command {
+        // 1. Resolve root path (handles Init command specially)
+        let root = self.resolve_root_path(cli);
+        self.set_root(&root);
+
+        // 2. Normalize all paths relative to root
+        self.normalize_paths(&root);
+
+        // 3. Apply command-specific options
+        self.apply_command_options(cli);
+    }
+
+    /// Resolve the root directory path from CLI arguments.
+    fn resolve_root_path(&self, cli: &Cli) -> PathBuf {
+        match &cli.command {
+            // Init with name: root/name
             Commands::Init { name: Some(name) } => {
-                let base = cli
-                    .root
-                    .as_ref()
-                    .cloned()
-                    .unwrap_or_else(|| self.get_root().to_owned());
+                let base = cli.root.clone().unwrap_or_else(|| self.get_root().to_owned());
                 base.join(name)
             }
-            _ => cli
-                .root
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| self.get_root().to_owned()),
-        };
-
-        self.set_root(&root);
-        self.update_path_with_root(&root);
-
-        self.build.typst.svg.inline_max_size = self.build.typst.svg.inline_max_size.to_uppercase();
-
-        match &cli.command {
-            Commands::Build { build_args } | Commands::Serve { build_args, .. } => {
-                Self::update_option(&mut self.build.minify, build_args.minify.as_ref());
-                Self::update_option(
-                    &mut self.build.tailwind.enable,
-                    build_args.tailwind.as_ref(),
-                );
-                Self::update_option(&mut self.build.rss.enable, build_args.rss.as_ref());
-                Self::update_option(&mut self.build.sitemap.enable, build_args.sitemap.as_ref());
-                self.build.clean = build_args.clean;
-            }
-            _ => {}
+            // Other commands: use CLI root or config root
+            _ => cli.root.clone().unwrap_or_else(|| self.get_root().to_owned()),
         }
+    }
 
+    /// Apply command-specific configuration options.
+    fn apply_command_options(&mut self, cli: &Cli) {
         match &cli.command {
-            Commands::Serve {
-                interface,
-                port,
-                watch,
-                ..
-            } => {
-                Self::update_option(&mut self.serve.interface, interface.as_ref());
-                Self::update_option(&mut self.serve.port, port.as_ref());
-                Self::update_option(&mut self.serve.watch, watch.as_ref());
-                self.base.url = Some(format!(
-                    "http://{}:{}",
-                    self.serve.interface, self.serve.port
-                ));
+            Commands::Build { build_args } => {
+                self.apply_build_args(build_args, false);
+            }
+            Commands::Serve { build_args, interface, port, watch, .. } => {
+                self.apply_build_args(build_args, true);
+                self.apply_serve_options(interface, port, watch);
             }
             Commands::Deploy { force } => {
                 Self::update_option(&mut self.deploy.force, force.as_ref());
             }
-            _ => {}
+            Commands::Init { .. } => {}
         }
     }
 
-    /// Update config option if CLI value is provided
+    /// Apply build arguments from CLI.
+    ///
+    /// `is_serve`: If true, rss/sitemap default to disabled for faster local preview.
+    fn apply_build_args(&mut self, args: &BuildArgs, is_serve: bool) {
+        Self::update_option(&mut self.build.minify, args.minify.as_ref());
+        Self::update_option(&mut self.build.tailwind.enable, args.tailwind.as_ref());
+        self.build.clean = args.clean;
+
+        if is_serve {
+            // Serve: disable rss/sitemap by default, enable only if explicitly requested
+            self.build.rss.enable = args.rss.unwrap_or(false);
+            self.build.sitemap.enable = args.sitemap.unwrap_or(false);
+        } else {
+            // Build/Deploy: respect config, override only if CLI flag provided
+            Self::update_option(&mut self.build.rss.enable, args.rss.as_ref());
+            Self::update_option(&mut self.build.sitemap.enable, args.sitemap.as_ref());
+        }
+    }
+
+    /// Apply serve-specific options.
+    fn apply_serve_options(
+        &mut self,
+        interface: &Option<String>,
+        port: &Option<u16>,
+        watch: &Option<bool>,
+    ) {
+        Self::update_option(&mut self.serve.interface, interface.as_ref());
+        Self::update_option(&mut self.serve.port, port.as_ref());
+        Self::update_option(&mut self.serve.watch, watch.as_ref());
+
+        // Set base URL for local development
+        self.base.url = Some(format!(
+            "http://{}:{}",
+            self.serve.interface, self.serve.port
+        ));
+    }
+
+    /// Update config option if CLI value is provided.
     fn update_option<T: Clone>(config_option: &mut T, cli_option: Option<&T>) {
         if let Some(option) = cli_option {
             *config_option = option.clone();
         }
     }
 
-    /// Update all paths relative to root directory and normalize to absolute paths
-    fn update_path_with_root(&mut self, root: &Path) {
+    // ========================================================================
+    // path normalization
+    // ========================================================================
+
+    /// Normalize all paths relative to root directory.
+    fn normalize_paths(&mut self, root: &Path) {
         let cli = self.get_cli();
 
-        // Apply CLI overrides first
+        // Apply CLI path overrides first
         Self::update_option(&mut self.build.content, cli.content.as_ref());
         Self::update_option(&mut self.build.assets, cli.assets.as_ref());
         Self::update_option(&mut self.build.output, cli.output.as_ref());
@@ -261,7 +295,7 @@ impl SiteConfig {
         // Normalize config path
         self.config_path = Self::normalize_path(&root.join(&cli.config));
 
-        // Normalize all directory paths
+        // Normalize build directories
         self.build.content = Self::normalize_path(&root.join(&self.build.content));
         self.build.assets = Self::normalize_path(&root.join(&self.build.assets));
         self.build.output = Self::normalize_path(&root.join(&self.build.output));
@@ -269,27 +303,35 @@ impl SiteConfig {
         self.build.utils = Self::normalize_path(&root.join(&self.build.utils));
         self.build.rss.path = self.build.output.join(&self.build.rss.path);
 
-        // Normalize tailwind input path
-        if let Some(input) = self.build.tailwind.input.as_ref() {
+        // Normalize optional paths
+        self.normalize_optional_paths(&root);
+
+        // Normalize misc settings
+        self.build.typst.svg.inline_max_size = self.build.typst.svg.inline_max_size.to_uppercase();
+    }
+
+    /// Normalize optional paths (tailwind input, deploy token).
+    fn normalize_optional_paths(&mut self, root: &Path) {
+        if let Some(input) = self.build.tailwind.input.take() {
             self.build.tailwind.input = Some(Self::normalize_path(&root.join(input)));
         }
 
-        // Normalize token path (with tilde expansion)
-        if let Some(token_path) = &self.deploy.github.token_path {
-            let expanded = shellexpand::tilde(token_path.to_str().unwrap()).into_owned();
-            let path = PathBuf::from(expanded);
-            self.deploy.github.token_path = Some(if path.is_relative() {
-                Self::normalize_path(&root.join(path))
-            } else {
-                Self::normalize_path(&path)
-            });
+        if let Some(token_path) = self.deploy.github.token_path.take() {
+            self.deploy.github.token_path = Some(Self::normalize_token_path(&token_path, root));
         }
     }
 
-    /// Normalize a path to absolute, using canonicalize if the path exists
+    /// Normalize token path with tilde expansion.
+    fn normalize_token_path(path: &Path, root: &Path) -> PathBuf {
+        let expanded = shellexpand::tilde(path.to_str().unwrap_or_default()).into_owned();
+        let path = PathBuf::from(expanded);
+        let full_path = if path.is_relative() { root.join(&path) } else { path };
+        Self::normalize_path(&full_path)
+    }
+
+    /// Normalize a path to absolute, using canonicalize if the path exists.
     fn normalize_path(path: &Path) -> PathBuf {
         path.canonicalize().unwrap_or_else(|_| {
-            // For non-existent paths, manually make them absolute
             if path.is_absolute() {
                 path.to_path_buf()
             } else {
@@ -300,105 +342,108 @@ impl SiteConfig {
         })
     }
 
-    /// Validate configuration for the current command
-    #[allow(unused)]
-    pub fn validate(&self) -> Result<()> {
-        let cli = self.get_cli();
+    // ========================================================================
+    // validation
+    // ========================================================================
 
+    /// Validate configuration for the current command.
+    pub fn validate(&self) -> Result<()> {
         if !self.config_path.exists() {
             bail!("Config file not found");
         }
+        self.validate_base()?;
+        self.validate_build()?;
+        self.validate_command_specific()?;
+        Ok(())
+    }
 
+    fn validate_base(&self) -> Result<()> {
         if self.build.rss.enable && self.base.url.is_none() {
-            bail!("[base.url] is required for RSS generation");
+            bail!("[base.url] is required for rss generation");
         }
-
-        Self::check_command_installed("[build.typst.command]", &self.build.typst.command)?;
 
         if let Some(base_url) = &self.base.url
-            && !base_url.starts_with("http")
-        {
-            bail!(ConfigError::Validation(
-                "[base.url] must start with http:// or https://".into()
-            ));
-        }
-
-        if self.build.tailwind.enable {
-            Self::check_command_installed(
-                "[build.tailwind.command]",
-                &self.build.tailwind.command,
-            )?;
-
-            match &self.build.tailwind.input {
-                None => bail!(
-                    "[build.tailwind.enable] = true requires [build.tailwind.input] to be set"
-                ),
-                Some(path) if !path.exists() => {
-                    bail!(ConfigError::Validation(
-                        "[build.tailwind.input] not found".into()
-                    ))
-                }
-                Some(path) if !path.is_file() => {
-                    bail!(ConfigError::Validation(
-                        "[build.tailwind.input] is not a file".into()
-                    ))
-                }
-                _ => {}
+            && !base_url.starts_with("http") {
+                bail!(ConfigError::Validation(
+                    "[base.url] must start with http:// or https://".into()
+                ));
             }
+        Ok(())
+    }
+
+    fn validate_build(&self) -> Result<()> {
+        Self::check_command_installed("[build.typst.command]", &self.build.typst.command)?;
+        self.validate_tailwind()?;
+        self.validate_inline_max_size()?;
+        Ok(())
+    }
+
+    fn validate_tailwind(&self) -> Result<()> {
+        if !self.build.tailwind.enable {
+            return Ok(());
         }
 
-        let valid_size_suffixes = ["B", "KB", "MB"];
-        if !valid_size_suffixes
-            .iter()
-            .any(|s| self.build.typst.svg.inline_max_size.ends_with(s))
-        {
+        Self::check_command_installed("[build.tailwind.command]", &self.build.tailwind.command)?;
+
+        match &self.build.tailwind.input {
+            None => bail!("[build.tailwind.enable] = true requires [build.tailwind.input] to be set"),
+            Some(path) if !path.exists() => {
+                bail!(ConfigError::Validation("[build.tailwind.input] not found".into()))
+            }
+            Some(path) if !path.is_file() => {
+                bail!(ConfigError::Validation("[build.tailwind.input] is not a file".into()))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn validate_inline_max_size(&self) -> Result<()> {
+        const VALID_SUFFIXES: [&str; 3] = ["B", "KB", "MB"];
+        if !VALID_SUFFIXES.iter().any(|s| self.build.typst.svg.inline_max_size.ends_with(s)) {
             bail!(ConfigError::Validation(
                 "[build.typst.svg.inline_max_size] must end with B, KB, or MB".into()
             ));
         }
-
-        match &cli.command {
-            Commands::Init { .. } if self.get_root().exists() => {
-                bail!("Path already exists");
-            }
-            Commands::Deploy { .. } => {
-                if let Some(path) = &self.deploy.github.token_path {
-                    if !path.exists() {
-                        bail!(ConfigError::Validation(
-                            "[deploy.github.token_path] not found".into()
-                        ));
-                    }
-                    if !path.is_file() {
-                        bail!(ConfigError::Validation(
-                            "[deploy.github.token_path] is not a file".into()
-                        ));
-                    }
-                }
-            }
-            _ => {}
-        }
-
         Ok(())
     }
 
-    /// Check if a command is installed and available
+    fn validate_command_specific(&self) -> Result<()> {
+        match &self.get_cli().command {
+            Commands::Init { .. } if self.get_root().exists() => {
+                bail!("Path already exists");
+            }
+            Commands::Deploy { .. } => self.validate_deploy()?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn validate_deploy(&self) -> Result<()> {
+        if let Some(path) = &self.deploy.github.token_path {
+            if !path.exists() {
+                bail!(ConfigError::Validation("[deploy.github.token_path] not found".into()));
+            }
+            if !path.is_file() {
+                bail!(ConfigError::Validation("[deploy.github.token_path] is not a file".into()));
+            }
+        }
+        Ok(())
+    }
+
+    /// Check if a command is installed and available.
     fn check_command_installed(field: &str, command: &[String]) -> Result<()> {
         if command.is_empty() {
-            bail!(ConfigError::Validation(format!(
-                "{field} must have at least one element"
-            )));
+            bail!(ConfigError::Validation(format!("{field} must have at least one element")));
         }
 
         let cmd = &command[0];
-        which::which(cmd)
-            .with_context(|| format!("`{cmd}` not found. Please install it first."))?;
-
+        which::which(cmd).with_context(|| format!("`{cmd}` not found. Please install it first."))?;
         Ok(())
     }
 }
 
 // ============================================================================
-// Tests
+// tests
 // ============================================================================
 
 #[cfg(test)]

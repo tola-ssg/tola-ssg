@@ -124,18 +124,18 @@ pub fn url_from_output_path(path: &Path, config: &SiteConfig) -> Result<String> 
 
 /// Primary metadata structure for a content page.
 ///
-/// Contains all path and URL information needed by build, RSS and sitemap.
+/// Contains all path and URL information needed by build, rss and sitemap.
 /// This is the **single source of truth** for page paths.
 ///
 /// # Fields
 ///
 /// | Field | Example | Used By |
 /// |-------|---------|---------|
-/// | `paths.source` | `content/posts/hello.typ` | build, RSS query |
+/// | `paths.source` | `content/posts/hello.typ` | build, rss query |
 /// | `paths.html` | `public/posts/hello/index.html` | build output |
 /// | `paths.relative` | `posts/hello` | logging |
 /// | `paths.url_path` | `/posts/hello/` | URL construction |
-/// | `paths.full_url` | `https://example.com/posts/hello/` | RSS, sitemap |
+/// | `paths.full_url` | `https://example.com/posts/hello/` | rss, sitemap |
 /// | `lastmod` | `SystemTime` | sitemap |
 #[derive(Debug, Clone)]
 pub struct PageMeta {

@@ -1,6 +1,6 @@
-//! RSS feed generation.
+//! rss feed generation.
 //!
-//! Parses post metadata and generates RSS/Atom feeds.
+//! Parses post metadata and generates rss/atom feeds.
 
 use crate::{
     config::SiteConfig,
@@ -28,10 +28,10 @@ const META_TAG_NAME: &str = "<tola-meta>";
 
 
 // ============================================================================
-// RSS Feed Types
+// rss feed types
 // ============================================================================
 
-/// RSS feed builder
+/// rss feed builder
 pub struct RssFeed {
     title: String,
     description: String,
@@ -54,7 +54,7 @@ struct PostMeta {
 }
 
 impl PostMeta {
-    /// Convert to RSS item, returns None if required fields are missing
+    /// Convert to rss item, returns None if required fields are missing
     fn into_rss_item(self) -> Option<rss::Item> {
         let title = self.title?;
         let link = self.link.clone()?;
@@ -79,7 +79,7 @@ impl PostMeta {
 // Public API
 // ============================================================================
 
-/// Build RSS feed if enabled in config.
+/// Build rss feed if enabled in config.
 ///
 /// Uses pre-collected page metadata for URLs, but still queries typst
 /// for title/summary/date since those require parsing the source files.
@@ -95,7 +95,7 @@ pub fn build_rss(config: &SiteConfig, pages: &Pages) -> Result<()> {
 // ============================================================================
 
 impl RssFeed {
-    /// Build RSS feed using pre-collected page metadata.
+    /// Build rss feed using pre-collected page metadata.
     ///
     /// Uses `Pages` for URL information, but queries typst for
     /// title/summary/date metadata in parallel.
@@ -119,7 +119,7 @@ impl RssFeed {
         })
     }
 
-    /// Generate RSS XML string
+    /// Generate rss xml string
     fn into_xml(self) -> Result<String> {
         let items: Vec<_> = self
             .posts
@@ -138,11 +138,11 @@ impl RssFeed {
 
         channel
             .validate()
-            .map_err(|e| anyhow!("RSS validation failed: {e}"))?;
+            .map_err(|e| anyhow!("rss validation failed: {e}"))?;
         Ok(channel.to_string())
     }
 
-    /// Write RSS feed to file
+    /// Write rss feed to file
     pub fn write(self, config: &SiteConfig) -> Result<()> {
         let xml = self.into_xml()?;
         let rss_path = &config.build.rss.path;
@@ -216,7 +216,7 @@ fn parse_typst_element(content: &str) -> Result<TypstElement> {
     serde_json::from_str(content).map_err(Into::into)
 }
 
-/// Normalize author field to RSS format: "email@example.com (Name)"
+/// Normalize author field to rss format: "email@example.com (Name)"
 ///
 /// Priority:
 /// 1. Post meta author if already in valid format

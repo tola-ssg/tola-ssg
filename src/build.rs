@@ -25,7 +25,7 @@ use std::{
 
 /// Build the entire site, processing content and assets in parallel.
 ///
-/// Returns the collected page metadata for RSS/sitemap generation.
+/// Returns the collected page metadata for rss/sitemap generation.
 /// If `config.build.clean` is true, clears the entire output directory first.
 pub fn build_site(config: &'static SiteConfig) -> Result<(ThreadSafeRepository, Pages)> {
     let output = &config.build.output;
@@ -114,8 +114,12 @@ pub fn build_site(config: &'static SiteConfig) -> Result<(ThreadSafeRepository, 
     posts_result?;
     assets_result?;
 
-    // Collect page metadata for RSS/sitemap (reuse already collected .typ files)
-    let pages = collect_pages(config, &typ_files);
+    // Collect page metadata only when rss or sitemap is enabled
+    let pages = if config.build.rss.enable || config.build.sitemap.enable {
+        collect_pages(config, &typ_files)
+    } else {
+        Pages::default()
+    };
 
     log_build_result(output)?;
 

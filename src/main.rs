@@ -73,14 +73,14 @@ fn load_config(cli: &'static Cli) -> Result<SiteConfig> {
 
 /// Build site and optionally generate rss/sitemap in parallel.
 ///
-/// RSS generation is controlled by `config.build.rss.enable`.
+/// rss generation is controlled by `config.build.rss.enable`.
 /// Sitemap generation is controlled by `config.build.sitemap.enable`.
 /// Output cleanup is controlled by `config.build.clean`.
 fn build_all(config: &'static SiteConfig) -> Result<ThreadSafeRepository> {
     // Build site first, collecting page metadata
     let (repo, pages) = build_site(config)?;
 
-    // Generate RSS and sitemap in parallel using collected pages
+    // Generate rss and sitemap in parallel using collected pages
     let (rss_result, sitemap_result) = rayon::join(
         || build_rss(config, &pages),
         || build_sitemap(config, &pages),

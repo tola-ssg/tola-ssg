@@ -10,7 +10,7 @@ pub fn r#true() -> bool {
     true
 }
 
-#[allow(unused)]
+
 pub fn r#false() -> bool {
     false
 }

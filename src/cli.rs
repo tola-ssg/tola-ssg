@@ -49,7 +49,7 @@ pub struct BuildArgs {
     #[arg(short, long, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true", require_equals = false)]
     pub tailwind: Option<bool>,
 
-    /// enable RSS feed generation
+    /// enable rss feed generation
     #[arg(long, action = clap::ArgAction::Set, num_args = 0..=1, default_missing_value = "true", require_equals = false)]
     pub rss: Option<bool>,
 
