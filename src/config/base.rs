@@ -23,12 +23,12 @@ pub struct BaseConfig {
     /// Site title displayed in browser tab and headers.
     pub title: String,
 
-    /// Author name for RSS feed and meta tags.
+    /// Author name for rss feed and meta tags.
     #[serde(default = "defaults::base::author")]
     #[educe(Default = defaults::base::author())]
     pub author: String,
 
-    /// Author email for RSS feed.
+    /// Author email for rss feed.
     #[serde(default = "defaults::base::email")]
     #[educe(Default = defaults::base::email())]
     pub email: String,
@@ -36,7 +36,7 @@ pub struct BaseConfig {
     /// Site description for SEO meta tags.
     pub description: String,
 
-    /// Base URL for absolute links in RSS/sitemap.
+    /// Base URL for absolute links in rss/sitemap.
     /// Required when `[build.rss].enable = true`.
     #[serde(default = "defaults::base::url")]
     #[educe(Default = defaults::base::url())]

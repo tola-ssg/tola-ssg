@@ -178,11 +178,9 @@ pub struct BuildConfig {
 
 /// `[build.rss]` section - RSS feed generation configuration.
 ///
-/// RSS generation is controlled by two factors:
-/// - `enable`: this config option (user-controlled)
-/// - Mode: `build`/`deploy` generate RSS, `serve` skips it for faster local preview
-///
-/// See `build_all` in `main.rs` and `build_rss` in `utils/rss.rs` for implementation.
+/// RSS generation behavior:
+/// - `build`/`deploy`: respects the `enable` config option
+/// - `serve`: disabled by default for faster local preview, use `--rss` to enable
 #[derive(Debug, Clone, Educe, Serialize, Deserialize)]
 #[educe(Default)]
 #[serde(deny_unknown_fields)]
@@ -201,6 +199,10 @@ pub struct RssConfig {
 /// `[build.sitemap]` section - Sitemap generation configuration.
 ///
 /// Generates a sitemap.xml file listing all pages for search engine indexing.
+///
+/// Sitemap generation behavior:
+/// - `build`/`deploy`: respects the `enable` config option
+/// - `serve`: disabled by default for faster local preview, use `--sitemap` to enable
 #[derive(Debug, Clone, Educe, Serialize, Deserialize)]
 #[educe(Default)]
 #[serde(deny_unknown_fields)]
