@@ -63,16 +63,6 @@ impl FileCategory {
         }
     }
 
-    /// Get a human-readable description for logging
-    pub fn description(self, path: &Path) -> String {
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("unknown");
-
-        format!("{} ({file_name})", self.name())
-    }
-
     /// Get the directory path for this category from config
     pub fn path(self, config: &SiteConfig) -> Option<PathBuf> {
         match self {
@@ -207,26 +197,6 @@ mod tests {
         assert_eq!(FileCategory::Template.name(), "templates");
         assert_eq!(FileCategory::Utils.name(), "utils");
         assert_eq!(FileCategory::Unknown.name(), "unknown");
-    }
-
-    #[test]
-    fn test_category_description() {
-        let path = Path::new("/some/path/example.typ");
-        assert_eq!(
-            FileCategory::Content.description(path),
-            "content (example.typ)"
-        );
-        assert_eq!(
-            FileCategory::Template.description(path),
-            "templates (example.typ)"
-        );
-    }
-
-    #[test]
-    fn test_category_description_no_filename() {
-        let path = Path::new("/");
-        // Root path has no file_name, should fallback to "unknown"
-        assert!(FileCategory::Content.description(path).contains("unknown"));
     }
 
     #[test]

@@ -148,25 +148,7 @@ pub fn compile_to_html(path: &Path, root: &Path) -> anyhow::Result<String> {
     #[cfg(test)]
     let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    // Reset access flags to enable fingerprint checking for file changes
-    file::reset_access_flags();
-
-    let world = SystemWorld::new(path, root)?;
-    let result = typst::compile(&world);
-
-    // Check for errors in warnings
-    if diagnostic::has_errors(&result.warnings) {
-        let formatted = diagnostic::format_diagnostics(&world, &result.warnings);
-        anyhow::bail!("Typst compilation warnings:\n{formatted}");
-    }
-
-    // Extract document or format errors
-    let document = result.output.map_err(|errors| {
-        let all_diags: Vec<_> = errors.iter().chain(&result.warnings).cloned().collect();
-        let filtered = diagnostic::filter_html_warnings(&all_diags);
-        let formatted = diagnostic::format_diagnostics(&world, &filtered);
-        anyhow::anyhow!("Typst compilation failed:\n{formatted}")
-    })?;
+    let (_world, document) = compile_base(path, root)?;
 
     // Export to HTML
     typst_html::html(&document)
@@ -198,6 +180,30 @@ pub fn compile_meta(
     #[cfg(test)]
     let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
+    let (_world, document) = compile_base(path, root)?;
+
+    // Export to HTML
+    let html = typst_html::html(&document)
+        .map_err(|e| anyhow::anyhow!("HTML export failed: {e:?}"))?
+        .into_bytes();
+
+    // Try to extract metadata (optional - don't fail if not found)
+    let metadata = extract_meta(&document, label_name);
+
+    Ok(CompileResult { html, metadata })
+}
+
+/// Common compilation logic for all entry points.
+///
+/// Handles:
+/// - Resetting file access flags (for incremental check)
+/// - Creating SystemWorld
+/// - Running compilation
+/// - Formatting diagnostics (errors/warnings)
+fn compile_base(
+    path: &Path,
+    root: &Path,
+) -> anyhow::Result<(SystemWorld, typst_html::HtmlDocument)> {
     // Reset access flags to enable fingerprint checking for file changes
     file::reset_access_flags();
 
@@ -218,15 +224,7 @@ pub fn compile_meta(
         anyhow::anyhow!("Typst compilation failed:\n{formatted}")
     })?;
 
-    // Export to HTML
-    let html = typst_html::html(&document)
-        .map_err(|e| anyhow::anyhow!("HTML export failed: {e:?}"))?
-        .into_bytes();
-
-    // Try to extract metadata (optional - don't fail if not found)
-    let metadata = extract_meta(&document, label_name);
-
-    Ok(CompileResult { html, metadata })
+    Ok((world, document))
 }
 
 /// Extract metadata from a compiled document by label name.
@@ -262,18 +260,7 @@ pub fn query_meta(path: &Path, root: &Path, label_name: &str) -> anyhow::Result<
     #[cfg(test)]
     let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    // Reset access flags to enable fingerprint checking for file changes
-    file::reset_access_flags();
-
-    let world = SystemWorld::new(path, root)?;
-    let result = typst::compile::<typst_html::HtmlDocument>(&world);
-
-    // Extract document (ignore warnings for query - they were shown during build)
-    let document = result.output.map_err(|errors| {
-        let all_diags: Vec<_> = errors.iter().cloned().collect();
-        let formatted = diagnostic::format_diagnostics(&world, &all_diags);
-        anyhow::anyhow!("Typst compilation failed:\n{formatted}")
-    })?;
+    let (_world, document) = compile_base(path, root)?;
 
     // Create label selector
     let label = Label::new(PicoStr::intern(label_name))
