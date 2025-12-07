@@ -1,20 +1,17 @@
 use crate::utils::category::{FileCategory, categorize_path, normalize_path};
 use crate::compiler::pages::process_page;
 use crate::compiler::assets::{process_asset, rebuild_tailwind};
-use crate::{config::SiteConfig, log};
+use crate::config::SiteConfig;
 use anyhow::{Result, bail};
 use rayon::prelude::*;
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    thread,
-    time::Duration,
-};
+use std::path::PathBuf;
 
 /// Process all watched file changes.
 ///
 /// Categorizes files by type (content vs asset) and processes them accordingly.
 /// Content files are compiled with Typst, assets are copied to output directory.
+///
+/// Returns an error if any file processing fails, with details about which files failed.
 pub fn process_watched_files(files: &[PathBuf], config: &'static SiteConfig) -> Result<()> {
     let mut content_files = Vec::new();
     let mut asset_files = Vec::new();
@@ -30,20 +27,25 @@ pub fn process_watched_files(files: &[PathBuf], config: &'static SiteConfig) -> 
         }
     }
 
-    // Process content files (.typ)
-    if !content_files.is_empty() {
-        content_files.par_iter().for_each(|path| {
-            let path = normalize_path(path);
-            if let Err(e) = process_page(&path, config, false, None, true) {
-                log!("watch"; "{e}");
-            }
-        });
+    // Collect errors from content file processing
+    let content_errors: Vec<_> = if !content_files.is_empty() {
+        let errors: Vec<_> = content_files
+            .par_iter()
+            .filter_map(|path| {
+                let path = normalize_path(path);
+                process_page(&path, config, false, None, true).err()
+            })
+            .collect();
 
         // Rebuild tailwind CSS if enabled (content may have changed classes)
         if config.build.tailwind.enable {
             rebuild_tailwind(config)?;
         }
-    }
+
+        errors
+    } else {
+        Vec::new()
+    };
 
     // Process asset files
     if !asset_files.is_empty() {
@@ -52,28 +54,20 @@ pub fn process_watched_files(files: &[PathBuf], config: &'static SiteConfig) -> 
             .filter(|path| path.exists())
             .try_for_each(|path| {
                 let path = normalize_path(path);
-                wait_until_stable(&path, 5)?;
                 process_asset(&path, config, true, true)
             })?;
     }
 
-    Ok(())
-}
-
-/// Wait for file to stop being written to.
-fn wait_until_stable(path: &Path, max_retries: usize) -> Result<()> {
-    const POLL_INTERVAL: Duration = Duration::from_millis(50);
-
-    let mut last_size = fs::metadata(path)?.len();
-
-    for _ in 0..max_retries {
-        thread::sleep(POLL_INTERVAL);
-        let current_size = fs::metadata(path)?.len();
-        if current_size == last_size {
-            return Ok(());
-        }
-        last_size = current_size;
+    // Report content errors if any
+    if !content_errors.is_empty() {
+        // Join all error messages for comprehensive reporting
+        let error_msg = content_errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        bail!("{error_msg}");
     }
 
-    bail!("File did not stabilize after {max_retries} retries")
+    Ok(())
 }

@@ -103,6 +103,11 @@ pub struct SystemWorld {
     now: LazyNow,
 }
 
+/// Normalize a path by canonicalizing it if possible, or returning it as-is.
+fn normalize_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
 impl SystemWorld {
     /// Create a new world for compiling a specific file.
     ///
@@ -123,15 +128,11 @@ impl SystemWorld {
     /// Currently infallible, but returns `Result` for future compatibility.
     pub fn new(entry_file: &Path, root_dir: &Path) -> Result<Self, anyhow::Error> {
         // Canonicalize root path for consistent path resolution
-        let root = root_dir
-            .canonicalize()
-            .unwrap_or_else(|_| root_dir.to_path_buf());
+        let root = normalize_path(root_dir);
 
         // Resolve the virtual path of the main file within the project root.
         // Virtual paths are root-relative and use forward slashes.
-        let entry_abs = entry_file
-            .canonicalize()
-            .unwrap_or_else(|_| entry_file.to_path_buf());
+        let entry_abs = normalize_path(entry_file);
         let virtual_path = VirtualPath::within_root(&entry_abs, &root)
             .unwrap_or_else(|| VirtualPath::new(entry_file.file_name().unwrap()));
         let main = FileId::new(None, virtual_path);

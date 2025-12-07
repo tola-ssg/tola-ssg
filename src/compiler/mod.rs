@@ -12,7 +12,7 @@ use walkdir::WalkDir;
 // ============================================================================
 
 pub use assets::process_asset;
-pub use assets::process_relative_asset;
+pub use assets::process_rel_asset;
 pub use pages::collect_pages;
 pub use pages::compile_pages;
 pub use watch::process_watched_files;

@@ -52,7 +52,7 @@ pub fn process_asset(
 }
 
 /// Process an asset file from the content directory (non-.typ files).
-pub fn process_relative_asset(
+pub fn process_rel_asset(
     path: &Path,
     config: &SiteConfig,
     clean: bool,

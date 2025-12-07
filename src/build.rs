@@ -21,7 +21,7 @@
 //! ```
 
 use crate::{
-    compiler::{collect_all_files, collect_pages, compile_pages, process_asset, process_relative_asset},
+    compiler::{collect_all_files, collect_pages, compile_pages, process_asset, process_rel_asset},
     compiler::meta::Pages,
     config::SiteConfig,
     log,
@@ -120,7 +120,7 @@ pub fn build_site(config: &'static SiteConfig) -> Result<(ThreadSafeRepository, 
                     if has_error.load(Ordering::Relaxed) {
                         return Err(anyhow!("Aborted"));
                     }
-                    if let Err(e) = process_relative_asset(path, config, clean, false) {
+                    if let Err(e) = process_rel_asset(path, config, clean, false) {
                         if !has_error.swap(true, Ordering::Relaxed) {
                             log!("error"; "{}: {:#}", path.display(), e);
                         }
