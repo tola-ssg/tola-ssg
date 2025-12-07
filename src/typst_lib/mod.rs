@@ -26,45 +26,26 @@
 //!
 //! # Module Structure
 //!
-//! - [`font`] - Global shared font management with `OnceLock`
-//! - [`package`] - Global shared package storage with `LazyLock`
-//! - [`library`] - Global shared Typst standard library with `LazyLock`
-//! - [`file`] - **Global** file cache with fingerprint-based invalidation
+//! - [`font`] - Global shared font management
+//! - [`package`] - Global shared package storage
+//! - [`library`] - Global shared Typst standard library
+//! - [`file`] - Global file cache with fingerprint-based invalidation
 //! - [`world`] - `SystemWorld` implementation of the `World` trait
-//! - [`diagnostic`] - Human-readable diagnostic formatting with filtering
-//!
-//! # Performance Optimizations
-//!
-//! 1. **Global Shared Fonts** - Font search is expensive (~100ms+). We do it once
-//!    at startup and share across all compilations via `OnceLock`.
-//!
-//! 2. **Global Shared PackageStorage** - Package downloads and caching are shared
-//!    to avoid redundant network requests.
-//!
-//! 3. **Global Shared Library** - Typst's standard library is created once with
-//!    HTML feature enabled.
-//!
-//! 4. **Global File Cache** - Template files, common imports, etc. are cached
-//!    globally and reused across ALL file compilations. Only changed files
-//!    are re-read (fingerprint-based invalidation).
+//! - [`diagnostic`] - Human-readable diagnostic formatting
 //!
 //! # Usage Example
 //!
 //! ```ignore
-//! use std::path::Path;
 //! use tola::typst_lib;
 //!
 //! // Pre-warm at startup (optional but recommended)
 //! typst_lib::warmup_with_root(Path::new("/project/root"));
 //!
 //! // Compile files - template.typ is cached after first use!
-//! let html1 = typst_lib::compile_to_html(
-//!     Path::new("/project/content/page1.typ"),
+//! let result = typst_lib::compile_meta(
+//!     Path::new("/project/content/page.typ"),
 //!     Path::new("/project"),
-//! )?;
-//! let html2 = typst_lib::compile_to_html(
-//!     Path::new("/project/content/page2.typ"),  // Reuses cached template!
-//!     Path::new("/project"),
+//!     "tola-meta",
 //! )?;
 //! ```
 
@@ -84,18 +65,22 @@ use typst::Document;
 
 pub use world::SystemWorld;
 
+// =============================================================================
+// Types
+// =============================================================================
+
 /// Compilation result containing HTML output and optional metadata.
-///
-/// This struct allows a single compilation to produce both the HTML output
-/// and any metadata (from `<tola-meta>` labels), avoiding duplicate compilations.
 #[derive(Debug)]
 pub struct CompileResult {
     /// The compiled HTML content as bytes.
     pub html: Vec<u8>,
-    /// Optional metadata value from `<tola-meta>` label.
-    /// None if the label doesn't exist in the document.
+    /// Optional metadata value (None if label not found).
     pub metadata: Option<serde_json::Value>,
 }
+
+// =============================================================================
+// Test Synchronization
+// =============================================================================
 
 /// Test-only mutex to serialize typst compilations.
 ///
@@ -104,10 +89,28 @@ pub struct CompileResult {
 #[cfg(test)]
 static COMPILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Dummy guard for non-test mode (zero-cost).
+#[cfg(not(test))]
+struct DummyGuard;
+
+/// Acquire compilation lock in test mode, no-op in production.
+#[cfg(test)]
+fn acquire_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(not(test))]
+fn acquire_test_lock() -> DummyGuard {
+    DummyGuard
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
 /// Pre-warm global resources (fonts, library, package storage).
 ///
-/// Call this once at startup to avoid lazy initialization during compilation.
-/// This moves the ~100ms font loading to a predictable point.
+/// Call once at startup to avoid lazy initialization during compilation.
 /// Pass the project root to include custom fonts from the project directory.
 pub fn warmup_with_root(root: &Path) {
     let _ = font::get_fonts(Some(root));
@@ -118,93 +121,54 @@ pub fn warmup_with_root(root: &Path) {
 
 /// Compile a Typst file to HTML string.
 ///
-/// This is the main entry point. It creates a lightweight `SystemWorld` that
-/// references globally shared fonts/packages/library/file-cache.
-///
 /// # Arguments
 ///
 /// * `path` - Path to the `.typ` file to compile
 /// * `root` - Project root directory for resolving imports
-///
-/// # Returns
-///
-/// The compiled HTML as a string, or an error if compilation fails.
-///
-/// # Errors
-///
-/// Returns an error if:
-/// - The file cannot be read
-/// - Typst compilation fails (syntax errors, missing imports, etc.)
-/// - HTML export fails
-///
-/// # Diagnostics
-///
-/// When compilation fails, the error message includes human-readable diagnostic
-/// information with file paths, line numbers, and hints. Known HTML export
-/// development warnings are automatically filtered out.
-#[allow(dead_code)] // Used by tests
+#[allow(dead_code)]
 pub fn compile_to_html(path: &Path, root: &Path) -> anyhow::Result<String> {
-    // Serialize compilations in tests to avoid comemo race conditions
-    #[cfg(test)]
-    let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
+    let _guard = acquire_test_lock();
     let (_world, document) = compile_base(path, root)?;
 
-    // Export to HTML
-    typst_html::html(&document)
-        .map_err(|e| anyhow::anyhow!("HTML export failed: {e:?}"))
+    typst_html::html(&document).map_err(|e| anyhow::anyhow!("HTML export failed: {e:?}"))
 }
 
-/// Compile a Typst file and extract metadata in a single compilation pass.
+/// Compile a Typst file and extract metadata in a single pass.
 ///
-/// This is the **recommended** entry point for building sites, as it avoids
-/// compiling the same file twice (once for HTML, once for metadata query).
+/// This is the **recommended** entry point for building sites, avoiding
+/// duplicate compilations for HTML and metadata.
 ///
 /// # Arguments
 ///
 /// * `path` - Path to the `.typ` file to compile
 /// * `root` - Project root directory for resolving imports
 /// * `label_name` - The label to query for metadata (e.g., "tola-meta")
-///
-/// # Returns
-///
-/// A `CompileResult` containing:
-/// - `html`: The compiled HTML as bytes
-/// - `metadata`: Optional metadata value (None if label not found)
 pub fn compile_meta(
     path: &Path,
     root: &Path,
     label_name: &str,
 ) -> anyhow::Result<CompileResult> {
-    // Serialize compilations in tests to avoid comemo race conditions
-    #[cfg(test)]
-    let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
+    let _guard = acquire_test_lock();
     let (_world, document) = compile_base(path, root)?;
 
-    // Export to HTML
     let html = typst_html::html(&document)
         .map_err(|e| anyhow::anyhow!("HTML export failed: {e:?}"))?
         .into_bytes();
 
-    // Try to extract metadata (optional - don't fail if not found)
     let metadata = extract_meta(&document, label_name);
 
     Ok(CompileResult { html, metadata })
 }
 
-/// Common compilation logic for all entry points.
-///
-/// Handles:
-/// - Resetting file access flags (for incremental check)
-/// - Creating SystemWorld
-/// - Running compilation
-/// - Formatting diagnostics (errors/warnings)
+// =============================================================================
+// Internal Helpers
+// =============================================================================
+
+/// Core compilation logic shared by all entry points.
 fn compile_base(
     path: &Path,
     root: &Path,
 ) -> anyhow::Result<(SystemWorld, typst_html::HtmlDocument)> {
-    // Reset access flags to enable fingerprint checking for file changes
     file::reset_access_flags();
 
     let world = SystemWorld::new(path, root)?;
@@ -230,10 +194,8 @@ fn compile_base(
 /// Extract metadata from a compiled document by label name.
 fn extract_meta(document: &typst_html::HtmlDocument, label_name: &str) -> Option<serde_json::Value> {
     let label = Label::new(PicoStr::intern(label_name))?;
-    let selector = Selector::Label(label);
-
     let introspector = document.introspector();
-    let elem = introspector.query_unique(&selector).ok()?;
+    let elem = introspector.query_unique(&Selector::Label(label)).ok()?;
 
     elem.to_packed::<MetadataElem>()
         .and_then(|meta| serde_json::to_value(&meta.value).ok())
@@ -241,39 +203,20 @@ fn extract_meta(document: &typst_html::HtmlDocument, label_name: &str) -> Option
 
 /// Query metadata from a Typst file by label name.
 ///
-/// This is equivalent to `typst query <file> "<label>" --field value --one`.
-/// It compiles the document and queries for a metadata element with the given label,
-/// returning its value as a JSON-serializable Value.
-///
-/// # Arguments
-///
-/// * `path` - Path to the `.typ` file to query
-/// * `root` - Project root directory for resolving imports
-/// * `label_name` - The label to query for (e.g., "tola-meta" for `<tola-meta>`)
-///
-/// # Returns
-///
-/// The metadata value if found, or an error if compilation fails or label not found.
-#[allow(dead_code)] // Used by tests
+/// Equivalent to `typst query <file> "<label>" --field value --one`.
+#[allow(dead_code)]
 pub fn query_meta(path: &Path, root: &Path, label_name: &str) -> anyhow::Result<Value> {
-    // Serialize compilations in tests to avoid comemo race conditions
-    #[cfg(test)]
-    let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
+    let _guard = acquire_test_lock();
     let (_world, document) = compile_base(path, root)?;
 
-    // Create label selector
     let label = Label::new(PicoStr::intern(label_name))
         .ok_or_else(|| anyhow::anyhow!("Invalid label name: {label_name}"))?;
-    let selector = Selector::Label(label);
 
-    // Query the introspector
     let introspector = document.introspector();
     let elem = introspector
-        .query_unique(&selector)
+        .query_unique(&Selector::Label(label))
         .map_err(|e| anyhow::anyhow!("Query failed: {e}"))?;
 
-    // Extract value from metadata element
     elem.to_packed::<MetadataElem>()
         .map(|meta| meta.value.clone())
         .ok_or_else(|| anyhow::anyhow!("Element is not a metadata element"))
