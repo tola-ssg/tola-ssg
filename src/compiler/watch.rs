@@ -199,8 +199,8 @@ fn report_errors(errors: Vec<anyhow::Error>) -> Result<()> {
 
     let mut seen = rustc_hash::FxHashSet::default();
     let unique: Vec<_> = errors
-        .iter()
-        .map(ToString::to_string)
+        .into_iter()
+        .map(|e| e.to_string())
         .filter(|e| seen.insert(e.clone()))
         .collect();
 

@@ -186,8 +186,8 @@ pub struct BuildConfig {
 #[serde(deny_unknown_fields)]
 pub struct RssConfig {
     /// Enable RSS feed generation (only effective in build/deploy mode).
-    #[serde(default = "defaults::r#true")]
-    #[educe(Default = defaults::r#true())]
+    #[serde(default = "defaults::r#false")]
+    #[educe(Default = defaults::r#false())]
     pub enable: bool,
 
     /// Output path for RSS feed file.
@@ -208,8 +208,8 @@ pub struct RssConfig {
 #[serde(deny_unknown_fields)]
 pub struct SitemapConfig {
     /// Enable sitemap generation.
-    #[serde(default = "defaults::r#true")]
-    #[educe(Default = defaults::r#true())]
+    #[serde(default = "defaults::r#false")]
+    #[educe(Default = defaults::r#false())]
     pub enable: bool,
 
     /// Output path for sitemap file.
@@ -818,7 +818,7 @@ mod tests {
             description = "Test"
         "#;
         let config: SiteConfig = toml::from_str(config).unwrap();
-        assert!(config.build.rss.enable); // RSS enabled by default
+        assert!(!config.build.rss.enable); // RSS disabled by default (requires base.url)
         assert_eq!(config.build.rss.path, PathBuf::from("feed.xml"));
     }
 

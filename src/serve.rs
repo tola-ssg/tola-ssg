@@ -226,6 +226,7 @@ fn guess_content_type(path: &Path) -> &'static str {
 /// Generate HTML directory listing for browsing.
 ///
 /// Features:
+/// - Only shows directories and `.html` files
 /// - Filters out hidden files (starting with '.')
 /// - Shows folder/file icons
 /// - Provides parent directory navigation
@@ -234,8 +235,17 @@ fn generate_directory_listing(dir_path: &PathBuf, request_path: &str) -> std::io
     let entries: Vec<_> = fs::read_dir(dir_path)?
         .filter_map(Result::ok)
         .filter(|entry| {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+
             // Filter out hidden files (starting with '.')
-            !entry.file_name().to_string_lossy().starts_with('.')
+            let is_hidden = name_str.starts_with('.');
+
+            // Allow directories
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+
+            // Only show .html files, filter out feed.xml, sitemap.xml, etc.
+            !is_hidden && (is_dir || name_str.ends_with(".html"))
         })
         .map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
