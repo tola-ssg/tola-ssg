@@ -24,6 +24,7 @@ use std::io::{self, Read};
 use std::mem;
 use std::path::Path;
 use std::sync::LazyLock;
+use std::cell::RefCell;
 
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
@@ -65,8 +66,8 @@ pub static GLOBAL_FILE_CACHE: LazyLock<RwLock<FxHashMap<FileId, FileSlot>>> =
 thread_local! {
     /// Thread-local set of accessed file IDs for the current compilation.
     /// This avoids race conditions when compiling files in parallel.
-    static ACCESSED_FILES: std::cell::RefCell<rustc_hash::FxHashSet<FileId>> =
-        std::cell::RefCell::new(rustc_hash::FxHashSet::default());
+    static ACCESSED_FILES: RefCell<rustc_hash::FxHashSet<FileId>> =
+        RefCell::new(rustc_hash::FxHashSet::default());
 }
 
 /// Clear the thread-local accessed files set and reset global cache access flags.

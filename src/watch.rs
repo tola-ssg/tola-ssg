@@ -37,8 +37,8 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
+use rustc_hash::FxHashSet;
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -100,7 +100,7 @@ fn log_build_error(kind: &str, trigger: &str, err: &anyhow::Error) {
 
 /// Batches rapid file events with debouncing and rebuild cooldown.
 struct Debouncer {
-    pending: HashMap<String, PathBuf>,
+    pending: FxHashSet<PathBuf>,
     last_event: Option<Instant>,
     last_rebuild: Option<Instant>,
 }
@@ -108,7 +108,7 @@ struct Debouncer {
 impl Debouncer {
     fn new() -> Self {
         Self {
-            pending: HashMap::new(),
+            pending: FxHashSet::default(),
             last_event: None,
             last_rebuild: None,
         }
@@ -122,7 +122,7 @@ impl Debouncer {
     fn add(&mut self, event: Event) {
         for path in event.paths {
             if !is_temp_file(&path) {
-                self.pending.insert(path.to_string_lossy().into(), path);
+                self.pending.insert(path);
             }
         }
         self.last_event = Some(Instant::now());
@@ -137,7 +137,7 @@ impl Debouncer {
 
     fn take(&mut self) -> Vec<PathBuf> {
         self.last_event = None;
-        self.pending.drain().map(|(_, p)| p).collect()
+        self.pending.drain().collect()
     }
 
     fn mark_rebuild(&mut self) {
@@ -210,7 +210,7 @@ fn handle_changes(paths: &[PathBuf], config: &'static SiteConfig) -> bool {
     // Template/utils changes: query dependency graph for precise rebuild
     // Only falls back to full rebuild when no cached dependencies exist
     if !dependency_triggers.is_empty() {
-        let affected = collect_affected_content(&dependency_triggers, config);
+        let affected = collect_affected_content(&dependency_triggers);
 
         if affected.is_empty() {
             // No known dependents - fall back to full rebuild
@@ -254,19 +254,18 @@ fn handle_changes(paths: &[PathBuf], config: &'static SiteConfig) -> bool {
 }
 
 /// Collect all content files affected by template/utils changes.
-fn collect_affected_content(changed_files: &[&PathBuf], config: &SiteConfig) -> Vec<PathBuf> {
+///
+/// Note: All entries in the dependency graph's reverse map are content files
+/// (only content files call `record_dependencies`), so no category check needed.
+fn collect_affected_content(changed_files: &[&PathBuf]) -> Vec<PathBuf> {
     use crate::compiler::deps::DEPENDENCY_GRAPH;
 
     let graph = DEPENDENCY_GRAPH.read();
-    let mut affected = rustc_hash::FxHashSet::default();
+    let mut affected = FxHashSet::default();
 
     for path in changed_files {
         if let Some(dependents) = graph.get_dependents(path) {
-            for dep in dependents {
-                if categorize_path(dep, config) == FileCategory::Content {
-                    affected.insert(dep.clone());
-                }
-            }
+            affected.extend(dependents.iter().cloned());
         }
     }
 
