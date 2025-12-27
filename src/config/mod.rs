@@ -462,10 +462,17 @@ impl SiteConfig {
     }
 
     fn validate_build(&self) -> Result<()> {
-        Self::check_command_installed("[build.typst.command]", &self.build.typst.command)?;
+        self.validate_typst()?;
         self.validate_tailwind()?;
         self.validate_inline_max_size()?;
         Ok(())
+    }
+
+    fn validate_typst(&self) -> Result<()> {
+        if self.build.typst.use_lib {
+            return Ok(());
+        }
+        Self::check_command_installed("[build.typst.command]", &self.build.typst.command)
     }
 
     fn validate_tailwind(&self) -> Result<()> {
