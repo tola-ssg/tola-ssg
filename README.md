@@ -27,7 +27,7 @@ A static site generator for Typst-based blogs.
 - **parallel compilation** — Build pages and assets concurrently using rayon
 - **incremental rebuilds** — Intelligent dependency tracking for sub-second hot reload
   - **content**: Direct rebuild of changed file
-  - **templates/utils**: Reverse-lookup of dependencies to rebuild only affected pages
+  - **deps (templates/utils)**: Reverse-lookup of dependencies to rebuild only affected pages
   - **config**: Full rebuild to ensure consistency across the site
 
 When a template or shared file changes, `tola` uses its in-memory dependency graph to determine the minimal rebuild set:
@@ -107,7 +107,7 @@ A `flake.nix` is provided in the repo. Pre-built binaries are available at [tola
 ```nix
 {
   inputs = {
-    tola.url = "github:tola-ssg/tola-ssg/v0.6.3";
+    tola.url = "github:tola-ssg/tola-ssg/v0.6.4";
     # ...
   };
 }
@@ -165,6 +165,14 @@ Options:
   -C, --config <CONFIG>    Config file name [default: tola.toml]
   -h, --help               Print help
   -V, --version            Print version
+
+Build/Serve Options:
+  --base-url <URL>         Override base URL for deployment (e.g., GitHub Pages)
+  --clean                  Clean output directory before building
+  -m, --minify             Minify HTML output
+  -t, --tailwind           Enable Tailwind CSS processing
+  --rss                    Enable RSS feed generation
+  --sitemap                Enable sitemap generation
 ```
 
 You can run `tola` from any subdirectory — it will automatically find `tola.toml` by searching upward.
@@ -182,9 +190,9 @@ You can run `tola` from any subdirectory — it will automatically find `tola.to
 │   ├── posts/
 │   ├── index.typ
 │   └── about.typ
-├── templates/
+├── templates/          # Dependency directory (triggers dependent rebuilds)
 │   └── base.typ
-├── utils/
+├── utils/              # Dependency directory (triggers dependent rebuilds)
 │   └── helpers.typ
 └── tola.toml
 ```
