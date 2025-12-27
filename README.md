@@ -107,7 +107,7 @@ A `flake.nix` is provided in the repo. Pre-built binaries are available at [tola
 ```nix
 {
   inputs = {
-    tola.url = "github:tola-ssg/tola-ssg/v0.6.2";
+    tola.url = "github:tola-ssg/tola-ssg/v0.6.3";
     # ...
   };
 }
@@ -125,17 +125,24 @@ A `flake.nix` is provided in the repo. Pre-built binaries are available at [tola
   };
 
   environment.systemPackages = [
-    # Use cross-compiled binary from cachix (recommended)
-    inputs.tola.packages.${pkgs.stdenv.hostPlatform.system}.aarch64-darwin  # Apple Silicon
-    # inputs.tola.packages.${pkgs.stdenv.hostPlatform.system}.x86_64-linux  # x86_64 Linux
+    # 1. Native build (recommended if you want to build from source)
+    # inputs.tola.packages.${pkgs.system}.default
 
-    # Or build locally (does NOT use cachix):
-    # inputs.tola.packages.${pkgs.stdenv.hostPlatform.system}.default
+    # 2. Pre-built binaries (recommended for fast CI/CD)
+    # Choose the one matching your system:
+    inputs.tola.packages.${pkgs.system}.aarch64-darwin        # macOS (Apple Silicon)
+    # inputs.tola.packages.${pkgs.system}.x86_64-linux        # Linux (x86_64)
+    # inputs.tola.packages.${pkgs.system}.aarch64-linux       # Linux (ARM64)
+    # inputs.tola.packages.${pkgs.system}.x86_64-windows      # Windows (x86_64)
+
+    # 3. Static Binaries (Linux only)
+    # inputs.tola.packages.${pkgs.system}.x86_64-linux-static
+    # inputs.tola.packages.${pkgs.system}.aarch64-linux-static
   ];
 }
 ```
 
-> **Note**: The `default` package builds natively and won't hit the cachix cache. Use explicitly named packages (e.g., `aarch64-darwin`, `x86_64-linux`) to use pre-built binaries.
+> **Note**: The `default` package builds natively for your system. If a pre-built binary is not available in the cache for `default`, Nix will build it from source. The specific architecture packages (e.g., `aarch64-darwin`) are explicit cross-compilation targets that are likely populated in the cache.
 
 ## Usage
 
