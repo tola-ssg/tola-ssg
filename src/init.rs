@@ -25,7 +25,7 @@ const SITE_DIRS: &[&str] = &[
 ];
 
 /// Create a new site with default structure
-pub fn new_site(config: &'static SiteConfig, has_name: bool) -> Result<()> {
+pub fn new_site(config: &SiteConfig, has_name: bool) -> Result<()> {
     let root = config.get_root();
 
     // Safety check: if no name was provided (init in current dir),

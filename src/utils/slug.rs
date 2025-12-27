@@ -57,7 +57,7 @@ pub const FORBIDDEN_CHARS: &[char] = &[
 /// slugify_fragment("Hello World") // → "hello-world"
 /// slugify_fragment("Chapter:One") // → "Chapter-One"
 /// ```
-pub fn slugify_fragment(text: &str, config: &'static SiteConfig) -> String {
+pub fn slugify_fragment(text: &str, config: &SiteConfig) -> String {
     let slug = &config.build.slug;
     let sep = slug.separator.as_char();
 
@@ -85,7 +85,7 @@ pub fn slugify_fragment(text: &str, config: &'static SiteConfig) -> String {
 /// slugify_path("content/My Posts/Hello World")
 /// // → "content/my-posts/hello-world"
 /// ```
-pub fn slugify_path(path: impl AsRef<Path>, config: &'static SiteConfig) -> PathBuf {
+pub fn slugify_path(path: impl AsRef<Path>, config: &SiteConfig) -> PathBuf {
     let slug = &config.build.slug;
     let sep = slug.separator.as_char();
 
@@ -657,7 +657,7 @@ mod tests {
         fragment_mode: &str,
         case: &str,
         sep: char,
-    ) -> &'static SiteConfig {
+    ) -> SiteConfig {
         let sep_str = if sep == '-' { "dash" } else { "underscore" };
         let toml = format!(
             r#"
@@ -672,31 +672,29 @@ mod tests {
             "#,
             path_mode, fragment_mode, case, sep_str
         );
-        // Leak memory to get &'static SiteConfig for tests
-        let config: SiteConfig = toml::from_str(&toml).unwrap();
-        Box::leak(Box::new(config))
+        toml::from_str(&toml).unwrap()
     }
 
     #[test]
     fn test_slugify_fragment_modes() {
         // Full mode
         let config = make_config("safe", "full", "lower", SEP_DASH);
-        assert_eq!(slugify_fragment("Hello World", config), "hello-world");
-        assert_eq!(slugify_fragment("München", config), "munchen");
+        assert_eq!(slugify_fragment("Hello World", &config), "hello-world");
+        assert_eq!(slugify_fragment("München", &config), "munchen");
 
         // Safe mode
         let config = make_config("safe", "safe", "preserve", SEP_UNDERSCORE);
-        assert_eq!(slugify_fragment("Hello World", config), "Hello_World");
-        assert_eq!(slugify_fragment("München", config), "München");
+        assert_eq!(slugify_fragment("Hello World", &config), "Hello_World");
+        assert_eq!(slugify_fragment("München", &config), "München");
 
         // Ascii mode
         let config = make_config("safe", "ascii", "lower", SEP_DASH);
-        assert_eq!(slugify_fragment("Hello World", config), "hello-world");
-        assert_eq!(slugify_fragment("München", config), "munchen");
+        assert_eq!(slugify_fragment("Hello World", &config), "hello-world");
+        assert_eq!(slugify_fragment("München", &config), "munchen");
 
         // No mode
         let config = make_config("safe", "no", "preserve", SEP_DASH);
-        assert_eq!(slugify_fragment("Hello World", config), "Hello World");
+        assert_eq!(slugify_fragment("Hello World", &config), "Hello World");
     }
 
     #[test]
@@ -704,28 +702,28 @@ mod tests {
         // Full mode
         let config = make_config("full", "safe", "lower", SEP_DASH);
         assert_eq!(
-            slugify_path("content/My Posts/Hello", config),
+            slugify_path("content/My Posts/Hello", &config),
             PathBuf::from("content/my-posts/hello")
         );
 
         // Safe mode
         let config = make_config("safe", "safe", "preserve", SEP_UNDERSCORE);
         assert_eq!(
-            slugify_path("content/My Posts/Hello", config),
+            slugify_path("content/My Posts/Hello", &config),
             PathBuf::from("content/My_Posts/Hello")
         );
 
         // Ascii mode
         let config = make_config("ascii", "safe", "lower", SEP_DASH);
         assert_eq!(
-            slugify_path("content/My Posts/München", config),
+            slugify_path("content/My Posts/München", &config),
             PathBuf::from("content/my-posts/munchen")
         );
 
         // No mode
         let config = make_config("no", "safe", "preserve", SEP_DASH);
         assert_eq!(
-            slugify_path("content/My Posts/Hello", config),
+            slugify_path("content/My Posts/Hello", &config),
             PathBuf::from("content/My Posts/Hello")
         );
     }
@@ -736,31 +734,31 @@ mod tests {
 
         // Test 1: Unicode paths - each component slugified separately
         assert_eq!(
-            slugify_path("posts/北京/天安门", config),
+            slugify_path("posts/北京/天安门", &config),
             PathBuf::from("posts/bei-jing/tian-an-men")
         );
 
         // Test 2: Deeply nested paths
         assert_eq!(
-            slugify_path("a/b/c/d/e", config),
+            slugify_path("a/b/c/d/e", &config),
             PathBuf::from("a/b/c/d/e")
         );
 
         // Test 3: Mixed case and spaces in multiple components
         assert_eq!(
-            slugify_path("Blog Posts/2024/Hello World", config),
+            slugify_path("Blog Posts/2024/Hello World", &config),
             PathBuf::from("blog-posts/2024/hello-world")
         );
 
         // Test 4: Special characters in path components (note: + is preserved)
         assert_eq!(
-            slugify_path("posts/C++ Guide/Part #1", config),
+            slugify_path("posts/C++ Guide/Part #1", &config),
             PathBuf::from("posts/c++-guide/part-1")
         );
 
         // Test 5: Single component (no path separators)
         assert_eq!(
-            slugify_path("Hello World", config),
+            slugify_path("Hello World", &config),
             PathBuf::from("hello-world")
         );
     }

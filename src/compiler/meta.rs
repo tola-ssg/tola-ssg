@@ -237,7 +237,7 @@ impl PageMeta {
     /// Returns error if:
     /// - File is not in content directory
     /// - File is not a .typ file
-    pub fn from_paths(source: PathBuf, config: &'static SiteConfig) -> Result<Self> {
+    pub fn from_paths(source: PathBuf, config: &SiteConfig) -> Result<Self> {
         let content_dir = &config.build.content;
         let path_prefix = &config.build.path_prefix;
         let output_dir = config.build.output.join(path_prefix);
@@ -634,7 +634,7 @@ mod tests {
         config.build.content = PathBuf::from("content");
 
         // Leak config to get 'static lifetime required by from_paths
-        let config: &'static SiteConfig = Box::leak(Box::new(config));
+        let config: &SiteConfig = Box::leak(Box::new(config));
 
         let source = PathBuf::from("content/Posts/Hello.typ");
         let page = PageMeta::from_paths(source, config).unwrap();
@@ -656,7 +656,7 @@ mod tests {
         config.build.output = PathBuf::from("/tmp/Personal/25FW/website");
         config.build.content = PathBuf::from("/tmp/Personal/25FW/website/content");
 
-        let config: &'static SiteConfig = Box::leak(Box::new(config));
+        let config: &SiteConfig = Box::leak(Box::new(config));
 
         let source = PathBuf::from("/tmp/Personal/25FW/website/content/Posts/Hello.typ");
         let page = PageMeta::from_paths(source, config).unwrap();

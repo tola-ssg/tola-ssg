@@ -27,7 +27,7 @@
 //!              (public/ dir)
 //! ```
 
-use crate::{config::SiteConfig, log, watch::watch_for_changes_blocking};
+use crate::{cli::Cli, config::{config, SiteConfig}, log, watch::watch_for_changes_blocking};
 use anyhow::{Context, Result};
 use std::{
     fs,
@@ -61,8 +61,9 @@ const WELCOME_TEMPLATE: &str = include_str!("embed/serve/welcome.html");
 /// 4. Enters the main request handling loop
 ///
 /// The server blocks until Ctrl+C is received.
-pub fn serve_site(config: &'static SiteConfig) -> Result<()> {
-    let addr = SocketAddr::new(config.serve.interface.parse()?, config.serve.port);
+pub fn serve_site(cli: &'static Cli) -> Result<()> {
+    let cfg = config();
+    let addr = SocketAddr::new(cfg.serve.interface.parse()?, cfg.serve.port);
 
     let server =
         Arc::new(Server::http(addr).map_err(|e| anyhow::anyhow!("Failed to bind to {addr}: {e}"))?);
@@ -78,9 +79,9 @@ pub fn serve_site(config: &'static SiteConfig) -> Result<()> {
     log!("serve"; "http://{}", addr);
 
     // Spawn file watcher thread
-    if config.serve.watch {
+    if cfg.serve.watch {
         std::thread::spawn(move || {
-            if let Err(err) = watch_for_changes_blocking(config) {
+            if let Err(err) = watch_for_changes_blocking(cli) {
                 log!("watch"; "{err}");
             }
         });
@@ -88,7 +89,9 @@ pub fn serve_site(config: &'static SiteConfig) -> Result<()> {
 
     // Handle requests in main thread (blocks until Ctrl+C)
     for request in server.incoming_requests() {
-        if let Err(e) = handle_request(request, config) {
+        // Re-load config on each request to pick up hot-reloaded changes
+        let cfg = config();
+        if let Err(e) = handle_request(request, &cfg) {
             log!("serve"; "request error: {e}");
         }
     }

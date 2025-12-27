@@ -9,7 +9,7 @@ use std::{fs, path::Path};
 use super::repo::get_repo_root;
 
 /// Push commits to remote repository
-pub fn push(repo: &ThreadSafeRepository, config: &'static SiteConfig) -> Result<()> {
+pub fn push(repo: &ThreadSafeRepository, config: &SiteConfig) -> Result<()> {
     let github = &config.deploy.github;
     log!("git"; "pushing to {}", github.url);
 

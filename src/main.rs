@@ -18,7 +18,7 @@ use anyhow::Result;
 use build::build_site;
 use clap::Parser;
 use cli::{Cli, Commands};
-use config::SiteConfig;
+use config::{init_config, config, SiteConfig};
 use deploy::deploy_site;
 use generator::{rss::build_rss, sitemap::build_sitemap};
 use gix::ThreadSafeRepository;
@@ -27,18 +27,18 @@ use serve::serve_site;
 
 fn main() -> Result<()> {
     let cli: &'static Cli = Box::leak(Box::new(Cli::parse()));
-    let config: &'static SiteConfig = Box::leak(Box::new(SiteConfig::load(cli)?));
+    init_config(SiteConfig::load(cli)?);
 
     match &cli.command {
-        Commands::Init { name } => new_site(config, name.is_some()),
-        Commands::Build { .. } => build_all(config).map(|_| ()),
+        Commands::Init { name } => new_site(&config(), name.is_some()),
+        Commands::Build { .. } => build_all().map(|_| ()),
         Commands::Deploy { .. } => {
-            let repo = build_all(config)?;
-            deploy_site(&repo, config)
+            let repo = build_all()?;
+            deploy_site(&repo, &config())
         }
         Commands::Serve { .. } => {
-            build_all(config)?;
-            serve_site(config)
+            build_all()?;
+            serve_site(cli)
         }
     }
 }
@@ -48,14 +48,15 @@ fn main() -> Result<()> {
 /// rss generation is controlled by `config.build.rss.enable`.
 /// Sitemap generation is controlled by `config.build.sitemap.enable`.
 /// Output cleanup is controlled by `config.build.clean`.
-fn build_all(config: &'static SiteConfig) -> Result<ThreadSafeRepository> {
+fn build_all() -> Result<ThreadSafeRepository> {
+    let cfg = config();
     // Build site first, collecting page metadata
-    let (repo, pages) = build_site(config)?;
+    let (repo, pages) = build_site(&cfg)?;
 
     // Generate rss and sitemap in parallel using collected pages
     let (rss_result, sitemap_result) = rayon::join(
-        || build_rss(config, &pages),
-        || build_sitemap(config, &pages),
+        || build_rss(&cfg, &pages),
+        || build_sitemap(&cfg, &pages),
     );
 
     rss_result?;

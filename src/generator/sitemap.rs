@@ -32,7 +32,7 @@ const SITEMAP_NS: &str = "http://www.sitemaps.org/schemas/sitemap/0.9";
 /// Build sitemap if enabled in config.
 ///
 /// Uses pre-collected page metadata instead of re-scanning the filesystem.
-pub fn build_sitemap(config: &'static SiteConfig, pages: &Pages) -> Result<()> {
+pub fn build_sitemap(config: &SiteConfig, pages: &Pages) -> Result<()> {
     if config.build.sitemap.enable {
         let sitemap = Sitemap::from_pages(pages);
         sitemap.write(config)?;
@@ -100,7 +100,7 @@ impl Sitemap {
     }
 
     /// Write sitemap to output file.
-    fn write(self, config: &'static SiteConfig) -> Result<()> {
+    fn write(self, config: &SiteConfig) -> Result<()> {
         let sitemap_path = &config.build.sitemap.path;
         let xml = self.into_xml();
         let xml = minify(MinifyType::Xml(xml.as_bytes()), config);

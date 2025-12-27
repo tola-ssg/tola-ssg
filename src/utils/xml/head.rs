@@ -8,7 +8,7 @@ use super::assets::{compute_asset_href, compute_stylesheet_href, get_icon_mime_t
 use super::common::{write_empty_elem, write_script, write_text_element, XmlWriter};
 
 /// Write `<head>` section content before closing tag.
-pub fn write_head_content(writer: &mut XmlWriter, config: &'static SiteConfig) -> Result<()> {
+pub fn write_head_content(writer: &mut XmlWriter, config: &SiteConfig) -> Result<()> {
     let head = &config.build.head;
 
     if !config.base.title.is_empty() {

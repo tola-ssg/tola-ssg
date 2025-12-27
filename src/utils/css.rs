@@ -110,7 +110,7 @@ pub fn run_tailwind(input: &Path, output: &Path, config: &SiteConfig) -> Result<
 ///
 /// Used by watch mode to rebuild when source files change.
 pub fn rebuild_tailwind(
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     get_output_path: impl FnOnce(&Path) -> Result<PathBuf>,
 ) -> Result<()> {
     let input = config

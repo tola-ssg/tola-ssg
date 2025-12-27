@@ -44,7 +44,7 @@ const TYPST_FILTER: FilterRule = FilterRule::new(&[
 #[allow(dead_code)]
 pub fn compile_pages(
     pages: &Pages,
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     clean: bool,
     deps_mtime: Option<SystemTime>,
     on_progress: impl Fn() + Sync,
@@ -67,7 +67,7 @@ pub fn compile_pages(
 /// Returns `Some(PageMeta)` if compiled, `None` if skipped (up-to-date or draft).
 pub fn process_page(
     path: &Path,
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     clean: bool,
     deps_mtime: Option<SystemTime>,
     log_file: bool,
@@ -108,7 +108,7 @@ pub fn process_page(
 /// Write a page's HTML to disk.
 fn write_page(
     page: &PageMeta,
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     clean: bool,
     deps_mtime: Option<SystemTime>,
     log_file: bool,
@@ -258,7 +258,7 @@ fn page_meta_to_data(page: &PageMeta) -> PageData {
 ///
 /// After this phase, `GLOBAL_SITE_DATA` contains complete metadata from all pages.
 pub fn collect_metadata(
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     on_progress: impl Fn() + Sync,
 ) -> Result<Vec<std::path::PathBuf>> {
     let content_files = collect_all_files(&config.build.content);
@@ -327,7 +327,7 @@ pub fn collect_metadata(
 /// Virtual JSON files now return complete data, so HTML output is correct.
 pub fn compile_pages_with_data(
     paths: &[std::path::PathBuf],
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     clean: bool,
     deps_mtime: Option<SystemTime>,
     on_progress: impl Fn() + Sync,
@@ -378,7 +378,7 @@ pub fn compile_pages_with_data(
 /// Note: This is the legacy single-phase collection. For two-phase compilation
 /// with virtual data support, use `collect_metadata` + `compile_pages_with_data`.
 #[allow(dead_code)]
-pub fn collect_pages(config: &'static SiteConfig) -> Result<Pages> {
+pub fn collect_pages(config: &SiteConfig) -> Result<Pages> {
     let content_files = collect_all_files(&config.build.content);
 
     let typ_files: Vec<_> = content_files
@@ -435,12 +435,12 @@ mod tests {
     use tempfile::TempDir;
 
     /// Create a test config with the given content directory.
-    fn make_test_config(content_dir: PathBuf, output_dir: PathBuf) -> &'static SiteConfig {
+    fn make_test_config(content_dir: PathBuf, output_dir: PathBuf) -> SiteConfig {
         let mut config = SiteConfig::default();
         config.build.content = content_dir;
         config.build.output = output_dir;
         config.build.typst.use_lib = true;
-        Box::leak(Box::new(config))
+        config
     }
 
     #[test]
@@ -580,7 +580,7 @@ mod tests {
         fs::write(&file_path, "= Test").unwrap();
 
         let config = make_test_config(content_dir.clone(), output_dir);
-        let page = PageMeta::from_paths(file_path, config);
+        let page = PageMeta::from_paths(file_path, &config);
 
         assert!(page.is_ok());
         let page = page.unwrap();
@@ -599,7 +599,7 @@ mod tests {
         fs::write(&file_path, "= Hello").unwrap();
 
         let config = make_test_config(content_dir.clone(), output_dir);
-        let page = PageMeta::from_paths(file_path, config);
+        let page = PageMeta::from_paths(file_path, &config);
 
         assert!(page.is_ok());
         let page = page.unwrap();

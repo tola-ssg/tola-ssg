@@ -57,7 +57,7 @@ fn get_asset_top_levels(assets_dir: &Path) -> &'static HashSet<OsString> {
 }
 
 /// Check if a path is an asset link
-pub fn is_asset_link(path: &str, config: &'static SiteConfig) -> bool {
+pub fn is_asset_link(path: &str, config: &SiteConfig) -> bool {
     let asset_top_levels = get_asset_top_levels(&config.build.assets);
 
     // Extract first path component after the leading slash

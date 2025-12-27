@@ -42,7 +42,7 @@ use std::path::PathBuf;
 /// Returns the number of files processed on success, or an error if any file processing fails.
 pub fn process_watched_files(
     files: &[PathBuf],
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     clean: bool,
 ) -> Result<usize> {
     let (content_files, asset_files) = categorize_files(files, config);
@@ -103,7 +103,7 @@ fn categorize_files<'a>(
 /// to validate templates before parallel compilation of remaining files.
 fn compile_content(
     files: &[&PathBuf],
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     clean: bool,
     progress: Option<&ProgressBars>,
 ) -> Result<Vec<anyhow::Error>> {
@@ -126,7 +126,7 @@ fn compile_content(
 /// Compile first file to validate, then compile rest in parallel.
 fn compile_with_validation(
     files: &[&PathBuf],
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     log_file: bool,
     progress: Option<&ProgressBars>,
 ) -> Result<Vec<anyhow::Error>> {
@@ -148,7 +148,7 @@ fn compile_with_validation(
 /// Compile files in parallel, collecting errors.
 fn compile_parallel(
     files: &[&PathBuf],
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     clean: bool,
     log_file: bool,
     progress: Option<&ProgressBars>,
@@ -169,7 +169,7 @@ fn compile_parallel(
 /// Process asset files in parallel.
 fn process_assets(
     files: &[&PathBuf],
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     progress: Option<&ProgressBars>,
 ) -> Result<()> {
     if files.is_empty() {
