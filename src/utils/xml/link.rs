@@ -16,7 +16,7 @@ use super::assets::is_asset_link;
 /// | `#` | Fragment | `process_fragment_link` |
 /// | `../` or `../../` | Relative | `process_relative_or_external_link` |
 /// | `https://` | External | kept unchanged |
-pub fn process_link_value(value: &[u8], config: &'static SiteConfig) -> Result<Cow<'static, [u8]>> {
+pub fn process_link_value(value: &[u8], config: &SiteConfig) -> Result<Cow<'static, [u8]>> {
     let value_str = str::from_utf8(value)?;
     let processed = match value_str.bytes().next() {
         Some(b'/') => process_absolute_link(value_str, config)?,
@@ -37,7 +37,7 @@ pub fn process_link_value(value: &[u8], config: &'static SiteConfig) -> Result<C
 /// | `/about#team` | `/about#team` (fragment slugified) |
 /// | `//example.com` | `//example.com` (protocol-relative) |
 #[allow(clippy::unnecessary_wraps)] // Result for API consistency
-pub fn process_absolute_link(value: &str, config: &'static SiteConfig) -> Result<String> {
+pub fn process_absolute_link(value: &str, config: &SiteConfig) -> Result<String> {
     let path_prefix = &config.build.path_prefix;
 
     if is_asset_link(value, config) {
@@ -59,7 +59,7 @@ pub fn process_absolute_link(value: &str, config: &'static SiteConfig) -> Result
 
 /// Process fragment links (starting with `#`).
 #[allow(clippy::unnecessary_wraps)] // Result for API consistency
-pub fn process_fragment_link(value: &str, config: &'static SiteConfig) -> Result<String> {
+pub fn process_fragment_link(value: &str, config: &SiteConfig) -> Result<String> {
     Ok(format!("#{}", slugify_fragment(&value[1..], config)))
 }
 

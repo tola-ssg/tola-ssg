@@ -4800,6 +4800,7 @@ name = "tola"
 version = "0.6.2"
 dependencies = [
  "anyhow",
+ "arc-swap",
  "chrono",
  "clap",
  "colored",

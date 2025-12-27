@@ -29,6 +29,7 @@ debug = 1
 strip = false
 
 [dependencies]
+arc-swap = "1.7"
 anyhow = "1.0.98"
 which = "8.0.0"
 clap = { version = "4.5.40", features = ["derive", "string"] }

@@ -10,7 +10,7 @@ use std::path::Path;
 /// Process an asset file from the assets directory.
 pub fn process_asset(
     asset_path: &Path,
-    config: &'static SiteConfig,
+    config: &SiteConfig,
     clean: bool,
     log_file: bool,
 ) -> Result<()> {
@@ -81,7 +81,7 @@ pub fn process_rel_asset(
 /// Rebuild tailwind CSS.
 ///
 /// Delegates to `utils::css::rebuild_tailwind` with asset path resolution.
-pub fn rebuild_tailwind(config: &'static SiteConfig) -> Result<()> {
+pub fn rebuild_tailwind(config: &SiteConfig) -> Result<()> {
     css::rebuild_tailwind(config, |input| {
         let meta = AssetMeta::from_source(input.to_path_buf(), config)?;
         Ok(meta.paths.dest)

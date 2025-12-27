@@ -30,8 +30,9 @@
 //! ```
 
 use crate::{
+    cli::Cli,
     compiler::process_watched_files,
-    config::SiteConfig,
+    config::{config, reload_config, SiteConfig},
     log,
     utils::category::{categorize_path, FileCategory},
 };
@@ -164,7 +165,7 @@ impl Debouncer {
 /// Attempt a full site rebuild, logging errors on failure.
 /// Clears the dependency graph before rebuilding to ensure fresh state.
 /// Returns true if successful (for cooldown tracking).
-fn try_full_rebuild(config: &'static SiteConfig, reason: &str) -> bool {
+fn try_full_rebuild(reason: &str) -> bool {
     use crate::compiler::deps::DEPENDENCY_GRAPH;
 
     log!("watch"; "{reason}");
@@ -172,7 +173,7 @@ fn try_full_rebuild(config: &'static SiteConfig, reason: &str) -> bool {
     // Clear dependency graph before full rebuild
     DEPENDENCY_GRAPH.write().clear();
 
-    match crate::build::build_site(config) {
+    match crate::build::build_site(&config()) {
         Ok(_) => true,
         Err(e) => {
             log_build_error("full", "", &e);
@@ -182,13 +183,14 @@ fn try_full_rebuild(config: &'static SiteConfig, reason: &str) -> bool {
 }
 
 /// Process file changes. Returns true if full rebuild succeeded (for cooldown).
-fn handle_changes(paths: &[PathBuf], config: &'static SiteConfig) -> bool {
+fn handle_changes(paths: &[PathBuf], cli: &'static Cli) -> bool {
     if paths.is_empty() {
         return false;
     }
 
-    let root = config.get_root();
-    let rel = |p: &Path| rel_path(p, root);
+    let cfg = config();
+    let root = cfg.get_root().to_path_buf();
+    let rel = |p: &Path| rel_path(p, &root);
 
     // Categorize changed files
     let mut config_changed = false;
@@ -198,7 +200,7 @@ fn handle_changes(paths: &[PathBuf], config: &'static SiteConfig) -> bool {
     let mut incremental_targets: Vec<PathBuf> = Vec::new();
 
     for path in paths {
-        match categorize_path(path, config) {
+        match categorize_path(path, &cfg) {
             FileCategory::Config => config_changed = true,
             FileCategory::Template | FileCategory::Utils => dependency_triggers.push(path),
             FileCategory::Content | FileCategory::Asset => incremental_targets.push(path.clone()),
@@ -206,9 +208,13 @@ fn handle_changes(paths: &[PathBuf], config: &'static SiteConfig) -> bool {
         }
     }
 
-    // Config changes always require full rebuild
+    // Config changes: reload config then full rebuild
     if config_changed {
-        return try_full_rebuild(config, "config changed, rebuilding...");
+        if let Err(e) = reload_config(cli) {
+            log!("watch"; "config reload failed: {e}");
+            return false;
+        }
+        return try_full_rebuild("config changed, rebuilding...");
     }
 
     // Template/utils changes: query dependency graph for precise rebuild
@@ -219,7 +225,7 @@ fn handle_changes(paths: &[PathBuf], config: &'static SiteConfig) -> bool {
         if affected.is_empty() {
             // No known dependents - fall back to full rebuild
             let trigger = rel(dependency_triggers[0]);
-            return try_full_rebuild(config, &format!("{trigger} changed (no deps cached), rebuilding..."));
+            return try_full_rebuild(&format!("{trigger} changed (no deps cached), rebuilding..."));
         }
 
         // Log and add affected files to rebuild list
@@ -242,7 +248,7 @@ fn handle_changes(paths: &[PathBuf], config: &'static SiteConfig) -> bool {
             }
         }
 
-        match process_watched_files(&incremental_targets, config, clean) {
+        match process_watched_files(&incremental_targets, &config(), clean) {
             Ok(count) if count > 1 => {
                 log!("watch"; "rebuilt {} files", count);
             }
@@ -272,7 +278,7 @@ fn handle_changes(paths: &[PathBuf], config: &'static SiteConfig) -> bool {
         if !virtual_dependents.is_empty() {
             log!("watch"; "updating {} pages using site data", virtual_dependents.len());
             // Use clean=false since templates haven't changed, only data
-            if let Err(e) = process_watched_files(&virtual_dependents, config, false) {
+            if let Err(e) = process_watched_files(&virtual_dependents, &config(), false) {
                 log_build_error("", "virtual data dependents", &e);
             }
         }
@@ -401,14 +407,15 @@ const fn is_relevant(event: &Event) -> bool {
 // =============================================================================
 
 /// Start blocking file watcher with debouncing and live rebuild.
-pub fn watch_for_changes_blocking(config: &'static SiteConfig) -> Result<()> {
-    if !config.serve.watch {
+pub fn watch_for_changes_blocking(cli: &'static Cli) -> Result<()> {
+    let cfg = config();
+    if !cfg.serve.watch {
         return Ok(());
     }
 
     let (tx, rx) = std::sync::mpsc::channel();
     let mut watcher = notify::recommended_watcher(tx).context("Failed to create file watcher")?;
-    setup_watchers(&mut watcher, config)?;
+    setup_watchers(&mut watcher, &cfg)?;
 
     let mut debouncer = Debouncer::new();
 
@@ -419,7 +426,7 @@ pub fn watch_for_changes_blocking(config: &'static SiteConfig) -> Result<()> {
             }
             Ok(Err(e)) => log!("watch"; "error: {e}"),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) if debouncer.ready() => {
-                if handle_changes(&debouncer.take(), config) {
+                if handle_changes(&debouncer.take(), cli) {
                     debouncer.mark_rebuild();
                 }
             }

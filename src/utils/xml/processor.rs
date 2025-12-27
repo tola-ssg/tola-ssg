@@ -19,7 +19,7 @@ use super::link::process_link_value;
 pub fn process_html(
     html_path: &Path,
     content: &[u8],
-    config: &'static SiteConfig,
+    config: &SiteConfig,
 ) -> Result<Vec<u8>> {
     let mut ctx = HtmlContext::new(config, html_path);
     let mut writer = Writer::new(Cursor::new(Vec::with_capacity(content.len())));
@@ -80,7 +80,7 @@ fn handle_start_element(
 fn handle_end_element(
     elem: &BytesEnd<'_>,
     writer: &mut Writer<Cursor<Vec<u8>>>,
-    config: &'static SiteConfig,
+    config: &SiteConfig,
 ) -> Result<()> {
     match elem.name().as_ref() {
         b"head" => write_head_content(writer, config)?,
@@ -105,7 +105,7 @@ pub fn write_html_with_lang(
 pub fn write_heading_with_slugified_id(
     elem: &BytesStart<'_>,
     writer: &mut XmlWriter,
-    config: &'static SiteConfig,
+    config: &SiteConfig,
 ) -> Result<()> {
     let new_elem = rebuild_elem(elem, |key, value| {
         if key == b"id" {
@@ -123,7 +123,7 @@ pub fn write_heading_with_slugified_id(
 pub fn write_element_with_processed_links(
     elem: &BytesStart<'_>,
     writer: &mut XmlWriter,
-    config: &'static SiteConfig,
+    config: &SiteConfig,
 ) -> Result<()> {
     let new_elem = rebuild_elem_try(elem, |key, value| {
         if matches!(key, b"href" | b"src") {
@@ -144,7 +144,7 @@ pub fn write_element_with_processed_links(
 pub fn write_img_with_color_invert(
     elem: &BytesStart<'_>,
     writer: &mut XmlWriter,
-    config: &'static SiteConfig,
+    config: &SiteConfig,
 ) -> Result<()> {
     // Check if this is an SVG image
     let is_svg = elem.attributes().filter_map(|a| a.ok()).any(|attr| {

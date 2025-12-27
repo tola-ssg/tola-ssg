@@ -101,7 +101,7 @@ pub enum OutputFormat {
 
 /// Processing context for HTML transformation
 pub struct HtmlContext<'a> {
-    pub config: &'static SiteConfig,
+    pub config: &'a SiteConfig,
     pub html_path: &'a Path,
     pub svg_count: usize,
     pub extract_svg: bool,
@@ -109,7 +109,7 @@ pub struct HtmlContext<'a> {
 
 impl<'a> HtmlContext<'a> {
     #[allow(clippy::missing_const_for_fn)] // matches! macro is not const
-    pub fn new(config: &'static SiteConfig, html_path: &'a Path) -> Self {
+    pub fn new(config: &'a SiteConfig, html_path: &'a Path) -> Self {
         Self {
             config,
             html_path,

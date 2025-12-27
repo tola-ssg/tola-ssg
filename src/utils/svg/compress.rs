@@ -13,7 +13,7 @@ use super::{Svg, OutputFormat};
 pub fn compress_svgs_parallel(
     svgs: &[Svg],
     html_path: &Path,
-    config: &'static SiteConfig,
+    config: &SiteConfig,
 ) -> Result<()> {
     let output_dir = html_path.parent().context("Invalid html path")?;
     let log_prefix = get_log_prefix(html_path, config);

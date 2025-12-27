@@ -38,12 +38,14 @@ mod build;
 pub mod defaults;
 mod deploy;
 mod error;
+pub mod handle;
 mod serve;
 
 // Re-export public types used by other modules
 pub use build::{BuildConfig, ExtractSvgType, SlugCase, SlugMode, SlugSeparator};
 pub use deploy::DeployConfig;
 pub use error::ConfigError;
+pub use handle::{config, init_config, reload_config};
 
 // Internal imports used in this module
 use base::BaseConfig;

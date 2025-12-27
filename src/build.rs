@@ -55,7 +55,7 @@ use std::{
 ///
 /// Returns the collected page metadata for rss/sitemap generation.
 /// If `config.build.clean` is true, clears the entire output directory first.
-pub fn build_site(config: &'static SiteConfig) -> Result<(ThreadSafeRepository, Pages)> {
+pub fn build_site(config: &SiteConfig) -> Result<(ThreadSafeRepository, Pages)> {
     let output = &config.build.output;
     let assets = &config.build.assets;
 
