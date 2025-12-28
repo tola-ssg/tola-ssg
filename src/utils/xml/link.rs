@@ -6,6 +6,10 @@ use std::str;
 
 use super::assets::is_asset_link;
 
+// ============================================================================
+// Public API
+// ============================================================================
+
 /// Process a link value (href or src attribute).
 ///
 /// # Link Type Detection
@@ -50,21 +54,120 @@ pub fn process_link_value(
 pub fn process_absolute_link(value: &str, config: &SiteConfig) -> Result<String> {
     let paths = config.paths();
 
+    // Asset links: just add prefix, no slugification
     if is_asset_link(value, config) {
-        let value = value.trim_start_matches('/');
-        return Ok(paths.url_for_rel_path(value));
+        let path = value.trim_start_matches('/');
+        return Ok(paths.url_for_rel_path(path));
     }
 
-    let (path, fragment) = value.split_once('#').unwrap_or((value, ""));
+    // Split path and fragment
+    let (path, fragment) = split_path_fragment(value);
     let path = path.trim_start_matches('/');
-    let slugified_path = slugify_path(path, config);
 
-    let mut result = paths.url_for_rel_path(&slugified_path);
+    // Build URL with proper prefix handling
+    let mut result = build_prefixed_url(path, config);
+
+    // Append slugified fragment if present
     if !fragment.is_empty() {
         result.push('#');
         result.push_str(&slugify_fragment(fragment, config));
     }
+
     Ok(result)
+}
+
+// ============================================================================
+// Path Prefix Handling
+// ============================================================================
+
+/// Build a URL with path_prefix, avoiding double-prefixing.
+///
+/// # Why Double-Prefix Can Happen
+///
+/// When using virtual JSON data (e.g., `post.url` from `_data/posts.json`),
+/// the URL already includes the path_prefix. If we blindly add prefix again,
+/// we get broken URLs like `/blog/blog/post-1/` instead of `/blog/post-1/`.
+///
+/// # Detection Strategy
+///
+/// We check if the path already starts with the configured `path_prefix`.
+/// If so, we skip adding the prefix again.
+///
+/// # Examples
+///
+/// With `path_prefix = "blog"`:
+/// - `about` → `/blog/about` (prefix added)
+/// - `blog/post-1` → `/blog/post-1` (already has prefix, skip)
+fn build_prefixed_url(path: &str, config: &SiteConfig) -> String {
+    let paths = config.paths();
+    let slugified = slugify_path(path, config);
+    let slugified_str = slugified.to_string_lossy();
+
+    if has_path_prefix(path, config) {
+        // Path already contains prefix - just format without adding prefix
+        format!("/{slugified_str}")
+    } else {
+        // Normal case - add prefix via url_for_rel_path
+        paths.url_for_rel_path(&*slugified_str)
+    }
+}
+
+/// Check if a path already contains the configured path_prefix.
+///
+/// Returns `false` if no path_prefix is configured.
+///
+/// # Examples
+///
+/// With `path_prefix = "blog"`:
+/// - `"blog/post-1"` → `true`
+/// - `"blog"` → `true`
+/// - `"about"` → `false`
+/// - `"blogger/post"` → `false` (must be exact segment match)
+fn has_path_prefix(path: &str, config: &SiteConfig) -> bool {
+    let paths = config.paths();
+
+    // No prefix configured - can't have double-prefix
+    if !paths.has_prefix() {
+        return false;
+    }
+
+    let prefix = paths.prefix();
+    let prefix_str = prefix.to_string_lossy();
+
+    // Check if path starts with prefix as a complete segment
+    // e.g., "blog/post" starts with "blog", but "blogger/post" does not
+    path_starts_with_segment(path, &prefix_str)
+}
+
+/// Check if path starts with a given segment (not just string prefix).
+///
+/// This ensures we match complete path segments, not partial strings.
+///
+/// # Examples
+/// - `path_starts_with_segment("blog/post", "blog")` → `true`
+/// - `path_starts_with_segment("blog", "blog")` → `true`
+/// - `path_starts_with_segment("blogger/post", "blog")` → `false`
+fn path_starts_with_segment(path: &str, segment: &str) -> bool {
+    if path == segment {
+        return true;
+    }
+
+    // Check if path starts with "segment/"
+    let with_slash = format!("{segment}/");
+    path.starts_with(&with_slash)
+}
+
+// ============================================================================
+// Link Parsing Utilities
+// ============================================================================
+
+/// Split a URL into path and fragment parts.
+///
+/// # Returns
+/// A tuple of (path, fragment) where fragment is empty string if no `#` found.
+#[inline]
+fn split_path_fragment(url: &str) -> (&str, &str) {
+    url.split_once('#').unwrap_or((url, ""))
 }
 
 /// Process fragment links (starting with `#`).
@@ -242,5 +345,36 @@ mod tests {
         let config = SiteConfig::default();
         let result = process_link_value(b"", &config, true);
         assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // path_starts_with_segment tests
+    // ========================================================================
+
+    #[test]
+    fn test_path_starts_with_segment_exact_match() {
+        assert!(path_starts_with_segment("blog", "blog"));
+        assert!(path_starts_with_segment("docs", "docs"));
+    }
+
+    #[test]
+    fn test_path_starts_with_segment_with_subpath() {
+        assert!(path_starts_with_segment("blog/post-1", "blog"));
+        assert!(path_starts_with_segment("blog/2024/post", "blog"));
+        assert!(path_starts_with_segment("docs/api/v1", "docs"));
+    }
+
+    #[test]
+    fn test_path_starts_with_segment_partial_no_match() {
+        // "blogger" starts with "blog" as string, but not as segment
+        assert!(!path_starts_with_segment("blogger/post", "blog"));
+        assert!(!path_starts_with_segment("blogging", "blog"));
+        assert!(!path_starts_with_segment("documentation", "docs"));
+    }
+
+    #[test]
+    fn test_path_starts_with_segment_different_prefix() {
+        assert!(!path_starts_with_segment("about", "blog"));
+        assert!(!path_starts_with_segment("posts/blog", "blog")); // blog is not first segment
     }
 }

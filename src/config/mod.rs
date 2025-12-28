@@ -276,6 +276,33 @@ impl SiteConfig {
         self.set_root(&root);
         self.normalize_paths(&root);
         self.apply_command_options(cli);
+
+        // Extract path_prefix from base.url if not already set by CLI
+        // This ensures path_prefix works for both:
+        // 1. CLI: --base-url "https://example.github.io/my-project"
+        // 2. Config: url = "https://example.github.io/my-project"
+        self.sync_path_prefix_from_url();
+    }
+
+    /// Sync path_prefix from base.url if not already set.
+    ///
+    /// This extracts the URL path component and sets it as path_prefix,
+    /// enabling proper link generation for subdirectory deployments
+    /// (e.g., GitHub Pages project sites).
+    fn sync_path_prefix_from_url(&mut self) {
+        // Skip if path_prefix already set (e.g., from CLI --base-url)
+        if !self.build.path_prefix.as_os_str().is_empty() {
+            return;
+        }
+
+        // Extract path from base.url
+        if let Some(ref url) = self.base.url {
+            if let Some(path) = extract_url_path(url) {
+                if !path.is_empty() {
+                    self.build.path_prefix = PathBuf::from(path);
+                }
+            }
+        }
     }
 
     /// Parse configuration from TOML string
