@@ -32,10 +32,10 @@ pub fn process_link_value(
     is_source_index: bool,
 ) -> Result<Cow<'static, [u8]>> {
     let value_str = str::from_utf8(value)?;
-    let processed = match value_str.bytes().next() {
+    let processed: String = match value_str.bytes().next() {
         Some(b'/') => process_absolute_link(value_str, config)?,
         Some(b'#') => process_fragment_link(value_str, config)?,
-        Some(_) => process_relative_link(value_str, is_source_index)?,
+        Some(_) => process_relative_link(value_str, is_source_index)?.into_owned(),
         None => anyhow::bail!("empty link URL found in typst file"),
     };
     Ok(Cow::Owned(processed.into_bytes()))
@@ -195,16 +195,13 @@ pub fn process_fragment_link(value: &str, config: &SiteConfig) -> Result<String>
 /// - `./img.png` → `../img.png` (adjusted for extra directory level)
 /// - `../doc.pdf` → `../../doc.pdf` (adjusted)
 #[allow(clippy::unnecessary_wraps)] // Result for API consistency
-pub fn process_relative_link(value: &str, is_source_index: bool) -> Result<String> {
-    Ok(if is_external_link(value) {
-        // External links (http:, mailto:, etc.) are unchanged
-        value.to_string()
-    } else if is_source_index {
-        // index.typ: output is at same level, no adjustment needed
-        value.to_string()
+pub fn process_relative_link(value: &str, is_source_index: bool) -> Result<Cow<'_, str>> {
+    Ok(if is_external_link(value) || is_source_index {
+        // External links or index.typ: unchanged
+        Cow::Borrowed(value)
     } else {
         // Non-index files: output is one level deeper, prepend ../
-        format!("../{value}")
+        Cow::Owned(format!("../{value}"))
     })
 }
 

@@ -31,6 +31,7 @@
 //! ```
 
 use crate::config::{SiteConfig, SlugCase, SlugMode};
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 /// Characters that are unsafe for URLs and file paths.
@@ -68,7 +69,7 @@ pub fn slugify_fragment(text: &str, config: &SiteConfig) -> String {
         SlugMode::Ascii => sanitize(&deunicode::deunicode(text), sep),
     };
 
-    apply_case(&result, &slug.case)
+    apply_case(&result, &slug.case).into_owned()
 }
 
 /// Converts a file path to URL-safe format.
@@ -175,7 +176,7 @@ fn transform_path_components(path: &Path, sep: char, case: &SlugCase, to_ascii: 
             } else {
                 sanitize(&text, sep)
             };
-            apply_case(&sanitized, case)
+            apply_case(&sanitized, case).into_owned()
         })
         .collect()
 }
@@ -238,12 +239,14 @@ fn collapse_consecutive_separators(text: &str, sep: char) -> String {
 /// - `Upper`: ALL UPPERCASE
 /// - `Capitalize`: Title Case (Each Word Capitalized)
 /// - `Preserve`: no change
-fn apply_case(text: &str, case: &SlugCase) -> String {
+///
+/// Uses `Cow` to avoid allocation for `Preserve` mode.
+fn apply_case<'a>(text: &'a str, case: &SlugCase) -> Cow<'a, str> {
     match case {
-        SlugCase::Lower => text.to_lowercase(),
-        SlugCase::Upper => text.to_uppercase(),
-        SlugCase::Capitalize => capitalize_words(text),
-        SlugCase::Preserve => text.to_owned(),
+        SlugCase::Lower => Cow::Owned(text.to_lowercase()),
+        SlugCase::Upper => Cow::Owned(text.to_uppercase()),
+        SlugCase::Capitalize => Cow::Owned(capitalize_words(text)),
+        SlugCase::Preserve => Cow::Borrowed(text),
     }
 }
 

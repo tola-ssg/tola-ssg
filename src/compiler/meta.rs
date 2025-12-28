@@ -64,6 +64,7 @@ use crate::{config::SiteConfig, utils::slug::slugify_path};
 use anyhow::{Result, anyhow};
 use serde::Deserialize;
 use std::{
+    borrow::Cow,
     fs,
     path::{Path, PathBuf},
     time::SystemTime,
@@ -357,7 +358,7 @@ where
         Some(v) => {
             // Handle simple strings directly: e.g.: `summary: "hello world"`
             if let Some(s) = v.as_str() {
-                return Ok(Some(html_escape(s)));
+                return Ok(Some(html_escape(s).into_owned()));
             }
 
             // Handle Typst content elements: e.g.: `summary: [hello world, _italic_, $x + y$]`
@@ -403,7 +404,7 @@ impl TypstElement {
         match self {
             Self::Space => " ".into(),
             Self::Linebreak => "<br/>".into(),
-            Self::Text { text } => html_escape(text),
+            Self::Text { text } => html_escape(text).into_owned(),
             Self::Strike { text } => format!("<s>{}</s>", html_escape(text)),
             Self::Link { dest, body } => {
                 format!("<a href=\"{dest}\">{}</a>", body.to_html())
@@ -417,8 +418,15 @@ impl TypstElement {
 }
 
 /// Escape HTML special characters.
+///
+/// Uses `Cow` to avoid allocation when no escaping is needed.
 #[inline]
-fn html_escape(s: &str) -> String {
+fn html_escape(s: &str) -> Cow<'_, str> {
+    // Fast path: check if escaping is needed
+    if !s.contains(['<', '>', '&', '"']) {
+        return Cow::Borrowed(s);
+    }
+
     let mut result = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -429,7 +437,7 @@ fn html_escape(s: &str) -> String {
             _ => result.push(c),
         }
     }
-    result
+    Cow::Owned(result)
 }
 
 // ============================================================================

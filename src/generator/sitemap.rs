@@ -16,6 +16,7 @@
 
 use crate::{compiler::meta::Pages, config::SiteConfig, log, utils::minify::{minify, MinifyType}};
 use anyhow::{Context, Result};
+use std::borrow::Cow;
 use std::fs;
 
 // ============================================================================
@@ -118,12 +119,21 @@ impl Sitemap {
 // ============================================================================
 
 /// Escape special XML characters.
-fn escape_xml(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+///
+/// Uses `Cow` to avoid allocation when no escaping is needed.
+fn escape_xml(s: &str) -> Cow<'_, str> {
+    // Fast path: check if escaping is needed
+    if !s.contains(['&', '<', '>', '"', '\'']) {
+        return Cow::Borrowed(s);
+    }
+
+    Cow::Owned(
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;")
+    )
 }
 
 // ============================================================================
