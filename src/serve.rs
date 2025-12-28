@@ -48,6 +48,8 @@ const DIRECTORY_TEMPLATE: &str = include_str!("embed/serve/directory.html");
 /// Welcome page HTML template (shown when output directory is empty)
 const WELCOME_TEMPLATE: &str = include_str!("embed/serve/welcome.html");
 
+/// Try binding to port, retry with incremented port if in use
+const MAX_PORT_RETRIES: u16 = 10;
 // ============================================================================
 // Server Entry Point
 // ============================================================================
@@ -55,7 +57,7 @@ const WELCOME_TEMPLATE: &str = include_str!("embed/serve/welcome.html");
 /// Start the development server with optional file watching.
 ///
 /// This function:
-/// 1. Binds to the configured interface and port
+/// 1. Binds to the configured interface and port (with auto-retry on port conflict)
 /// 2. Sets up Ctrl+C handler for graceful shutdown
 /// 3. Spawns file watcher thread (if enabled)
 /// 4. Enters the main request handling loop
@@ -63,10 +65,11 @@ const WELCOME_TEMPLATE: &str = include_str!("embed/serve/welcome.html");
 /// The server blocks until Ctrl+C is received.
 pub fn serve_site() -> Result<()> {
     let c = cfg();
-    let addr = SocketAddr::new(c.serve.interface.parse()?, c.serve.port);
+    let interface: std::net::IpAddr = c.serve.interface.parse()?;
+    let base_port = c.serve.port;
 
-    let server =
-        Arc::new(Server::http(addr).map_err(|e| anyhow::anyhow!("Failed to bind to {addr}: {e}"))?);
+    let (server, addr) = try_bind_port(interface, base_port, MAX_PORT_RETRIES)?;
+    let server = Arc::new(server);
 
     // Set up Ctrl+C handler for graceful shutdown
     let server_for_signal = Arc::clone(&server);
@@ -96,6 +99,42 @@ pub fn serve_site() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Try to bind to a port, retrying with incremented port numbers if in use.
+fn try_bind_port(
+    interface: std::net::IpAddr,
+    base_port: u16,
+    max_retries: u16,
+) -> Result<(Server, SocketAddr)> {
+    for offset in 0..max_retries {
+        let port = base_port.saturating_add(offset);
+        let addr = SocketAddr::new(interface, port);
+
+        match Server::http(addr) {
+            Ok(server) => {
+                if offset > 0 {
+                    log!("serve"; "port {} in use, using {} instead", base_port, port);
+                }
+                return Ok((server, addr));
+            }
+            Err(_) if offset + 1 < max_retries => {
+                // Will retry silently
+                continue;
+            }
+            Err(e) => {
+                // Last attempt failed
+                return Err(anyhow::anyhow!(
+                    "Failed to bind after {} attempts (ports {}-{}): {}",
+                    max_retries,
+                    base_port,
+                    port,
+                    e
+                ));
+            }
+        }
+    }
+    unreachable!()
 }
 
 // ============================================================================
