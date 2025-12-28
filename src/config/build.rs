@@ -103,8 +103,10 @@ pub enum ExtractSvgType {
 #[educe(Default)]
 #[serde(default, deny_unknown_fields)]
 pub struct BuildConfig {
-    /// URL path prefix for subdirectory deployment (e.g., "blog" → `/blog/...`).
-    #[serde(default = "defaults::build::path_prefix")]
+    /// URL path prefix for subdirectory deployment.
+    /// Automatically extracted from `[base].url` path component.
+    /// Internal use only - not exposed in tola.toml.
+    #[serde(skip)]
     #[educe(Default = defaults::build::path_prefix())]
     pub path_prefix: PathBuf,
 
@@ -807,7 +809,9 @@ mod tests {
     }
 
     #[test]
-    fn test_build_path_prefix() {
+    fn test_build_path_prefix_not_from_config() {
+        // path_prefix is now internal-only (serde skip)
+        // It should NOT be read from config file
         let config = r#"
             [base]
             title = "Test"
@@ -815,8 +819,21 @@ mod tests {
             [build]
             path_prefix = "blog"
         "#;
+        // This should fail because path_prefix is not a valid config field
+        let result: Result<SiteConfig, _> = toml::from_str(config);
+        assert!(result.is_err(), "path_prefix should not be accepted in config");
+    }
+
+    #[test]
+    fn test_build_path_prefix_default_empty() {
+        let config = r#"
+            [base]
+            title = "Test"
+            description = "Test"
+        "#;
         let config: SiteConfig = toml::from_str(config).unwrap();
-        assert_eq!(config.build.path_prefix, PathBuf::from("blog"));
+        // Default path_prefix should be empty
+        assert!(config.build.path_prefix.as_os_str().is_empty());
     }
 
     #[test]

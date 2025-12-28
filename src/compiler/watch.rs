@@ -56,8 +56,9 @@ pub fn process_watched_files(
     let content_errors = compile_content(&content_files, config, clean, progress.as_ref())?;
 
     // Update virtual data files on disk after content changes
+    // Use output_dir() to place _data inside the site content directory (with path_prefix)
     if !content_files.is_empty() {
-        let _ = virtual_fs::write_to_disk(&config.build.output.join(&config.build.data));
+        let _ = virtual_fs::write_to_disk(&config.paths().output_dir().join(&config.build.data));
     }
 
     // Process asset files (tailwind input is handled specially inside)

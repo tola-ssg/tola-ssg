@@ -476,8 +476,8 @@ impl SiteConfig {
             .iter()
             .map(|p| Self::normalize_path(&root.join(p)))
             .collect();
-        self.build.rss.path = self.build.output.join(&self.build.rss.path);
-        self.build.sitemap.path = self.build.output.join(&self.build.sitemap.path);
+        // Note: rss.path and sitemap.path are kept as relative filenames.
+        // They are resolved to output_dir() at write time to include path_prefix.
 
         // Normalize optional paths
         self.normalize_optional_paths(&root);

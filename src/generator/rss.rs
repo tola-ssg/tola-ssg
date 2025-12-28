@@ -78,12 +78,13 @@ impl<'a> RssFeed<'a> {
     fn write(self, config: &SiteConfig) -> Result<()> {
         let xml = self.into_xml()?;
         let xml = minify(MinifyType::Xml(xml.as_bytes()), config);
-        let rss_path = &config.build.rss.path;
+        // Resolve RSS path relative to output_dir (with path_prefix)
+        let rss_path = config.paths().output_dir().join(&config.build.rss.path);
 
         if let Some(parent) = rss_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(rss_path, &*xml)?;
+        fs::write(&rss_path, &*xml)?;
 
         log!("rss"; "{}", rss_path.file_name().unwrap_or_default().to_string_lossy());
         Ok(())

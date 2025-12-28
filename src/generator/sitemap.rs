@@ -102,11 +102,12 @@ impl Sitemap {
 
     /// Write sitemap to output file.
     fn write(self, config: &SiteConfig) -> Result<()> {
-        let sitemap_path = &config.build.sitemap.path;
+        // Resolve sitemap path relative to output_dir (with path_prefix)
+        let sitemap_path = config.paths().output_dir().join(&config.build.sitemap.path);
         let xml = self.into_xml();
         let xml = minify(MinifyType::Xml(xml.as_bytes()), config);
 
-        fs::write(sitemap_path, &*xml)
+        fs::write(&sitemap_path, &*xml)
             .with_context(|| format!("Failed to write sitemap to {}", sitemap_path.display()))?;
 
         log!("sitemap"; "{}", sitemap_path.file_name().unwrap_or_default().to_string_lossy());

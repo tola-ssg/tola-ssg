@@ -206,7 +206,8 @@ pub fn build_site(config: &SiteConfig, quiet: bool) -> Result<(ThreadSafeReposit
     content_assets_res?;
 
     // Write virtual data files to disk for external tools
-    virtual_fs::write_to_disk(&config.build.output.join(&config.build.data))?;
+    // Use output_dir() to place _data inside the site content directory (with path_prefix)
+    virtual_fs::write_to_disk(&config.paths().output_dir().join(&config.build.data))?;
 
     // Build Tailwind CSS if enabled
     if config.build.css.tailwind.enable {
