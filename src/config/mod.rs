@@ -106,12 +106,13 @@ fn parse_size_string(s: &str) -> usize {
 /// extract_url_path("https://example.github.io/my-project/") → Some("my-project")
 /// extract_url_path("https://example.github.io/a/b/c")       → Some("a/b/c")
 /// extract_url_path("https://example.com")                   → Some("")
+/// extract_url_path("file:///path/to/site")                  → Some("path/to/site")
 /// extract_url_path("invalid")                               → None
 /// ```
 fn extract_url_path(url: &str) -> Option<String> {
-    // Find the host part: after "://" and before the next "/"
-    let after_scheme = url.strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))?;
+    // Find the scheme separator "://"
+    let scheme_end = url.find("://")?;
+    let after_scheme = &url[scheme_end + 3..];
 
     // Split at the first "/" to separate host from path
     let path = match after_scheme.find('/') {
@@ -510,9 +511,9 @@ impl SiteConfig {
         }
 
         if let Some(base_url) = &self.base.url
-            && !base_url.starts_with("http") {
+            && !base_url.contains("://") {
                 bail!(ConfigError::Validation(
-                    "[base.url] must start with http:// or https://".into()
+                    "[base.url] must be a valid URL with scheme (e.g., https://example.com)".into()
                 ));
             }
         Ok(())
@@ -660,6 +661,12 @@ mod tests {
 
         // Invalid URL (no scheme)
         assert_eq!(extract_url_path("invalid-url"), None);
+
+        // file:// scheme
+        assert_eq!(
+            extract_url_path("file:///path/to/site"),
+            Some("path/to/site".to_string())
+        );
     }
 
     #[test]
