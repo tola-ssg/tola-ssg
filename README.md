@@ -9,6 +9,7 @@ A static site generator for Typst-based blogs.
 - [Philosophy](#philosophy)
 - [Installation](#installation)
 - [Usage](#usage)
+- [Roadmap](#roadmap-v070)
 - [Note](#note)
 
 ## Showcase
@@ -220,6 +221,19 @@ tola build
 # Start development server
 tola serve
 ```
+
+## Roadmap (v0.7.0)
+
+> **Coming Soon**: Incremental Rendering & VDOM Architecture
+
+The next major release focuses on **instant hot-reloading** with sub-second refresh times:
+
+- **VDOM Core** — Type-safe virtual DOM with TTG (Trees that Grow) pattern
+- **Stable Identity** — Span-based node IDs for precise diffing across compilations
+- **Binary Patch Protocol** — `rkyv` zero-copy serialization for efficient updates
+- **Actor Concurrency** — Non-blocking `FsActor` / `CompilerActor` / `WsActor` via `tokio`
+
+Goal: *"Local refresh feels like a web app"*
 
 ## Note
 
