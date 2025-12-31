@@ -22,7 +22,7 @@
 
 use crate::{
     compiler::{
-        collect_all_files, collect_metadata, compile_pages,
+        collect_all_files,
         process_asset, process_rel_asset,
     },
     compiler::meta::Pages,
@@ -64,7 +64,7 @@ use std::{
 /// Returns the collected page metadata for rss/sitemap generation.
 /// If `config.build.clean` is true, clears the entire output directory first.
 pub fn build_site<D: BuildDriver + Copy>(
-    _driver: D,
+    driver: D,
     config: &SiteConfig,
     quiet: bool,
 ) -> Result<(ThreadSafeRepository, Pages)> {
@@ -88,11 +88,13 @@ pub fn build_site<D: BuildDriver + Copy>(
         .collect();
 
     // ========================================================================
-    // Collect metadata from all pages
+    // Phase 1: Collect metadata with Smart Skip
     // ========================================================================
-    // Virtual JSON files return empty data at this stage.
-    // Metadata extraction is static and unaffected.
-    // HTML output is discarded (incomplete due to empty JSON).
+    // Smart Skip optimization:
+    // - Static pages (no virtual data access) are written immediately
+    // - Dynamic pages (access /_data/*.json) wait for Phase 2
+    //
+    // This reduces build time for sites with many static pages.
 
     // First, count .typ files for progress bar
     let typ_file_count = collect_all_files(&config.build.content)
@@ -101,23 +103,34 @@ pub fn build_site<D: BuildDriver + Copy>(
         .count();
 
     if !quiet {
-        log!("metadata"; "collecting...");
+        log!("phase1"; "scanning {} files...", typ_file_count);
     }
-    let metadata_progress = if quiet {
+    let phase1_progress = if quiet {
         None
     } else {
-        Some(ProgressBars::new(&[("metadata", typ_file_count)]))
+        Some(ProgressBars::new(&[("phase1", typ_file_count)]))
     };
-    let page_paths = collect_metadata(config, || {
-        if let Some(ref p) = metadata_progress {
-            p.inc_by_name("metadata");
-        }
-    })?;
-    if let Some(p) = metadata_progress {
+
+    let clean = config.build.clean;
+
+    // Use Smart Skip: static pages written in Phase 1, dynamic pages deferred
+    let (dynamic_paths, static_count, dynamic_count) = crate::compiler::pages::collect_metadata_smart(
+        driver,
+        config,
+        clean,
+        deps_mtime,
+        || {
+            if let Some(ref p) = phase1_progress {
+                p.inc_by_name("phase1");
+            }
+        },
+    )?;
+
+    if let Some(p) = phase1_progress {
         p.finish();
     }
     if !quiet {
-        log!("metadata"; "found {} pages", page_paths.len());
+        log!("phase1"; "{} static (done), {} dynamic (pending)", static_count, dynamic_count);
     }
 
     // Create progress bars for Phase 2
@@ -125,32 +138,35 @@ pub fn build_site<D: BuildDriver + Copy>(
         None
     } else {
         Some(ProgressBars::new(&[
-            ("content", page_paths.len()),
+            ("phase2", dynamic_count),
             ("assets", asset_files.len() + content_asset_files.len()),
         ]))
     };
 
     let has_error = AtomicBool::new(false);
-    let clean = config.build.clean;
 
     // ========================================================================
-    // Compile pages with complete data + Process assets
+    // Phase 2: Recompile dynamic pages + Process assets
     // ========================================================================
     // Virtual JSON files now return complete data from GLOBAL_SITE_DATA.
-    // HTML output is correct and written to disk.
-    if !quiet {
-        log!("compile"; "building pages...");
+    // Only dynamic pages need recompilation; static pages already written.
+    if !quiet && dynamic_count > 0 {
+        log!("phase2"; "rebuilding {} dynamic pages...", dynamic_count);
     }
 
     let (compile_result, assets_result) = rayon::join(
         || {
-            // Compile all pages with complete data
-            match compile_pages(_driver, &page_paths, config, clean, deps_mtime, || {
+            // Only recompile dynamic pages
+            if dynamic_paths.is_empty() {
+                return Ok(Pages { items: vec![] });
+            }
+
+            match crate::compiler::pages::compile_dynamic_pages(driver, &dynamic_paths, config, clean, deps_mtime, || {
                 if let Some(ref p) = progress {
-                    p.inc_by_name("content");
+                    p.inc_by_name("phase2");
                 }
             }) {
-                Ok(pages) => Ok(pages),
+                Ok(pages) => Ok(Pages { items: pages }),
                 Err(e) => {
                     if !has_error.swap(true, Ordering::Relaxed) {
                         log!("error"; "compile failed: {:#}", e);

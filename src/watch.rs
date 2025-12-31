@@ -33,7 +33,7 @@
 //! ```
 
 use crate::{
-    compiler::{pages::{process_page, write_page_html}, process_watched_files},
+    compiler::pages::{process_page, write_page_html},
     config::{cfg, reload_config, SiteConfig},
     driver::Development,
     hotreload::{broadcast_patches, broadcast_reload, diff_indexed_documents, VDOM_CACHE},
@@ -319,17 +319,22 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
         }
     }
 
-    // Virtual data dependents
+    // Virtual data dependents: cascade update for pages that depend on /_data/*.json
+    // These pages need to be recompiled because GLOBAL_SITE_DATA may have changed.
     if !processed_content.is_empty() {
         let virtual_dependents: Vec<PathBuf> = collect_virtual_data_dependents()
             .into_iter()
             .filter(|p| !processed_content.contains(p))
             .collect();
 
-        if !virtual_dependents.is_empty()
-            && let Err(e) = process_watched_files(&virtual_dependents, &cfg(), false) {
+        if !virtual_dependents.is_empty() {
+            log!("hotreload"; "cascading to {} virtual data dependents", virtual_dependents.len());
+
+            // Use VDOM diff for cascade update too (same as incremental)
+            if let Err(e) = process_with_vdom_diff(&virtual_dependents, &c, false, status, &rel) {
                 status.error("failed: site data update", &e.to_string());
             }
+        }
     }
 
     // Evict stale entries from typst's comemo memoization cache
@@ -366,14 +371,14 @@ fn process_with_vdom_diff(
         let ext = path.extension().and_then(|e| e.to_str());
 
         if ext == Some("typ") {
+            // Get old VDOM from cache BEFORE compilation (process_page updates the cache)
+            let old_vdom = VDOM_CACHE.get(path);
+
             // Content file: use VDOM diff
             match process_page(&Development, path, config) {
                 Ok(Some(result)) => {
                     count += 1;
                     any_content_changed = true;
-
-                    // Get old VDOM from cache
-                    let old_vdom = VDOM_CACHE.get(path);
 
                     // Determine if we need reload or can use patches
                     let needs_reload = if let Some(old) = old_vdom {

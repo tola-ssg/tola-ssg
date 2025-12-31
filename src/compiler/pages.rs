@@ -100,6 +100,8 @@ pub struct PageResult {
     pub indexed_vdom: Option<crate::vdom::Document<crate::vdom::Indexed>>,
     /// URL path for the page (e.g., "/blog/post")
     pub url_path: String,
+    /// Whether this page depends on virtual data files (pages.json, tags.json)
+    pub uses_virtual_data: bool,
 }
 
 /// Process a single .typ file.
@@ -119,6 +121,9 @@ pub fn process_page<D: crate::driver::BuildDriver>(
 
     // Compile with driver
     let result = typst_lib::compile_vdom(driver, path, config.get_root(), TOLA_META_LABEL)?;
+
+    // Track if this page depends on virtual data (before moving metadata)
+    let uses_virtual_data = result.uses_virtual_data();
 
     // Extract metadata
     let content_meta: Option<ContentMeta> = result
@@ -151,6 +156,7 @@ pub fn process_page<D: crate::driver::BuildDriver>(
         page,
         indexed_vdom: result.indexed_vdom,
         url_path,
+        uses_virtual_data,
     }))
 }
 
@@ -373,7 +379,140 @@ pub fn collect_metadata(
     Ok(paths)
 }
 
-/// Phase 2: Compile pages with complete global data.
+/// Phase 1: Collect metadata and classify pages as static or dynamic.
+///
+/// Returns paths of dynamic pages that need recompilation in Phase 2.
+/// Static pages (those not using virtual data) are written directly.
+///
+/// # Smart Skip Logic
+///
+/// - **Static pages**: Do not access `/_data/*.json` files. Their HTML is
+///   complete after Phase 1, so we write it immediately.
+/// - **Dynamic pages**: Access virtual data files. Their HTML depends on
+///   other pages' metadata, so they must wait for Phase 2.
+pub fn collect_metadata_smart<D: crate::driver::BuildDriver + Copy>(
+    driver: D,
+    config: &SiteConfig,
+    clean: bool,
+    deps_mtime: Option<SystemTime>,
+    on_progress: impl Fn() + Sync,
+) -> Result<(Vec<std::path::PathBuf>, usize, usize)> {
+    let content_files = collect_all_files(&config.build.content);
+
+    let typ_files: Vec<_> = content_files
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|ext| ext == "typ"))
+        .collect();
+
+    // Clear global data store for fresh collection
+    GLOBAL_SITE_DATA.clear();
+
+    let results: Vec<Result<Option<(std::path::PathBuf, PageMeta, bool)>>> = typ_files
+        .par_iter()
+        .map(|path| {
+            let page = PageMeta::from_paths(path.clone(), config)?;
+
+            // Compile to extract metadata
+            let root = config.get_root();
+            let result = typst_lib::compile_vdom(&driver, path, root, TOLA_META_LABEL)?;
+
+            // Check if this page uses virtual data
+            let uses_virtual_data = result.uses_virtual_data();
+
+            // Record dependencies for incremental rebuild
+            super::deps::DEPENDENCY_GRAPH
+                .write()
+                .record_dependencies(path, &result.accessed_files);
+
+            let content_meta: Option<ContentMeta> = result.metadata.and_then(|json| serde_json::from_value(json).ok());
+
+            // Skip drafts
+            if is_draft(content_meta.as_ref()) {
+                on_progress();
+                return Ok(None);
+            }
+
+            let mut page = page;
+            page.content_meta = content_meta;
+            page.compiled_html = Some(result.html);
+
+            // Store in global data
+            GLOBAL_SITE_DATA.insert_page(page_meta_to_data(&page));
+
+            // For static pages, write immediately (their HTML is complete)
+            if !uses_virtual_data {
+                write_page(&page, config, clean, deps_mtime, false)?;
+            }
+
+            on_progress();
+            Ok(Some((path.clone(), page, uses_virtual_data)))
+        })
+        .collect();
+
+    // Collect dynamic page paths and counts
+    let mut dynamic_paths = Vec::new();
+    let mut static_count = 0;
+    let mut dynamic_count = 0;
+
+    for result in results {
+        match result {
+            Ok(Some((path, _page, uses_virtual_data))) => {
+                if uses_virtual_data {
+                    dynamic_paths.push(path);
+                    dynamic_count += 1;
+                } else {
+                    static_count += 1;
+                }
+            }
+            Ok(None) => {} // Draft, skip
+            Err(e) => return Err(e),
+        }
+    }
+
+    Ok((dynamic_paths, static_count, dynamic_count))
+}
+
+/// Phase 2: Recompile only dynamic pages with complete global data.
+///
+/// Only recompiles pages that access virtual data files (`/_data/*.json`).
+/// Static pages were already written in Phase 1.
+pub fn compile_dynamic_pages<D: crate::driver::BuildDriver + Copy>(
+    driver: D,
+    paths: &[std::path::PathBuf],
+    config: &SiteConfig,
+    clean: bool,
+    deps_mtime: Option<SystemTime>,
+    on_progress: impl Fn() + Sync,
+) -> Result<Vec<PageMeta>> {
+    let results: Vec<Result<PageMeta>> = paths
+        .par_iter()
+        .map(|path| {
+            let mut page = PageMeta::from_paths(path.clone(), config)?;
+
+            // Compile with complete data
+            let (html, content_meta) = compile_meta(&driver, path, config)?;
+
+            page.content_meta = content_meta;
+            page.compiled_html = Some(html);
+
+            // Write the page
+            write_page(&page, config, clean, deps_mtime, false)?;
+
+            on_progress();
+            Ok(page)
+        })
+        .collect();
+
+    // Collect successful pages
+    let mut items = Vec::with_capacity(results.len());
+    for result in results {
+        items.push(result?);
+    }
+
+    Ok(items)
+}
+
+/// Phase 2: Compile pages with complete global data (legacy).
 ///
 /// Compiles all pages again, this time with `GLOBAL_SITE_DATA` fully populated.
 /// Virtual JSON files now return complete data, so HTML output is correct.

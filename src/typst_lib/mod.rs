@@ -81,6 +81,31 @@ pub struct CompileResult {
     pub accessed_files: Vec<PathBuf>,
 }
 
+impl CompileResult {
+    /// Check if this compilation accessed any virtual data files.
+    ///
+    /// Virtual data files (`/_data/pages.json`, `/_data/tags.json`) contain
+    /// dynamically generated content that depends on other pages' metadata.
+    /// Pages that access these files are "dynamic" and may need to be
+    /// recompiled when other pages change.
+    #[inline]
+    pub fn uses_virtual_data(&self) -> bool {
+        self.accessed_files
+            .iter()
+            .any(|p| crate::data::is_virtual_data_path(p))
+    }
+
+    /// Get all virtual data files accessed during compilation.
+    ///
+    /// Returns paths like `/_data/pages.json` for dependency tracking.
+    pub fn accessed_virtual_files(&self) -> Vec<&PathBuf> {
+        self.accessed_files
+            .iter()
+            .filter(|p| crate::data::is_virtual_data_path(p))
+            .collect()
+    }
+}
+
 // =============================================================================
 // Test Synchronization
 // =============================================================================
@@ -224,6 +249,21 @@ pub struct VdomResult {
     pub metadata: Option<serde_json::Value>,
     /// Files accessed during compilation
     pub accessed_files: Vec<std::path::PathBuf>,
+}
+
+impl VdomResult {
+    /// Check if this compilation accessed any virtual data files.
+    ///
+    /// Virtual data files (`/_data/pages.json`, `/_data/tags.json`) contain
+    /// dynamically generated content that depends on other pages' metadata.
+    /// Pages that access these files are "dynamic" and may need to be
+    /// recompiled when other pages change.
+    #[inline]
+    pub fn uses_virtual_data(&self) -> bool {
+        self.accessed_files
+            .iter()
+            .any(|p| crate::data::is_virtual_data_path(p))
+    }
 }
 
 /// Compile a Typst file using the VDOM pipeline.
