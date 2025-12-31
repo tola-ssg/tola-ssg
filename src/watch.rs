@@ -35,6 +35,7 @@
 use crate::{
     compiler::{pages::process_page_for_dev, process_watched_files},
     config::{cfg, reload_config, SiteConfig},
+    driver::Development,
     hotreload::{broadcast_patches, broadcast_reload, diff_indexed_documents, VDOM_CACHE},
     log,
     logger::WatchStatus,
@@ -447,7 +448,7 @@ fn handle_full_rebuild(reason: &str, status: &mut WatchStatus) -> bool {
     VDOM_CACHE.clear(); // Clear VDOM cache on full rebuild
 
     // Use dev mode build to emit data-tola-id attributes for hot reload
-    match crate::build::build_site_for_dev(&cfg(), true) {
+    match crate::build::build_site(Development, &cfg(), true) {
         Ok(_) => {
             status.success(&format!("full rebuild: {reason}"));
             broadcast_reload();

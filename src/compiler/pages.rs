@@ -3,7 +3,7 @@ use crate::compiler::{collect_all_files, is_up_to_date};
 use crate::data::{PageData, GLOBAL_SITE_DATA};
 use crate::utils::minify::{minify, MinifyType};
 use crate::utils::xml::process_html;
-use crate::{config::SiteConfig, log, typst_lib};
+use crate::{config::SiteConfig, driver::Production, log, typst_lib};
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
@@ -27,9 +27,9 @@ use rayon::prelude::*;
 /// Calls `on_progress` after each page is processed.
 ///
 /// Note: This is the legacy single-phase compilation. For two-phase compilation
-/// with virtual data support, use `collect_metadata` + `compile_pages_with_data`.
+/// with virtual data support, use `collect_metadata` + `compile_pages`.
 #[allow(dead_code)]
-pub fn compile_pages(
+fn compile_pages_legacy(
     pages: &Pages,
     config: &SiteConfig,
     clean: bool,
@@ -67,7 +67,7 @@ pub fn process_page(
     }
 
     // Compile the page and get metadata
-    let (html_content, content_meta) = compile_meta(path, config)?;
+    let (html_content, content_meta) = compile_meta(&Production, path, config)?;
 
     // Skip drafts
     if is_draft(content_meta.as_ref()) {
@@ -204,27 +204,22 @@ fn write_page(
 
 /// Compile a typst file and extract metadata.
 ///
+/// # Type Parameter
+/// * `D` - Build driver (Production or Development)
+///
 /// Also records dependencies for incremental rebuild tracking.
 /// Uses the VDOM pipeline for HTML generation.
 ///
-/// For development mode with hot reload support, use `compile_meta_for_dev()` instead.
-pub fn compile_meta(path: &Path, config: &SiteConfig) -> Result<(Vec<u8>, Option<ContentMeta>)> {
-    compile_meta_internal(path, config, false)
-}
-
-/// Compile a typst file for development mode with `data-tola-id` attributes.
-///
-/// Same as `compile_meta()` but emits stable IDs on all elements for VDOM
-/// diffing and hot reload. Use this when building for `tola serve`.
-pub fn compile_meta_for_dev(path: &Path, config: &SiteConfig) -> Result<(Vec<u8>, Option<ContentMeta>)> {
-    compile_meta_internal(path, config, true)
-}
-
-/// Internal: compile with configurable dev mode flag.
-fn compile_meta_internal(path: &Path, config: &SiteConfig, dev_mode: bool) -> Result<(Vec<u8>, Option<ContentMeta>)> {
+/// When using `Development` driver, emits `data-tola-id` attributes
+/// and caches indexed VDOM for hot reload.
+pub fn compile_meta<D: crate::driver::BuildDriver>(
+    _driver: &D,
+    path: &Path,
+    config: &SiteConfig,
+) -> Result<(Vec<u8>, Option<ContentMeta>)> {
     let root = config.get_root();
 
-    if dev_mode {
+    if D::emit_ids(&_driver) {
         let result = typst_lib::compile_vdom_for_dev(path, root, TOLA_META_LABEL)?;
         let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
         super::deps::DEPENDENCY_GRAPH
@@ -232,7 +227,9 @@ fn compile_meta_internal(path: &Path, config: &SiteConfig, dev_mode: bool) -> Re
             .record_dependencies(path, &result.accessed_files);
 
         // Cache the indexed VDOM for hot reload
-        crate::hotreload::VDOM_CACHE.insert(path.to_path_buf(), result.indexed_vdom);
+        if D::cache_vdom(&_driver) {
+            crate::hotreload::VDOM_CACHE.insert(path.to_path_buf(), result.indexed_vdom);
+        }
 
         Ok((result.html, meta))
     } else {
@@ -352,13 +349,14 @@ pub fn collect_metadata(
 /// Compiles all pages again, this time with `GLOBAL_SITE_DATA` fully populated.
 /// Virtual JSON files now return complete data, so HTML output is correct.
 ///
-/// When `dev_mode` is true, emits `data-tola-id` attributes for hot reload.
-pub fn compile_pages_with_data(
+/// # Type Parameter
+/// * `D` - Build driver (Production or Development)
+pub fn compile_pages<D: crate::driver::BuildDriver + Copy>(
+    driver: D,
     paths: &[std::path::PathBuf],
     config: &SiteConfig,
     clean: bool,
     deps_mtime: Option<SystemTime>,
-    dev_mode: bool,
     on_progress: impl Fn() + Sync,
 ) -> Result<Pages> {
     let results: Vec<Result<PageMeta>> = paths
@@ -366,12 +364,8 @@ pub fn compile_pages_with_data(
         .map(|path| {
             let mut page = PageMeta::from_paths(path.clone(), config)?;
 
-            // Compile with complete data (dev_mode controls data-tola-id output)
-            let (html, content_meta) = if dev_mode {
-                compile_meta_for_dev(path, config)?
-            } else {
-                compile_meta(path, config)?
-            };
+            // Compile with complete data
+            let (html, content_meta) = compile_meta(&driver, path, config)?;
 
             page.content_meta = content_meta;
             page.compiled_html = Some(html);
@@ -425,7 +419,7 @@ pub fn collect_pages(config: &SiteConfig) -> Result<Pages> {
             let mut page = PageMeta::from_paths(path.clone(), config)?;
 
             // Compile once, get both HTML and metadata (metadata may be None)
-            let result = compile_meta(path, config)?;
+            let result = compile_meta(&Production, path, config)?;
             let html = Some(result.0);
             let content_meta = result.1;
 

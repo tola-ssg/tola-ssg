@@ -22,12 +22,13 @@
 
 use crate::{
     compiler::{
-        collect_all_files, collect_metadata, compile_pages_with_data,
+        collect_all_files, collect_metadata, compile_pages,
         process_asset, process_rel_asset,
     },
     compiler::meta::Pages,
     config::SiteConfig,
     data::virtual_fs,
+    driver::BuildDriver,
     log,
     logger::ProgressBars,
     typst_lib,
@@ -53,26 +54,20 @@ use std::{
 /// 1. Phase 1: Collect metadata from all pages (virtual JSON returns empty)
 /// 2. Phase 2: Compile pages with complete data (virtual JSON returns full data)
 ///
+/// # Type Parameter
+/// * `D` - Build driver (Production or Development)
+///
 /// # Arguments
 /// * `config` - Site configuration
 /// * `quiet` - If true, suppresses progress output (for watch mode)
 ///
 /// Returns the collected page metadata for rss/sitemap generation.
 /// If `config.build.clean` is true, clears the entire output directory first.
-pub fn build_site(config: &SiteConfig, quiet: bool) -> Result<(ThreadSafeRepository, Pages)> {
-    build_site_internal(config, quiet, false)
-}
-
-/// Build the entire site in development mode with hot reload support.
-///
-/// Same as `build_site()` but emits `data-tola-id` attributes on all elements
-/// for VDOM diffing and hot reload.
-pub fn build_site_for_dev(config: &SiteConfig, quiet: bool) -> Result<(ThreadSafeRepository, Pages)> {
-    build_site_internal(config, quiet, true)
-}
-
-/// Internal: build with configurable dev mode flag.
-fn build_site_internal(config: &SiteConfig, quiet: bool, dev_mode: bool) -> Result<(ThreadSafeRepository, Pages)> {
+pub fn build_site<D: BuildDriver + Copy>(
+    _driver: D,
+    config: &SiteConfig,
+    quiet: bool,
+) -> Result<(ThreadSafeRepository, Pages)> {
     let output = &config.build.output;
     let assets = &config.build.assets;
 
@@ -149,8 +144,8 @@ fn build_site_internal(config: &SiteConfig, quiet: bool, dev_mode: bool) -> Resu
 
     let (compile_result, assets_result) = rayon::join(
         || {
-            // Compile all pages with complete data (dev_mode controls data-tola-id output)
-            match compile_pages_with_data(&page_paths, config, clean, deps_mtime, dev_mode, || {
+            // Compile all pages with complete data
+            match compile_pages(_driver, &page_paths, config, clean, deps_mtime, || {
                 if let Some(ref p) = progress {
                     p.inc_by_name("content");
                 }

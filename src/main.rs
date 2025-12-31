@@ -9,6 +9,7 @@ mod compiler;
 mod config;
 mod data;
 mod deploy;
+mod driver;
 mod generator;
 mod hotreload;
 mod init;
@@ -20,11 +21,12 @@ mod vdom;
 mod watch;
 
 use anyhow::Result;
-use build::{build_site, build_site_for_dev};
+use build::build_site;
 use clap::Parser;
 use cli::{Cli, Commands};
 use config::{cfg, init_config, SiteConfig};
 use deploy::deploy_site;
+use driver::{Development, Production};
 use generator::{rss::build_rss, sitemap::build_sitemap};
 use gix::ThreadSafeRepository;
 use init::new_site;
@@ -36,14 +38,14 @@ fn main() -> Result<()> {
 
     match &cli.command {
         Commands::Init { name } => new_site(&cfg(), name.is_some()),
-        Commands::Build { .. } => build_all().map(|_| ()),
+        Commands::Build { .. } => build_all(Production).map(|_| ()),
         Commands::Deploy { .. } => {
-            let repo = build_all()?;
+            let repo = build_all(Production)?;
             deploy_site(&repo, &cfg())
         }
         Commands::Serve { .. } => {
             // Use dev mode build for serve to emit data-tola-id attributes
-            build_all_for_dev()?;
+            build_all(Development)?;
             serve_site()
         }
     }
@@ -51,33 +53,12 @@ fn main() -> Result<()> {
 
 /// Build site and optionally generate rss/sitemap in parallel.
 ///
-/// rss generation is controlled by `config.build.rss.enable`.
-/// Sitemap generation is controlled by `config.build.sitemap.enable`.
-/// Output cleanup is controlled by `config.build.clean`.
-fn build_all() -> Result<ThreadSafeRepository> {
+/// # Type Parameter
+/// * `D` - Build driver (Production or Development)
+fn build_all<D: driver::BuildDriver + Copy>(driver: D) -> Result<ThreadSafeRepository> {
     let c = cfg();
-    // Build site first, collecting page metadata
-    let (repo, pages) = build_site(&c, false)?;
-
-    // Generate rss and sitemap in parallel using collected pages
-    let (rss_result, sitemap_result) = rayon::join(
-        || build_rss(&c, &pages),
-        || build_sitemap(&c, &pages),
-    );
-
-    rss_result?;
-    sitemap_result?;
-    Ok(repo)
-}
-
-/// Build site for development mode with hot reload support.
-///
-/// Same as `build_all()` but emits `data-tola-id` attributes on all elements
-/// for VDOM diffing. RSS and sitemap are still generated normally.
-fn build_all_for_dev() -> Result<ThreadSafeRepository> {
-    let c = cfg();
-    // Build site in dev mode (with data-tola-id attributes)
-    let (repo, pages) = build_site_for_dev(&c, false)?;
+    // Build site with driver
+    let (repo, pages) = build_site(driver, &c, false)?;
 
     // Generate rss and sitemap in parallel using collected pages
     let (rss_result, sitemap_result) = rayon::join(
