@@ -404,6 +404,19 @@ pub fn get_client_script(ws_port: u16) -> String {
           }
           break;
         }
+        case 'remove_at_pos': {
+          // Remove child at a specific position
+          // Used for text nodes that don't have their own data-tola-id
+          const parent = this.getById(op.parent);
+          if (parent) {
+            const pos = parseInt(op.position, 10);
+            const childNodes = parent.childNodes;
+            if (pos < childNodes.length) {
+              childNodes[pos].remove();
+            }
+          }
+          break;
+        }
         case 'insert': {
           const parent = this.getById(op.parent);
           if (parent) {

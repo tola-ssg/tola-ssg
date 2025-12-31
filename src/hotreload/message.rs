@@ -141,6 +141,10 @@ impl HotReloadMessage {
                 StableIdPatch::Remove { target } => PatchOp::Remove {
                     target: target.to_attr_value(),
                 },
+                StableIdPatch::RemoveAtPosition { parent, position } => PatchOp::RemoveAtPosition {
+                    parent: parent.to_attr_value(),
+                    position: *position,
+                },
                 StableIdPatch::Insert { parent, position, html } => PatchOp::Insert {
                     parent: parent.to_attr_value(),
                     position: position.to_string(),
@@ -200,6 +204,16 @@ pub enum PatchOp {
     Remove {
         /// CSS selector or StableId (hex) to remove
         target: String,
+    },
+
+    /// Remove node at a specific child position
+    /// Used when text nodes don't have their own data-tola-id
+    #[serde(rename = "remove_at_pos")]
+    RemoveAtPosition {
+        /// Parent element's StableId (hex)
+        parent: String,
+        /// Child position (0-based index)
+        position: u32,
     },
 
     /// Move node to new position

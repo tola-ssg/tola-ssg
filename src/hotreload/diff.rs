@@ -431,9 +431,14 @@ pub enum StableIdPatch {
         position: u32,
         text: String,
     },
-    /// Remove element
+    /// Remove element by StableId
     Remove {
         target: StableId,
+    },
+    /// Remove child at specific position (for text nodes without data-tola-id)
+    RemoveAtPosition {
+        parent: StableId,
+        position: u32,
     },
     /// Insert new element
     Insert {
@@ -463,6 +468,7 @@ impl StableIdPatch {
             Self::UpdateText { target, .. } => *target,
             Self::UpdateTextAtPosition { parent, .. } => *parent,
             Self::Remove { target } => *target,
+            Self::RemoveAtPosition { parent, .. } => *parent,
             Self::Insert { parent, .. } => *parent,
             Self::Move { target, .. } => *target,
             Self::UpdateAttrs { target, .. } => *target,
@@ -651,11 +657,22 @@ impl IndexedDiffContext {
         }
 
         // Quick path: new empty, remove all old
+        // Use RemoveAtPosition for text nodes since they don't have data-tola-id
         if new_children.is_empty() {
-            for child in old_children.iter().rev() {
-                self.ops.push(StableIdPatch::Remove {
-                    target: get_indexed_node_stable_id(child),
-                });
+            for (i, child) in old_children.iter().enumerate().rev() {
+                match child {
+                    Node::Text(_) => {
+                        self.ops.push(StableIdPatch::RemoveAtPosition {
+                            parent: parent_id,
+                            position: i as u32,
+                        });
+                    }
+                    _ => {
+                        self.ops.push(StableIdPatch::Remove {
+                            target: get_indexed_node_stable_id(child),
+                        });
+                    }
+                }
             }
             return;
         }
@@ -723,10 +740,22 @@ impl IndexedDiffContext {
                     });
                 }
                 (Some(old_node), None) => {
-                    // Old node removed from end
-                    self.ops.push(StableIdPatch::Remove {
-                        target: get_indexed_node_stable_id(old_node),
-                    });
+                    // Old node removed - use appropriate removal strategy
+                    match old_node {
+                        Node::Text(_) => {
+                            // Text nodes don't have data-tola-id, use position-based removal
+                            self.ops.push(StableIdPatch::RemoveAtPosition {
+                                parent: parent_id,
+                                position: i as u32,
+                            });
+                        }
+                        _ => {
+                            // Elements have data-tola-id, use ID-based removal
+                            self.ops.push(StableIdPatch::Remove {
+                                target: get_indexed_node_stable_id(old_node),
+                            });
+                        }
+                    }
                 }
                 (None, None) => unreachable!(),
             }
@@ -827,9 +856,20 @@ impl IndexedDiffContext {
         deletes.sort_unstable_by(|a, b| b.cmp(a));
         for old_idx in deletes {
             let old_node = &old_children[old_idx];
-            self.ops.push(StableIdPatch::Remove {
-                target: get_indexed_node_stable_id(old_node),
-            });
+            // Use RemoveAtPosition for text nodes since they don't have data-tola-id
+            match old_node {
+                Node::Text(_) => {
+                    self.ops.push(StableIdPatch::RemoveAtPosition {
+                        parent: parent_id,
+                        position: old_idx as u32,
+                    });
+                }
+                _ => {
+                    self.ops.push(StableIdPatch::Remove {
+                        target: get_indexed_node_stable_id(old_node),
+                    });
+                }
+            }
         }
 
         if self.should_abort() {
