@@ -907,7 +907,9 @@ mod tests {
     }
 
     #[test]
-    fn test_typst_unknown_field_rejection() {
+    fn test_typst_unknown_field_allowed_for_compatibility() {
+        // Unknown fields in [build.typst] are allowed for backward compatibility
+        // with old configs that may have had other fields
         let config = r#"
             [base]
             title = "Test"
@@ -916,7 +918,7 @@ mod tests {
             unknown = "field"
         "#;
         let result: Result<SiteConfig, _> = toml::from_str(config);
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 
     #[test]

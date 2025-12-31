@@ -49,10 +49,10 @@ fn compile_pages_legacy(
 
 /// Process a single .typ file: compile and write HTML.
 ///
-/// Used by watch mode to compile individual files on change.
+/// Used by build mode to compile and write individual files.
 /// Also updates `GLOBAL_SITE_DATA` with the page's metadata for virtual JSON files.
 /// Returns `Some(PageMeta)` if compiled, `None` if skipped (up-to-date or draft).
-pub fn process_page(
+pub fn compile_and_write_page(
     path: &Path,
     config: &SiteConfig,
     clean: bool,
@@ -89,36 +89,36 @@ pub fn process_page(
 }
 
 // ============================================================================
-// process_page_for_dev: Development mode compilation with VDOM
+// Page Processing with Driver
 // ============================================================================
 
-/// Result of development mode page compilation
-pub struct DevPageResult {
+/// Result of page compilation
+pub struct PageResult {
     /// Page metadata
     pub page: PageMeta,
-    /// Indexed VDOM for diff comparison
-    pub indexed_vdom: crate::vdom::Document<crate::vdom::Indexed>,
+    /// Indexed VDOM for diff comparison (only in development mode)
+    pub indexed_vdom: Option<crate::vdom::Document<crate::vdom::Indexed>>,
     /// URL path for the page (e.g., "/blog/post")
     pub url_path: String,
 }
 
-/// Process a single .typ file for development mode.
+/// Process a single .typ file.
 ///
-/// Similar to `process_page` but also returns the Indexed VDOM for diffing.
-/// Used by watch mode when VDOM-based hot reload is enabled.
+/// The driver controls:
+/// - `emit_ids()`: Whether to output `data-tola-id` attributes
+/// - `cache_vdom()`: Whether to return indexed VDOM for hot reload
 ///
 /// Note: This function does NOT write the HTML file to disk.
-/// The caller should decide whether to write based on diff results:
-/// - If diff succeeds with patches → don't write (browser gets patches via WebSocket)
-/// - If diff fails/needs reload → write first, then trigger reload
-pub fn process_page_for_dev(
+/// The caller should decide whether to write based on diff results.
+pub fn process_page<D: crate::driver::BuildDriver>(
+    driver: &D,
     path: &Path,
     config: &SiteConfig,
-) -> Result<Option<DevPageResult>> {
+) -> Result<Option<PageResult>> {
     let mut page = PageMeta::from_paths(path.to_path_buf(), config)?;
 
-    // Compile with VDOM output
-    let result = typst_lib::compile_for_dev_with_vdom(path, config.get_root(), TOLA_META_LABEL)?;
+    // Compile with driver
+    let result = typst_lib::compile_vdom(driver, path, config.get_root(), TOLA_META_LABEL)?;
 
     // Extract metadata
     let content_meta: Option<ContentMeta> = result
@@ -142,21 +142,57 @@ pub fn process_page_for_dev(
     // Update global site data
     GLOBAL_SITE_DATA.insert_page(page_meta_to_data(&page));
 
-    // NOTE: Do NOT write HTML file here!
-    // The caller (watch.rs) will write only when reload is needed.
+    // Cache VDOM if driver requests it
+    if let Some(ref indexed) = result.indexed_vdom {
+        crate::hotreload::VDOM_CACHE.insert(path.to_path_buf(), indexed.clone());
+    }
 
-    Ok(Some(DevPageResult {
+    Ok(Some(PageResult {
         page,
         indexed_vdom: result.indexed_vdom,
         url_path,
     }))
 }
 
-/// Write a dev page's HTML to disk (for reload fallback).
-///
-/// Called by watch.rs when VDOM diff fails and a full reload is needed.
-pub fn write_page_for_dev(page: &PageMeta, config: &SiteConfig) -> Result<()> {
+/// Write a page's HTML to disk.
+pub fn write_page_html(page: &PageMeta, config: &SiteConfig) -> Result<()> {
     write_page(page, config, true, None, false)
+}
+
+// ============================================================================
+// Deprecated APIs (backward compatibility)
+// ============================================================================
+
+/// Result of development mode page compilation
+///
+/// Deprecated: Use `PageResult` instead.
+pub struct DevPageResult {
+    /// Page metadata
+    pub page: PageMeta,
+    /// Indexed VDOM for diff comparison
+    pub indexed_vdom: crate::vdom::Document<crate::vdom::Indexed>,
+    /// URL path for the page (e.g., "/blog/post")
+    pub url_path: String,
+}
+
+/// Deprecated: Use `process_page(&Development, ...)` instead.
+#[deprecated(since = "0.7.0", note = "Use `process_page(&Development, ...)` instead")]
+pub fn process_page_for_dev(
+    path: &Path,
+    config: &SiteConfig,
+) -> Result<Option<DevPageResult>> {
+    let result = process_page(&crate::driver::Development, path, config)?;
+    Ok(result.map(|r| DevPageResult {
+        page: r.page,
+        indexed_vdom: r.indexed_vdom.expect("Development driver should cache VDOM"),
+        url_path: r.url_path,
+    }))
+}
+
+/// Deprecated: Use `write_page_html` instead.
+#[deprecated(since = "0.7.0", note = "Use `write_page_html` instead")]
+pub fn write_page_for_dev(page: &PageMeta, config: &SiteConfig) -> Result<()> {
+    write_page_html(page, config)
 }
 
 // ============================================================================
@@ -213,33 +249,26 @@ fn write_page(
 /// When using `Development` driver, emits `data-tola-id` attributes
 /// and caches indexed VDOM for hot reload.
 pub fn compile_meta<D: crate::driver::BuildDriver>(
-    _driver: &D,
+    driver: &D,
     path: &Path,
     config: &SiteConfig,
 ) -> Result<(Vec<u8>, Option<ContentMeta>)> {
     let root = config.get_root();
 
-    if D::emit_ids(&_driver) {
-        let result = typst_lib::compile_vdom_for_dev(path, root, TOLA_META_LABEL)?;
-        let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
-        super::deps::DEPENDENCY_GRAPH
-            .write()
-            .record_dependencies(path, &result.accessed_files);
+    // Use unified compile_vdom with driver
+    let result = typst_lib::compile_vdom(driver, path, root, TOLA_META_LABEL)?;
+    let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
 
-        // Cache the indexed VDOM for hot reload
-        if D::cache_vdom(&_driver) {
-            crate::hotreload::VDOM_CACHE.insert(path.to_path_buf(), result.indexed_vdom);
-        }
+    super::deps::DEPENDENCY_GRAPH
+        .write()
+        .record_dependencies(path, &result.accessed_files);
 
-        Ok((result.html, meta))
-    } else {
-        let result = typst_lib::compile_vdom(path, root, TOLA_META_LABEL)?;
-        let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
-        super::deps::DEPENDENCY_GRAPH
-            .write()
-            .record_dependencies(path, &result.accessed_files);
-        Ok((result.html, meta))
+    // Cache the indexed VDOM if available (development mode)
+    if let Some(indexed) = result.indexed_vdom {
+        crate::hotreload::VDOM_CACHE.insert(path.to_path_buf(), indexed);
     }
+
+    Ok((result.html, meta))
 }
 
 /// Query metadata only.

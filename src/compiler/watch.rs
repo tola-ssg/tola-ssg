@@ -17,7 +17,7 @@
 //! ```
 
 use crate::compiler::assets::{process_asset, rebuild_tailwind};
-use crate::compiler::pages::process_page;
+use crate::compiler::pages::compile_and_write_page;
 use crate::config::SiteConfig;
 use crate::data::virtual_fs;
 use crate::logger::ProgressBars;
@@ -134,7 +134,7 @@ fn compile_with_validation(
 ) -> Result<Vec<anyhow::Error>> {
     // Compile first file to validate template
     let first = normalize_path(files[0]);
-    let first_result = process_page(&first, config, true, None, log_file);
+    let first_result = compile_and_write_page(&first, config, true, None, log_file);
     inc_progress(progress, "content");
 
     if let Err(e) = first_result {
@@ -159,7 +159,7 @@ fn compile_parallel(
         .par_iter()
         .filter_map(|path| {
             let path = normalize_path(path);
-            let result = process_page(&path, config, clean, None, log_file);
+            let result = compile_and_write_page(&path, config, clean, None, log_file);
             inc_progress(progress, "content");
             result.err()
         })

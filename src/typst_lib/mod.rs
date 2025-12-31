@@ -212,54 +212,67 @@ pub fn compile_document(
 // VDOM Compilation API
 // =============================================================================
 
+/// Result of VDOM compilation.
+///
+/// Used by both production and development builds.
+pub struct VdomResult {
+    /// Generated HTML bytes
+    pub html: Vec<u8>,
+    /// Indexed VDOM for diff comparison (only in development mode)
+    pub indexed_vdom: Option<crate::vdom::Document<crate::vdom::Indexed>>,
+    /// Extracted metadata
+    pub metadata: Option<serde_json::Value>,
+    /// Files accessed during compilation
+    pub accessed_files: Vec<std::path::PathBuf>,
+}
+
 /// Compile a Typst file using the VDOM pipeline.
 ///
-/// This uses the new TTG VDOM architecture for HTML generation:
-/// 1. Compile Typst to HtmlDocument
-/// 2. Convert to Raw VDOM (including Frame → SVG conversion)
-/// 3. Transform through Indexer → ProcessFolder pipeline
-/// 4. Render to HTML bytes
+/// This is the **unified entry point** for all compilation modes.
+/// The `driver` parameter controls:
+/// - `emit_ids()`: Whether to output `data-tola-id` attributes
+/// - `cache_vdom()`: Whether to return indexed VDOM for hot reload
 ///
-/// Returns `CompileResult` compatible with the existing API.
-pub fn compile_vdom(
+/// # Examples
+///
+/// ```ignore
+/// // Production build
+/// let result = compile_vdom(&Production, path, root, "tola-meta")?;
+/// assert!(result.indexed_vdom.is_none());
+///
+/// // Development build
+/// let result = compile_vdom(&Development, path, root, "tola-meta")?;
+/// cache.insert(path, result.indexed_vdom.unwrap());
+/// ```
+pub fn compile_vdom<D: crate::driver::BuildDriver>(
+    driver: &D,
     path: &Path,
     root: &Path,
     label_name: &str,
-) -> anyhow::Result<CompileResult> {
+) -> anyhow::Result<VdomResult> {
     let _guard = acquire_test_lock();
     let (_world, document) = compile_base(path, root)?;
 
     let accessed_files = collect_accessed_files(root);
 
-    // Use VDOM pipeline for HTML generation
-    let (vdom_result, metadata) = crate::vdom::compile_to_html_with_meta(&document, label_name);
+    // Use unified VDOM compile function
+    let output = crate::vdom::compile(&document, label_name, driver);
 
-    Ok(CompileResult {
-        html: vdom_result.html,
-        metadata,
+    Ok(VdomResult {
+        html: output.html,
+        indexed_vdom: output.indexed,
+        metadata: output.metadata,
         accessed_files,
     })
 }
 
-/// Compile a Typst file using the VDOM pipeline for development.
-///
-/// Same as `compile_vdom` but emits `data-tola-id` attributes on all elements
-/// for hot reload support. Use this when `tola serve` is running.
-///
-/// Returns `DevCompileResult` which includes the Indexed VDOM for caching.
-/// This allows the initial build to populate the VDOM cache directly,
-/// avoiding the need for a separate `populate_vdom_cache` pass which would
-/// cause StableId mismatch due to different Typst Span values.
-pub fn compile_vdom_for_dev(
-    path: &Path,
-    root: &Path,
-    label_name: &str,
-) -> anyhow::Result<DevCompileResult> {
-    // Delegate to compile_for_dev_with_vdom which already does what we need
-    compile_for_dev_with_vdom(path, root, label_name)
-}
+// =============================================================================
+// Deprecated APIs (backward compatibility)
+// =============================================================================
 
 /// Result of dev compilation with VDOM for diffing
+///
+/// Deprecated: Use `VdomResult` instead.
 pub struct DevCompileResult {
     /// Generated HTML bytes
     pub html: Vec<u8>,
@@ -271,29 +284,42 @@ pub struct DevCompileResult {
     pub accessed_files: Vec<std::path::PathBuf>,
 }
 
-/// Compile for development mode with VDOM output.
-///
-/// Returns both HTML and the Indexed VDOM tree for diffing.
-/// Used by watch mode to generate minimal patches instead of full reloads.
+/// Deprecated: Use `compile_vdom(&Development, ...)` instead.
+#[deprecated(since = "0.7.0", note = "Use `compile_vdom(&Development, ...)` instead")]
+pub fn compile_vdom_for_dev(
+    path: &Path,
+    root: &Path,
+    label_name: &str,
+) -> anyhow::Result<DevCompileResult> {
+    let result = compile_vdom(&crate::driver::Development, path, root, label_name)?;
+    Ok(DevCompileResult {
+        html: result.html,
+        indexed_vdom: result.indexed_vdom.expect("Development driver should cache VDOM"),
+        metadata: result.metadata,
+        accessed_files: result.accessed_files,
+    })
+}
+
+/// Deprecated: Use `compile_vdom(&Development, ...)` instead.
+#[deprecated(since = "0.7.0", note = "Use `compile_vdom(&Development, ...)` instead")]
+pub fn compile_vdom_with_cache(
+    path: &Path,
+    root: &Path,
+    label_name: &str,
+) -> anyhow::Result<DevCompileResult> {
+    #[allow(deprecated)]
+    compile_vdom_for_dev(path, root, label_name)
+}
+
+/// Deprecated: Use `compile_vdom(&Development, ...)` instead.
+#[deprecated(since = "0.7.0", note = "Use `compile_vdom(&Development, ...)` instead")]
 pub fn compile_for_dev_with_vdom(
     path: &Path,
     root: &Path,
     label_name: &str,
 ) -> anyhow::Result<DevCompileResult> {
-    let _guard = acquire_test_lock();
-    let (_world, document) = compile_base(path, root)?;
-
-    let accessed_files = collect_accessed_files(root);
-
-    // Use VDOM pipeline that returns both HTML and Indexed tree
-    let vdom_result = crate::vdom::compile_for_dev(&document, label_name);
-
-    Ok(DevCompileResult {
-        html: vdom_result.html,
-        indexed_vdom: vdom_result.indexed,
-        metadata: vdom_result.metadata,
-        accessed_files,
-    })
+    #[allow(deprecated)]
+    compile_vdom_for_dev(path, root, label_name)
 }
 
 // =============================================================================

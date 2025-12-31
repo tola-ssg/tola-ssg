@@ -117,97 +117,77 @@ pub fn compile_to_html_with_meta(
     document: &typst_html::HtmlDocument,
     label_name: &str,
 ) -> (VdomCompileResult, Option<serde_json::Value>) {
-    compile_to_html_with_options(document, label_name, false)
+    let result = compile(document, label_name, &crate::driver::Production);
+    (VdomCompileResult { html: result.html, stats: result.stats }, result.metadata)
 }
 
 /// Compile for development mode with hot reload support.
 ///
 /// Emits `data-tola-id` attributes on all elements for VDOM diffing.
+#[deprecated(since = "0.7.0", note = "Use `compile` with Development driver")]
 pub fn compile_to_html_for_dev(
     document: &typst_html::HtmlDocument,
     label_name: &str,
 ) -> (VdomCompileResult, Option<serde_json::Value>) {
-    compile_to_html_with_options(document, label_name, true)
+    let result = compile(document, label_name, &crate::driver::Development);
+    (VdomCompileResult { html: result.html, stats: result.stats }, result.metadata)
 }
 
-/// Internal: compile with configurable options.
-fn compile_to_html_with_options(
+/// Compile with configurable driver.
+///
+/// Deprecated: Use `compile` instead.
+#[deprecated(since = "0.7.0", note = "Use `compile` instead")]
+pub fn compile_to_html_with_driver<D: crate::driver::BuildDriver>(
     document: &typst_html::HtmlDocument,
     label_name: &str,
-    emit_stable_ids: bool,
+    driver: &D,
 ) -> (VdomCompileResult, Option<serde_json::Value>) {
-    use transform::Transform;
-    use typst::foundations::{Label, Selector};
-    use typst::introspection::MetadataElem;
-    use typst::utils::PicoStr;
-
-    // Extract metadata
-    let meta = (|| {
-        let label = Label::new(PicoStr::intern(label_name))?;
-        let introspector = &document.introspector;
-        let elem = introspector.query_unique(&Selector::Label(label)).ok()?;
-        elem.to_packed::<MetadataElem>()
-            .and_then(|meta| serde_json::to_value(&meta.value).ok())
-    })();
-
-    // Raw phase: convert from typst
-    let raw_doc = from_typst_html(document);
-
-    // Transform through pipeline
-    let indexed_doc = Indexer::new().transform(raw_doc);
-    let mut process_folder = ProcessFolder::new();
-    let processed_doc = fold(indexed_doc, &mut process_folder);
-    let stats = processed_doc.ext.clone();
-
-    // Render to HTML with appropriate config
-    let renderer_config = if emit_stable_ids {
-        transforms::render::HtmlRendererConfig::for_dev()
-    } else {
-        transforms::render::HtmlRendererConfig::for_production()
-    };
-    let html = HtmlRenderer::with_config(renderer_config).render(processed_doc);
-
-    (VdomCompileResult { html, stats }, meta)
+    let result = compile(document, label_name, driver);
+    (VdomCompileResult { html: result.html, stats: result.stats }, result.metadata)
 }
 
 // =============================================================================
-// Hot Reload Support: VDOM Diff API
+// Unified Compilation API
 // =============================================================================
 
-/// Result of VDOM compilation with Indexed tree for diffing
+/// Unified result of VDOM compilation.
+///
+/// Contains HTML output and optionally the Indexed VDOM tree (for hot reload).
 #[derive(Debug)]
-pub struct VdomDevResult {
+pub struct CompileOutput {
     /// Generated HTML bytes
     pub html: Vec<u8>,
-    /// Indexed VDOM for diff comparison
-    pub indexed: Document<Indexed>,
+    /// Indexed VDOM for diff comparison (only when driver.cache_vdom() is true)
+    pub indexed: Option<Document<Indexed>>,
     /// Processing statistics
     pub stats: ProcessedDocExt,
     /// Extracted metadata (if any)
     pub metadata: Option<serde_json::Value>,
 }
 
-/// Compile for development with both HTML and Indexed VDOM.
+/// Compile a typst HtmlDocument using the VDOM pipeline.
 ///
-/// This function is optimized for hot reload: it returns the Indexed VDOM
-/// which can be cached and compared with the next compilation to generate
-/// minimal patches.
+/// This is the **unified entry point** for all compilation modes.
+/// The `driver` parameter controls:
+/// - `emit_ids()`: Whether to output `data-tola-id` attributes
+/// - `cache_vdom()`: Whether to return indexed VDOM for hot reload
 ///
-/// # Usage
+/// # Examples
 ///
 /// ```ignore
-/// // First compilation
-/// let result = vdom::compile_for_dev(&document, "tola-meta");
-/// cache.insert(path, result.indexed.clone());
+/// // Production build
+/// let result = vdom::compile(&document, "tola-meta", &Production);
+/// assert!(result.indexed.is_none()); // No VDOM cache needed
 ///
-/// // On file change
-/// let new_result = vdom::compile_for_dev(&new_document, "tola-meta");
-/// let patches = hotreload::diff_indexed_documents(&cache[path], &new_result.indexed);
+/// // Development build (hot reload)
+/// let result = vdom::compile(&document, "tola-meta", &Development);
+/// cache.insert(path, result.indexed.unwrap()); // Cache for diffing
 /// ```
-pub fn compile_for_dev(
+pub fn compile<D: crate::driver::BuildDriver>(
     document: &typst_html::HtmlDocument,
     label_name: &str,
-) -> VdomDevResult {
+    driver: &D,
+) -> CompileOutput {
     use transform::Transform;
     use typst::foundations::{Label, Selector};
     use typst::introspection::MetadataElem;
@@ -228,22 +208,76 @@ pub fn compile_for_dev(
     // Transform to Indexed
     let indexed_doc = Indexer::new().transform(raw_doc);
 
-    // Clone for return before consuming
-    let indexed_for_cache = indexed_doc.clone();
+    // Optionally cache for hot reload
+    let indexed_for_cache = if driver.cache_vdom() {
+        Some(indexed_doc.clone())
+    } else {
+        None
+    };
 
     // Continue pipeline to get HTML
     let mut process_folder = ProcessFolder::new();
     let processed_doc = fold(indexed_doc, &mut process_folder);
     let stats = processed_doc.ext.clone();
 
-    // Render with stable IDs for hot reload
-    let renderer_config = transforms::render::HtmlRendererConfig::for_dev();
+    // Render with appropriate config
+    let renderer_config = if driver.emit_ids() {
+        transforms::render::HtmlRendererConfig::for_dev()
+    } else {
+        transforms::render::HtmlRendererConfig::for_production()
+    };
     let html = HtmlRenderer::with_config(renderer_config).render(processed_doc);
 
-    VdomDevResult {
+    CompileOutput {
         html,
         indexed: indexed_for_cache,
-        metadata: meta,
         stats,
+        metadata: meta,
     }
+}
+
+// =============================================================================
+// Deprecated APIs (for backward compatibility)
+// =============================================================================
+
+/// Result of VDOM compilation with Indexed tree for diffing
+///
+/// Deprecated: Use `CompileOutput` instead.
+#[derive(Debug)]
+pub struct VdomDevResult {
+    /// Generated HTML bytes
+    pub html: Vec<u8>,
+    /// Indexed VDOM for diff comparison
+    pub indexed: Document<Indexed>,
+    /// Processing statistics
+    pub stats: ProcessedDocExt,
+    /// Extracted metadata (if any)
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// Compile for development with both HTML and Indexed VDOM.
+///
+/// Deprecated: Use `compile` with Development driver instead.
+#[deprecated(since = "0.7.0", note = "Use `compile` with Development driver instead")]
+pub fn compile_with_vdom_cache(
+    document: &typst_html::HtmlDocument,
+    label_name: &str,
+) -> VdomDevResult {
+    let result = compile(document, label_name, &crate::driver::Development);
+    VdomDevResult {
+        html: result.html,
+        indexed: result.indexed.expect("Development driver should cache VDOM"),
+        stats: result.stats,
+        metadata: result.metadata,
+    }
+}
+
+/// Deprecated: Use `compile` with Development driver instead.
+#[deprecated(since = "0.7.0", note = "Use `compile` with Development driver instead")]
+pub fn compile_for_dev(
+    document: &typst_html::HtmlDocument,
+    label_name: &str,
+) -> VdomDevResult {
+    #[allow(deprecated)]
+    compile_with_vdom_cache(document, label_name)
 }

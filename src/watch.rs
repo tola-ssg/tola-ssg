@@ -33,7 +33,7 @@
 //! ```
 
 use crate::{
-    compiler::{pages::process_page_for_dev, process_watched_files},
+    compiler::{pages::{process_page, write_page_html}, process_watched_files},
     config::{cfg, reload_config, SiteConfig},
     driver::Development,
     hotreload::{broadcast_patches, broadcast_reload, diff_indexed_documents, VDOM_CACHE},
@@ -367,7 +367,7 @@ fn process_with_vdom_diff(
 
         if ext == Some("typ") {
             // Content file: use VDOM diff
-            match process_page_for_dev(path, config) {
+            match process_page(&Development, path, config) {
                 Ok(Some(result)) => {
                     count += 1;
                     any_content_changed = true;
@@ -377,8 +377,12 @@ fn process_with_vdom_diff(
 
                     // Determine if we need reload or can use patches
                     let needs_reload = if let Some(old) = old_vdom {
+                        // Get indexed VDOM (should always exist in Development mode)
+                        let indexed = result.indexed_vdom.as_ref()
+                            .expect("Development driver should provide indexed VDOM");
+
                         // Diff and check if we can patch
-                        let diff_result = diff_indexed_documents(&old, &result.indexed_vdom);
+                        let diff_result = diff_indexed_documents(&old, indexed);
 
                         // Debug: log diff stats
                         log!("hotreload"; "diff stats: elems={} text={} kept={} replaced={} text_updates={}",
@@ -410,12 +414,11 @@ fn process_with_vdom_diff(
                     // Only write file and reload if patches couldn't be applied
                     if needs_reload {
                         // Write HTML file to disk before reload
-                        crate::compiler::pages::write_page_for_dev(&result.page, config)?;
+                        write_page_html(&result.page, config)?;
                         broadcast_reload();
                     }
 
-                    // Update cache
-                    VDOM_CACHE.insert(path.clone(), result.indexed_vdom);
+                    // Update cache (indexed_vdom is already cached by process_page)
                 }
                 Ok(None) => {
                     // Skipped (draft or up-to-date)
@@ -466,8 +469,6 @@ fn handle_full_rebuild(reason: &str, status: &mut WatchStatus) -> bool {
 /// This enables immediate incremental patching on first edit
 /// instead of falling back to full reload.
 fn populate_vdom_cache(config: &SiteConfig) {
-    use crate::compiler::pages::process_page_for_dev;
-
     let content_files = crate::compiler::collect_all_files(&config.build.content);
     let typ_files: Vec<_> = content_files
         .into_iter()
@@ -481,9 +482,8 @@ fn populate_vdom_cache(config: &SiteConfig) {
     log!("vdom"; "populating cache for {} files", typ_files.len());
 
     for path in typ_files {
-        if let Ok(Some(result)) = process_page_for_dev(&path, config) {
-            VDOM_CACHE.insert(path, result.indexed_vdom);
-        }
+        // process_page with Development driver automatically caches indexed VDOM
+        let _ = process_page(&Development, &path, config);
     }
 }
 
