@@ -82,6 +82,14 @@ pub fn serve_site() -> Result<()> {
         match ws_server.start() {
             Ok(port) => {
                 log!("hotreload"; "ws://localhost:{}", port);
+
+                // Generate hotreload JS file in output directory
+                if let Err(e) = hotreload::server::generate_hotreload_js(&c.build.output, port) {
+                    log!("hotreload"; "failed to generate JS: {}", e);
+                }
+                // Clean up old versions
+                let _ = hotreload::server::cleanup_old_hotreload_js(&c.build.output);
+
                 Some(port)
             }
             Err(e) => {
@@ -257,10 +265,11 @@ fn serve_not_found(request: Request) -> Result<()> {
 
 /// Inject hot reload script into HTML content.
 ///
-/// Inserts the WebSocket client script before the closing </body> tag,
+/// Inserts the script tag before the closing </body> tag,
 /// or at the end of the document if </body> is not found.
-fn inject_hot_reload_script(content: &[u8], ws_port: u16) -> Vec<u8> {
-    let script = hotreload::server::get_client_script(ws_port);
+fn inject_hot_reload_script(content: &[u8], _ws_port: u16) -> Vec<u8> {
+    use crate::embed::HOTRELOAD_JS;
+    let script = HOTRELOAD_JS.html_tag();
 
     // Try to find </body> tag (case-insensitive)
     let html = String::from_utf8_lossy(content);

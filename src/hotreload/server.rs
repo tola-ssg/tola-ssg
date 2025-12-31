@@ -249,278 +249,30 @@ fn handle_client(stream: TcpStream) {
     BROADCAST.add_client(ws);
 }
 
-/// Get the JavaScript client code for hot reload
+// =============================================================================
+// Client Script
+// =============================================================================
+
+use crate::embed::{HOTRELOAD_JS, TemplateVar};
+
+/// Generate and write the hotreload JS file to the output directory.
 ///
-/// This returns a small JS snippet that connects to the WebSocket server
-/// and handles reload messages.
+/// The JS file contains the WebSocket port as a placeholder that needs
+/// to be replaced at runtime.
 ///
-/// # StableId-based Patching
+/// Returns the relative path to the generated file.
+pub fn generate_hotreload_js(
+    output_dir: &std::path::Path,
+    ws_port: u16,
+) -> std::io::Result<std::path::PathBuf> {
+    HOTRELOAD_JS.write_rendered_to(output_dir, &[TemplateVar::WsPort(ws_port)])
+}
+
+/// Clean up old hotreload JS files (files matching `.hotreload-*.js` pattern).
 ///
-/// The runtime uses `data-tola-id` attributes for node targeting:
-/// - Elements are identified by their StableId (derived from Typst Span)
-/// - This enables accurate patching even when DOM structure changes
-/// - Move operations preserve element state (scroll position, focus, etc.)
-pub fn get_client_script(ws_port: u16) -> String {
-    let s = r#"<script>
-(function() {
-  // ==========================================================================
-  // Tola Hot Reload Runtime
-  // ==========================================================================
-  //
-  // Uses StableId (data-tola-id) for node targeting instead of CSS selectors.
-  // This enables:
-  // - Move detection (reordered nodes don't trigger delete+insert)
-  // - Stable identity across compilations
-  // - SyncTeX integration (click-to-source navigation)
-
-  const Tola = {
-    // StableId -> Element mapping for O(1) lookups
-    idMap: new Map(),
-    ws: null,
-    reconnectDelay: 1000,
-
-    // Hydrate: build idMap from existing DOM
-    hydrate() {
-      this.idMap.clear();
-      document.querySelectorAll('[data-tola-id]').forEach(el => {
-        this.idMap.set(el.dataset.tolaId, el);
-      });
-      console.log('[tola] hydrated', this.idMap.size, 'nodes');
-    },
-
-    // Connect to WebSocket server
-    connect(port) {
-      this.ws = new WebSocket(`ws://localhost:${port}/`);
-
-      this.ws.onopen = () => {
-        console.log('[tola] hot reload connected');
-        this.reconnectDelay = 1000;
-        this.hydrate();
-      };
-
-      this.ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          this.handleMessage(msg);
-        } catch (err) {
-          console.error('[tola] message error:', err);
-        }
-      };
-
-      this.ws.onclose = () => {
-        console.log('[tola] connection closed, reconnecting in', this.reconnectDelay, 'ms');
-        setTimeout(() => {
-          this.reconnectDelay = Math.min(this.reconnectDelay * 1.5, 10000);
-          location.reload();
-        }, this.reconnectDelay);
-      };
-
-      this.ws.onerror = (err) => {
-        console.error('[tola] WebSocket error:', err);
-      };
-    },
-
-    // Handle incoming message
-    handleMessage(msg) {
-      switch (msg.type) {
-        case 'reload':
-          console.log('[tola] reloading:', msg.reason || 'file changed');
-          location.reload();
-          break;
-        case 'patch':
-          this.applyPatches(msg.ops);
-          break;
-        case 'connected':
-          console.log('[tola] server version:', msg.version);
-          break;
-        case 'full_sync':
-          // Full document replacement
-          document.documentElement.innerHTML = msg.html;
-          this.hydrate();
-          break;
-      }
-    },
-
-    // Apply patch operations
-    applyPatches(ops) {
-      for (const op of ops) {
-        try {
-          this.applyPatch(op);
-        } catch (err) {
-          console.error('[tola] patch error:', op, err);
-          // Fallback to full reload on error
-          location.reload();
-          return;
-        }
-      }
-      // Re-hydrate after patches to update idMap
-      this.hydrate();
-    },
-
-    // Apply single patch operation
-    applyPatch(op) {
-      switch (op.op) {
-        case 'replace': {
-          const target = this.getById(op.target);
-          if (target) {
-            target.outerHTML = op.html;
-          }
-          break;
-        }
-        case 'text': {
-          const target = this.getById(op.target);
-          if (target) {
-            target.textContent = op.text;
-          }
-          break;
-        }
-        case 'text_at_pos': {
-          // Update text content at a specific child position
-          // Used for text nodes that don't have their own data-tola-id
-          const parent = this.getById(op.parent);
-          if (parent) {
-            const pos = parseInt(op.position, 10);
-            const childNodes = parent.childNodes;
-            if (pos < childNodes.length) {
-              const node = childNodes[pos];
-              if (node.nodeType === Node.TEXT_NODE) {
-                node.textContent = op.text;
-              } else if (node.nodeType === Node.ELEMENT_NODE) {
-                // If it's an element, set its textContent
-                node.textContent = op.text;
-              }
-            } else {
-              // Position out of bounds - append as new text node
-              parent.appendChild(document.createTextNode(op.text));
-            }
-          }
-          break;
-        }
-        case 'remove': {
-          const target = this.getById(op.target);
-          if (target) {
-            target.remove();
-            this.idMap.delete(op.target);
-          }
-          break;
-        }
-        case 'remove_at_pos': {
-          // Remove child at a specific position
-          // Used for text nodes that don't have their own data-tola-id
-          const parent = this.getById(op.parent);
-          if (parent) {
-            const pos = parseInt(op.position, 10);
-            const childNodes = parent.childNodes;
-            if (pos < childNodes.length) {
-              childNodes[pos].remove();
-            }
-          }
-          break;
-        }
-        case 'insert': {
-          const parent = this.getById(op.parent);
-          if (parent) {
-            // Defensive insert: avoid duplicating elements that already exist
-            const temp = document.createElement('div');
-            temp.innerHTML = op.html;
-            const newIds = Array.from(temp.querySelectorAll('[data-tola-id]')).map(el => el.dataset.tolaId);
-
-            // If any of the new IDs already exist in the document, perform targeted replaces
-            if (newIds.some(id => document.querySelector(`[data-tola-id="${id}"]`))) {
-              newIds.forEach(id => {
-                const newEl = temp.querySelector(`[data-tola-id="${id}"]`);
-                const existing = document.querySelector(`[data-tola-id="${id}"]`);
-                if (newEl && existing) {
-                  existing.outerHTML = newEl.outerHTML;
-                }
-              });
-            } else {
-              // Insert at specific position
-              const children = parent.children;
-              if (op.position >= children.length) {
-                parent.insertAdjacentHTML('beforeend', op.html);
-              } else {
-                children[op.position].insertAdjacentHTML('beforebegin', op.html);
-              }
-            }
-          }
-          break;
-        }
-        case 'move': {
-          const target = this.getById(op.target);
-          const newParent = this.getById(op.new_parent);
-          if (target && newParent) {
-            // Remove from current position
-            target.remove();
-            // Insert at new position
-            const children = newParent.children;
-            if (op.position >= children.length) {
-              newParent.appendChild(target);
-            } else {
-              newParent.insertBefore(target, children[op.position]);
-            }
-          }
-          break;
-        }
-        case 'attrs': {
-          const target = this.getById(op.target);
-          if (target) {
-            for (const [name, value] of op.attrs) {
-              if (value === null) {
-                target.removeAttribute(name);
-              } else {
-                target.setAttribute(name, value);
-              }
-            }
-          }
-          break;
-        }
-        // Legacy CSS selector-based ops (backward compatibility)
-        default: {
-          const target = document.querySelector(op.target);
-          if (target) {
-            if (op.op === 'replace') target.outerHTML = op.html;
-            else if (op.op === 'text') target.textContent = op.text;
-            else if (op.op === 'remove') target.remove();
-          }
-        }
-      }
-    },
-
-    // Get element by StableId
-    getById(id) {
-      // Try cache first
-      let el = this.idMap.get(id);
-      if (el && el.isConnected) return el;
-
-      // Fallback to querySelector
-      el = document.querySelector(`[data-tola-id="${id}"]`);
-      if (el) {
-        this.idMap.set(id, el);
-      }
-      return el;
-    },
-
-    // SyncTeX: get source location from element
-    getSourceLocation(el) {
-      while (el && el !== document.body) {
-        const id = el.dataset?.tolaId;
-        if (id) {
-          return { id, tag: el.tagName.toLowerCase() };
-        }
-        el = el.parentElement;
-      }
-      return null;
-    }
-  };
-
-  // Initialize
-  Tola.connect(__TOLA_WS_PORT__);
-  window.Tola = Tola;
-})();
-</script>"#;
-
-    s.replace("__TOLA_WS_PORT__", &ws_port.to_string())
+/// Keeps only the current version based on hash.
+pub fn cleanup_old_hotreload_js(output_dir: &std::path::Path) -> std::io::Result<()> {
+    HOTRELOAD_JS.cleanup_old(output_dir)
 }
 
 #[cfg(test)]
@@ -528,15 +280,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_client_script_generation() {
-        let script = get_client_script(35729);
-        // Basic sanity checks
-        assert!(!script.is_empty(), "Script should not be empty");
-        assert!(script.starts_with("<script>"), "Script should start with <script> tag");
-        assert!(script.ends_with("</script>"), "Script should end with </script> tag");
-        // Check key components
-        assert!(script.contains("35729"), "Script should contain the port number");
-        assert!(script.contains("ws://"), "Script should contain WebSocket URL");
-        assert!(script.contains("Tola"), "Script should contain Tola object");
+    fn test_hotreload_js_filename() {
+        let filename = HOTRELOAD_JS.filename();
+        assert!(filename.starts_with(".hotreload-"), "Should start with .hotreload-");
+        assert!(filename.ends_with(".js"), "Should end with .js");
+    }
+
+    #[test]
+    fn test_hotreload_js_hash() {
+        let hash = HOTRELOAD_JS.hash();
+        assert_eq!(hash.len(), 8, "Hash should be 8 characters");
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()), "Hash should be hex");
+    }
+
+    #[test]
+    fn test_client_script_tag() {
+        let tag = HOTRELOAD_JS.html_tag();
+        assert!(tag.starts_with("<script"), "Should be a script tag");
+        assert!(tag.contains("src="), "Should have src attribute");
+        assert!(tag.contains(".hotreload-"), "Should reference hotreload file");
+        assert!(tag.contains(".js"), "Should reference JS file");
+        assert!(tag.contains("data-tola-generated"), "Should have generated marker");
     }
 }

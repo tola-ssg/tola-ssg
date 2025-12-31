@@ -5,70 +5,35 @@
 //! - Tailwind CSS build integration
 
 use crate::config::SiteConfig;
+use crate::embed::ENHANCE_CSS;
 use crate::utils::exec::FilterRule;
 use crate::exec;
 use anyhow::{anyhow, Result};
-use std::{
-    fs,
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 // ============================================================================
 // Auto-enhance CSS
 // ============================================================================
 
-/// CSS content for SVG theme adaptation and dark mode support.
-/// Loaded from `src/embed/css/enhance.css` at compile time.
-const ENHANCE_CSS: &str = include_str!("../embed/css/enhance.css");
-
-/// Compute the hash for the enhance CSS content.
-fn compute_hash() -> String {
-    crate::utils::hash::fingerprint(ENHANCE_CSS)
-}
-
 /// Get the enhance CSS filename (hidden file with hash).
 ///
 /// Returns a filename like `.enhance-a1b2c3d4.css`.
 pub fn enhance_css_filename() -> String {
-    format!(".enhance-{}.css", compute_hash())
+    ENHANCE_CSS.filename()
 }
 
 /// Generate and write the auto-enhance CSS file to the output directory.
 ///
 /// Returns the relative path to the generated file.
 pub fn generate_enhance_css(output_dir: &Path) -> Result<PathBuf> {
-    let filename = enhance_css_filename();
-    let path = output_dir.join(&filename);
-
-    // Write CSS file
-    let mut file = fs::File::create(&path)?;
-    file.write_all(ENHANCE_CSS.as_bytes())?;
-
-    Ok(PathBuf::from(filename))
+    Ok(ENHANCE_CSS.write_to(output_dir)?)
 }
 
 /// Clean up old enhance CSS files (files matching `.enhance-*.css` pattern).
 ///
 /// Keeps only the current version based on hash.
 pub fn cleanup_old_enhance_css(output_dir: &Path) -> Result<()> {
-    let current_filename = enhance_css_filename();
-
-    for entry in fs::read_dir(output_dir)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-
-        // Match pattern: .enhance-{hash}.css but not current file
-        if name_str.starts_with(".enhance-")
-            && name_str.ends_with(".css")
-            && name_str != current_filename
-        {
-            fs::remove_file(entry.path())?;
-        }
-    }
-
-    Ok(())
+    Ok(ENHANCE_CSS.cleanup_old(output_dir)?)
 }
 
 // ============================================================================
@@ -129,6 +94,7 @@ pub fn rebuild_tailwind(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::tempdir;
 
     #[test]

@@ -10,6 +10,7 @@ mod config;
 mod data;
 mod deploy;
 mod driver;
+mod embed;
 mod generator;
 mod hotreload;
 mod init;
