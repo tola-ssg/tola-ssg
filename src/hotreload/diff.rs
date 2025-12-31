@@ -792,9 +792,6 @@ impl IndexedDiffContext {
                 // since text nodes don't have data-tola-id in DOM
                 self.stats.text_nodes_compared += 1;
                 if old_text.content != new_text.content {
-                    // We need to target the parent and update at specific position
-                    // For now, use UpdateText with parent ID if this is the only text child
-                    // Otherwise, we need a more sophisticated approach
                     self.ops.push(StableIdPatch::UpdateTextAtPosition {
                         parent: parent_id,
                         position: position as u32,
@@ -803,7 +800,34 @@ impl IndexedDiffContext {
                     self.stats.text_updates += 1;
                 }
             }
-            // Different node types at same position - replace
+            // Different node types at same position
+            // Text nodes don't have data-tola-id in DOM, so we need to handle them specially
+            (Node::Text(_), _) => {
+                // Old is text, new is element: remove text at position, insert new element
+                self.ops.push(StableIdPatch::RemoveAtPosition {
+                    parent: parent_id,
+                    position: position as u32,
+                });
+                self.ops.push(StableIdPatch::Insert {
+                    parent: parent_id,
+                    position: position as u32,
+                    html: render_indexed_node_html(new),
+                });
+                self.stats.nodes_replaced += 1;
+            }
+            (_, Node::Text(_)) => {
+                // Old is element, new is text: remove element by ID, insert text
+                self.ops.push(StableIdPatch::Remove {
+                    target: get_indexed_node_stable_id(old),
+                });
+                self.ops.push(StableIdPatch::Insert {
+                    parent: parent_id,
+                    position: position as u32,
+                    html: render_indexed_node_html(new),
+                });
+                self.stats.nodes_replaced += 1;
+            }
+            // Both are elements but different types (Frame to Element, etc.) - replace by ID
             _ => {
                 self.ops.push(StableIdPatch::Replace {
                     target: get_indexed_node_stable_id(old),

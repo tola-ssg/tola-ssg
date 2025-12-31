@@ -147,10 +147,10 @@ pub fn process_page<D: crate::driver::BuildDriver>(
     // Update global site data
     GLOBAL_SITE_DATA.insert_page(page_meta_to_data(&page));
 
-    // Cache VDOM if driver requests it
-    if let Some(ref indexed) = result.indexed_vdom {
-        crate::hotreload::VDOM_CACHE.insert(path.to_path_buf(), indexed.clone());
-    }
+    // NOTE: Do NOT update VDOM_CACHE here!
+    // The caller (watch.rs) is responsible for updating the cache AFTER
+    // successfully sending patches or triggering reload.
+    // This ensures VDOM_CACHE stays in sync with what the browser actually displays.
 
     Ok(Some(PageResult {
         page,

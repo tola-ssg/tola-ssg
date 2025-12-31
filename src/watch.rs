@@ -330,10 +330,18 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
         if !virtual_dependents.is_empty() {
             log!("hotreload"; "cascading to {} virtual data dependents", virtual_dependents.len());
 
-            // Use VDOM diff for cascade update too (same as incremental)
-            if let Err(e) = process_with_vdom_diff(&virtual_dependents, &c, false, status, &rel) {
-                status.error("failed: site data update", &e.to_string());
+            // For cascade updates, use full reload instead of patch.
+            // Reason: VDOM_CACHE stores the state from when the page was last *directly* edited,
+            // but the browser may show a different state (e.g., from page load or previous cascade).
+            // Using patch here would cause inconsistency between browser DOM and expected state.
+            for path in &virtual_dependents {
+                if let Ok(Some(result)) = process_page(&Development, path, &c) {
+                    if let Err(e) = write_page_html(&result.page, &c) {
+                        log!("error"; "failed to write {}: {}", path.display(), e);
+                    }
+                }
             }
+            broadcast_reload();
         }
     }
 
@@ -371,7 +379,7 @@ fn process_with_vdom_diff(
         let ext = path.extension().and_then(|e| e.to_str());
 
         if ext == Some("typ") {
-            // Get old VDOM from cache BEFORE compilation (process_page updates the cache)
+            // Get old VDOM from cache BEFORE compilation
             let old_vdom = VDOM_CACHE.get(path);
 
             // Content file: use VDOM diff
@@ -380,14 +388,14 @@ fn process_with_vdom_diff(
                     count += 1;
                     any_content_changed = true;
 
-                    // Determine if we need reload or can use patches
-                    let needs_reload = if let Some(old) = old_vdom {
-                        // Get indexed VDOM (should always exist in Development mode)
-                        let indexed = result.indexed_vdom.as_ref()
-                            .expect("Development driver should provide indexed VDOM");
+                    // Get the new indexed VDOM
+                    let new_vdom = result.indexed_vdom.as_ref()
+                        .expect("Development driver should provide indexed VDOM");
 
+                    // Determine if we need reload or can use patches
+                    let needs_reload = if let Some(ref old) = old_vdom {
                         // Diff and check if we can patch
-                        let diff_result = diff_indexed_documents(&old, indexed);
+                        let diff_result = diff_indexed_documents(old, new_vdom);
 
                         // Debug: log diff stats
                         log!("hotreload"; "diff stats: elems={} text={} kept={} replaced={} text_updates={}",
@@ -405,8 +413,10 @@ fn process_with_vdom_diff(
                             log!("hotreload"; "no changes detected for {}", rel(path));
                             false
                         } else {
-                            // Broadcast patches - no file write needed!
+                            // Broadcast patches for live update
                             log!("hotreload"; "patch {} ({} ops): {:?}", rel(path), diff_result.ops.len(), diff_result.ops);
+                            // Always write HTML to disk (for page refresh/new tabs)
+                            write_page_html(&result.page, config)?;
                             broadcast_patches(&result.url_path, &diff_result.ops);
                             false
                         }
@@ -416,14 +426,15 @@ fn process_with_vdom_diff(
                         true
                     };
 
-                    // Only write file and reload if patches couldn't be applied
+                    // Write file and reload if needed
                     if needs_reload {
-                        // Write HTML file to disk before reload
                         write_page_html(&result.page, config)?;
                         broadcast_reload();
                     }
 
-                    // Update cache (indexed_vdom is already cached by process_page)
+                    // Update VDOM cache AFTER successful write/broadcast
+                    // This keeps cache in sync with what browser should display
+                    VDOM_CACHE.insert(path.to_path_buf(), new_vdom.clone());
                 }
                 Ok(None) => {
                     // Skipped (draft or up-to-date)
@@ -486,9 +497,14 @@ fn populate_vdom_cache(config: &SiteConfig) {
 
     log!("vdom"; "populating cache for {} files", typ_files.len());
 
-    for path in typ_files {
-        // process_page with Development driver automatically caches indexed VDOM
-        let _ = process_page(&Development, &path, config);
+    for path in &typ_files {
+        // process_page with Development driver compiles and returns indexed VDOM
+        if let Ok(Some(result)) = process_page(&Development, path, config) {
+            // Cache the indexed VDOM for later diffing
+            if let Some(indexed_vdom) = result.indexed_vdom {
+                VDOM_CACHE.insert(path.to_path_buf(), indexed_vdom);
+            }
+        }
     }
 }
 
