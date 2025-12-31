@@ -524,18 +524,51 @@ impl IndexedDiffContext {
         self.diff_attrs(old, new);
 
         // Fast path: single text child optimization
-        // If both old and new have exactly one text child, update parent's textContent directly
-        // This avoids the need for text nodes to have data-tola-id in the DOM
-        if let (Some(old_text), Some(new_text)) = (get_single_text_child(&old.children), get_single_text_child(&new.children)) {
-            if old_text != new_text {
+        // Text nodes don't have data-tola-id in the DOM, so we handle them specially
+        // by updating the parent element's textContent directly.
+        //
+        // This handles three cases:
+        // 1. Both have single text child -> update textContent if different
+        // 2. Old has single text, new is empty -> clear textContent
+        // 3. Old is empty, new has single text -> set textContent
+        let old_single_text = get_single_text_child(&old.children);
+        let new_single_text = get_single_text_child(&new.children);
+
+        match (old_single_text, new_single_text) {
+            // Case 1: Both have single text child
+            (Some(old_text), Some(new_text)) => {
+                if old_text != new_text {
+                    self.ops.push(StableIdPatch::UpdateText {
+                        target: old_id,
+                        text: new_text.to_string(),
+                    });
+                    self.stats.text_updates += 1;
+                }
+                self.stats.nodes_kept += 1;
+                return;
+            }
+            // Case 2: Old has text, new is empty -> clear content
+            (Some(_old_text), None) if new.children.is_empty() => {
                 self.ops.push(StableIdPatch::UpdateText {
-                    target: old_id, // Use parent element's ID, not text node's
+                    target: old_id,
+                    text: String::new(),
+                });
+                self.stats.text_updates += 1;
+                self.stats.nodes_kept += 1;
+                return;
+            }
+            // Case 3: Old is empty, new has text -> set content
+            (None, Some(new_text)) if old.children.is_empty() => {
+                self.ops.push(StableIdPatch::UpdateText {
+                    target: old_id,
                     text: new_text.to_string(),
                 });
                 self.stats.text_updates += 1;
+                self.stats.nodes_kept += 1;
+                return;
             }
-            self.stats.nodes_kept += 1;
-            return;
+            // Other cases: fall through to full children diff
+            _ => {}
         }
 
         // Diff children using LCS
@@ -956,5 +989,96 @@ mod indexed_tests {
         }
         assert!(first_remove.is_none() || first_insert.is_none() || first_remove.unwrap() < first_insert.unwrap(), "Removals should come before inserts to avoid duplicates: ops={:?}", r.ops);
     }
-}
 
+    #[test]
+    fn test_single_text_child_empty_to_text() {
+        // Test: old element is empty, new element has single text child
+        // Should generate UpdateText to parent, not Insert of text node
+        use crate::vdom::{Document, Element, Node, Text, FamilyExt, NodeId};
+        use crate::vdom::id::StableId;
+
+        // Build old: <p></p>
+        let mut root_old = Element::new("body");
+        let p_ext = crate::vdom::phase::IndexedElemExt::<crate::vdom::family::OtherFamily> {
+            stable_id: StableId::from_raw(100),
+            node_id: NodeId::new(1),
+            family_data: (),
+        };
+        let p_old = Element::with_ext("p", FamilyExt::Other(p_ext));
+        // Empty children
+        root_old.children.push(Node::Element(Box::new(p_old)));
+        let old = Document::new(root_old);
+
+        // Build new: <p>Hello</p>
+        let mut root_new = Element::new("body");
+        let p_ext2 = crate::vdom::phase::IndexedElemExt::<crate::vdom::family::OtherFamily> {
+            stable_id: StableId::from_raw(100),
+            node_id: NodeId::new(1),
+            family_data: (),
+        };
+        let mut p_new = Element::with_ext("p", FamilyExt::Other(p_ext2));
+        let mut txt = Text::new("Hello");
+        txt.ext = crate::vdom::phase::IndexedTextExt::new(StableId::from_raw(200));
+        p_new.children.push(Node::Text(txt));
+        root_new.children.push(Node::Element(Box::new(p_new)));
+        let new = Document::new(root_new);
+
+        let result = diff_indexed_documents(&old, &new);
+
+        // Should have UpdateText targeting the paragraph (id=100), not Insert
+        let has_update_text = result.ops.iter().any(|op| {
+            matches!(op, StableIdPatch::UpdateText { target, text } if target.as_raw() == 100 && text == "Hello")
+        });
+        assert!(has_update_text, "Expected UpdateText to parent element, got: {:?}", result.ops);
+
+        // Should NOT have any Insert operations
+        let has_insert = result.ops.iter().any(|op| matches!(op, StableIdPatch::Insert { .. }));
+        assert!(!has_insert, "Should not have Insert for text node: {:?}", result.ops);
+    }
+
+    #[test]
+    fn test_single_text_child_text_to_empty() {
+        // Test: old element has single text child, new element is empty
+        // Should generate UpdateText with empty string, not Remove of text node
+        use crate::vdom::{Document, Element, Node, Text, FamilyExt, NodeId};
+        use crate::vdom::id::StableId;
+
+        // Build old: <p>Hello</p>
+        let mut root_old = Element::new("body");
+        let p_ext = crate::vdom::phase::IndexedElemExt::<crate::vdom::family::OtherFamily> {
+            stable_id: StableId::from_raw(100),
+            node_id: NodeId::new(1),
+            family_data: (),
+        };
+        let mut p_old = Element::with_ext("p", FamilyExt::Other(p_ext));
+        let mut txt = Text::new("Hello");
+        txt.ext = crate::vdom::phase::IndexedTextExt::new(StableId::from_raw(200));
+        p_old.children.push(Node::Text(txt));
+        root_old.children.push(Node::Element(Box::new(p_old)));
+        let old = Document::new(root_old);
+
+        // Build new: <p></p>
+        let mut root_new = Element::new("body");
+        let p_ext2 = crate::vdom::phase::IndexedElemExt::<crate::vdom::family::OtherFamily> {
+            stable_id: StableId::from_raw(100),
+            node_id: NodeId::new(1),
+            family_data: (),
+        };
+        let p_new = Element::with_ext("p", FamilyExt::Other(p_ext2));
+        // Empty children
+        root_new.children.push(Node::Element(Box::new(p_new)));
+        let new = Document::new(root_new);
+
+        let result = diff_indexed_documents(&old, &new);
+
+        // Should have UpdateText targeting the paragraph with empty string
+        let has_update_text = result.ops.iter().any(|op| {
+            matches!(op, StableIdPatch::UpdateText { target, text } if target.as_raw() == 100 && text.is_empty())
+        });
+        assert!(has_update_text, "Expected UpdateText with empty string to parent element, got: {:?}", result.ops);
+
+        // Should NOT have any Remove operations
+        let has_remove = result.ops.iter().any(|op| matches!(op, StableIdPatch::Remove { .. }));
+        assert!(!has_remove, "Should not have Remove for text node: {:?}", result.ops);
+    }
+}

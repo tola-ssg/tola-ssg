@@ -83,7 +83,7 @@ impl StableId {
     pub fn for_element(
         tag: &str,
         attrs: &[(String, String)],
-        children: &[StableId],
+        _children: &[StableId],
         position: usize,
     ) -> Self {
         use std::collections::hash_map::DefaultHasher;
@@ -101,10 +101,12 @@ impl StableId {
             v.hash(&mut hasher);
         }
 
-        // Hash child IDs (order matters for children)
-        for child in children {
-            child.0.hash(&mut hasher);
-        }
+        // Hash child IDs (REMOVED: StableId should not depend on children content)
+        // If we include children, ANY change in a leaf node changes the ENTIRE path of StableIds to the root.
+        // This causes the VDOM diff to see the root as "Replaced" instead of finding the small change deep down.
+        // for child in children {
+        //     child.0.hash(&mut hasher);
+        // }
 
         // Hash position to disambiguate identical siblings
         position.hash(&mut hasher);

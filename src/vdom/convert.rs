@@ -40,15 +40,12 @@ use super::phase::{Raw, RawDocExt, RawTextExt};
 struct Converter<'a> {
     /// Reference to introspector for Frame→SVG rendering
     introspector: &'a Introspector,
-    /// Counter for SVG IDs (from frames)
-    svg_counter: u32,
 }
 
 impl<'a> Converter<'a> {
     fn new(introspector: &'a Introspector) -> Self {
         Self {
             introspector,
-            svg_counter: 0,
         }
     }
 
@@ -119,6 +116,7 @@ impl<'a> Converter<'a> {
     /// then wraps it in an Element node.
     ///
     /// Note: Frames don't have a direct Span, so we use detached Span.
+    /// StableId is computed from the SVG content hash during indexing.
     fn convert_frame_to_svg(&mut self, frame: &HtmlFrame) -> Node<Raw> {
         // Render frame to SVG string using typst-svg
         let svg_string = typst_svg::svg_html_frame(
@@ -129,18 +127,11 @@ impl<'a> Converter<'a> {
             self.introspector,
         );
 
-        self.svg_counter += 1;
-
-        // Parse the SVG string into a raw SVG element
-        // The SVG is already valid HTML, we create a wrapper element
-        // that will be processed by the SVG family handling
-        // Note: Use detached span since frames don't have direct source location
+        // Create SVG wrapper element
+        // StableId will be computed from the svg_string content during indexing
         let mut svg_elem = Element::auto_with_span("svg", &[], Span::detached());
-        svg_elem.attrs = vec![
-            ("data-typst-frame".to_string(), self.svg_counter.to_string()),
-        ];
+        svg_elem.attrs = vec![]; // No dynamic attributes - use content hash for StableId
         // Store the raw SVG content as a text child
-        // The actual SVG parsing happens in the SVG transform
         svg_elem.children = SmallVec::from_vec(vec![Node::Text(Text {
             content: svg_string,
             ext: RawTextExt::detached(),

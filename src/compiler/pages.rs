@@ -492,6 +492,8 @@ mod tests {
 
     #[test]
     fn test_compile_meta_no_label() {
+        use crate::driver::Development;
+
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("test.typ");
 
@@ -501,7 +503,7 @@ mod tests {
         let mut config = SiteConfig::default();
         config.set_root(dir.path());
 
-        let result = compile_meta(&file_path, &config);
+        let result = compile_meta(&Development, &file_path, &config);
         assert!(result.is_ok(), "compile_meta should succeed: {:?}", result);
 
         let (html, meta) = result.unwrap();
@@ -511,6 +513,8 @@ mod tests {
 
     #[test]
     fn test_compile_meta_with_label() {
+        use crate::driver::Development;
+
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("test.typ");
 
@@ -529,7 +533,7 @@ mod tests {
         let mut config = SiteConfig::default();
         config.set_root(dir.path());
 
-        let result = compile_meta(&file_path, &config);
+        let result = compile_meta(&Development, &file_path, &config);
         assert!(result.is_ok(), "compile_meta should succeed: {:?}", result);
 
         let (html, meta) = result.unwrap();
@@ -543,6 +547,8 @@ mod tests {
 
     #[test]
     fn test_compile_meta_draft_field() {
+        use crate::driver::Development;
+
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("test.typ");
 
@@ -561,7 +567,7 @@ mod tests {
         let mut config = SiteConfig::default();
         config.set_root(dir.path());
 
-        let result = compile_meta(&file_path, &config);
+        let result = compile_meta(&Development, &file_path, &config);
         assert!(result.is_ok());
 
         let (_, meta) = result.unwrap();
@@ -571,6 +577,8 @@ mod tests {
 
     #[test]
     fn test_compile_error_returns_err() {
+        use crate::driver::Development;
+
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("invalid.typ");
 
@@ -580,7 +588,7 @@ mod tests {
         let mut config = SiteConfig::default();
         config.set_root(dir.path());
 
-        let result = compile_meta(&file_path, &config);
+        let result = compile_meta(&Development, &file_path, &config);
 
         // Should return an error, not panic or silently skip
         assert!(result.is_err(), "Invalid typst should return Err");
