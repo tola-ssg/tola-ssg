@@ -419,9 +419,16 @@ pub enum StableIdPatch {
         target: StableId,
         html: String,
     },
-    /// Update text content
+    /// Update text content of an element (sets textContent)
     UpdateText {
         target: StableId,
+        text: String,
+    },
+    /// Update text content at a specific child position
+    /// Used when text nodes don't have their own data-tola-id
+    UpdateTextAtPosition {
+        parent: StableId,
+        position: u32,
         text: String,
     },
     /// Remove element
@@ -454,6 +461,7 @@ impl StableIdPatch {
         match self {
             Self::Replace { target, .. } => *target,
             Self::UpdateText { target, .. } => *target,
+            Self::UpdateTextAtPosition { parent, .. } => *parent,
             Self::Remove { target } => *target,
             Self::Insert { parent, .. } => *parent,
             Self::Move { target, .. } => *target,
@@ -612,6 +620,9 @@ impl IndexedDiffContext {
     }
 
     /// Diff child nodes using LCS algorithm
+    ///
+    /// For text nodes, we use position-based matching since text content changes
+    /// would cause StableId to change (making LCS see them as different nodes).
     fn diff_children(
         &mut self,
         old_children: &[Node<Indexed>],
@@ -649,7 +660,138 @@ impl IndexedDiffContext {
             return;
         }
 
-        // Extract StableIds for LCS comparison
+        // For small child lists with mostly text nodes, use simple position-based diff
+        // This handles the common case of editing text content without false Delete+Insert
+        if self.should_use_position_based_diff(old_children, new_children) {
+            self.diff_children_by_position(old_children, new_children, parent_id);
+            return;
+        }
+
+        // For larger/complex structures, use LCS-based diff for move detection
+        self.diff_children_by_lcs(old_children, new_children, parent_id);
+    }
+
+    /// Check if we should use simpler position-based diff
+    ///
+    /// Position-based is better when:
+    /// - Children are mostly text nodes (whose StableId changes with content)
+    /// - Few structural changes expected (just content updates)
+    fn should_use_position_based_diff(
+        &self,
+        old_children: &[Node<Indexed>],
+        new_children: &[Node<Indexed>],
+    ) -> bool {
+        // If counts differ significantly, use LCS for better diff
+        let len_diff = (old_children.len() as isize - new_children.len() as isize).abs();
+        if len_diff > 2 {
+            return false;
+        }
+
+        // If most children are text nodes, use position-based
+        let old_text_count = old_children.iter().filter(|n| matches!(n, Node::Text(_))).count();
+        let new_text_count = new_children.iter().filter(|n| matches!(n, Node::Text(_))).count();
+
+        // More than half are text nodes -> position-based is safer
+        old_text_count * 2 >= old_children.len() || new_text_count * 2 >= new_children.len()
+    }
+
+    /// Position-based child diffing - compare nodes at same indices
+    fn diff_children_by_position(
+        &mut self,
+        old_children: &[Node<Indexed>],
+        new_children: &[Node<Indexed>],
+        parent_id: StableId,
+    ) {
+        let max_len = old_children.len().max(new_children.len());
+
+        for i in 0..max_len {
+            if self.should_abort() {
+                return;
+            }
+
+            match (old_children.get(i), new_children.get(i)) {
+                (Some(old_node), Some(new_node)) => {
+                    // Both exist at this position - diff them
+                    self.diff_nodes_at_position(old_node, new_node, parent_id, i);
+                }
+                (None, Some(new_node)) => {
+                    // New node added at end
+                    self.ops.push(StableIdPatch::Insert {
+                        parent: parent_id,
+                        position: i as u32,
+                        html: render_indexed_node_html(new_node),
+                    });
+                }
+                (Some(old_node), None) => {
+                    // Old node removed from end
+                    self.ops.push(StableIdPatch::Remove {
+                        target: get_indexed_node_stable_id(old_node),
+                    });
+                }
+                (None, None) => unreachable!(),
+            }
+        }
+    }
+
+    /// Diff two nodes at the same position
+    ///
+    /// This is used for position-based diffing where we know the nodes
+    /// are at the same index, even if their StableIds differ.
+    fn diff_nodes_at_position(
+        &mut self,
+        old: &Node<Indexed>,
+        new: &Node<Indexed>,
+        parent_id: StableId,
+        position: usize,
+    ) {
+        match (old, new) {
+            (Node::Element(old_elem), Node::Element(new_elem)) => {
+                // Elements: check if same tag, then diff or replace
+                if old_elem.tag == new_elem.tag {
+                    self.diff_element(old_elem, new_elem);
+                } else {
+                    // Different tags - replace
+                    self.ops.push(StableIdPatch::Replace {
+                        target: old_elem.ext.stable_id(),
+                        html: render_indexed_element_html(new_elem),
+                    });
+                    self.stats.nodes_replaced += 1;
+                }
+            }
+            (Node::Text(old_text), Node::Text(new_text)) => {
+                // Text nodes at same position: update content using PARENT's ID
+                // since text nodes don't have data-tola-id in DOM
+                self.stats.text_nodes_compared += 1;
+                if old_text.content != new_text.content {
+                    // We need to target the parent and update at specific position
+                    // For now, use UpdateText with parent ID if this is the only text child
+                    // Otherwise, we need a more sophisticated approach
+                    self.ops.push(StableIdPatch::UpdateTextAtPosition {
+                        parent: parent_id,
+                        position: position as u32,
+                        text: new_text.content.clone(),
+                    });
+                    self.stats.text_updates += 1;
+                }
+            }
+            // Different node types at same position - replace
+            _ => {
+                self.ops.push(StableIdPatch::Replace {
+                    target: get_indexed_node_stable_id(old),
+                    html: render_indexed_node_html(new),
+                });
+                self.stats.nodes_replaced += 1;
+            }
+        }
+    }
+
+    /// LCS-based child diffing for complex structural changes
+    fn diff_children_by_lcs(
+        &mut self,
+        old_children: &[Node<Indexed>],
+        new_children: &[Node<Indexed>],
+        parent_id: StableId,
+    ) {
         let old_ids: Vec<StableId> = old_children
             .iter()
             .map(get_indexed_node_stable_id)

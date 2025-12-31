@@ -374,6 +374,28 @@ pub fn get_client_script(ws_port: u16) -> String {
           }
           break;
         }
+        case 'text_at_pos': {
+          // Update text content at a specific child position
+          // Used for text nodes that don't have their own data-tola-id
+          const parent = this.getById(op.parent);
+          if (parent) {
+            const pos = parseInt(op.position, 10);
+            const childNodes = parent.childNodes;
+            if (pos < childNodes.length) {
+              const node = childNodes[pos];
+              if (node.nodeType === Node.TEXT_NODE) {
+                node.textContent = op.text;
+              } else if (node.nodeType === Node.ELEMENT_NODE) {
+                // If it's an element, set its textContent
+                node.textContent = op.text;
+              }
+            } else {
+              // Position out of bounds - append as new text node
+              parent.appendChild(document.createTextNode(op.text));
+            }
+          }
+          break;
+        }
         case 'remove': {
           const target = this.getById(op.target);
           if (target) {

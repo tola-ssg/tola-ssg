@@ -133,6 +133,11 @@ impl HotReloadMessage {
                     target: target.to_attr_value(),
                     text: text.clone(),
                 },
+                StableIdPatch::UpdateTextAtPosition { parent, position, text } => PatchOp::TextAtPosition {
+                    parent: parent.to_attr_value(),
+                    position: *position,
+                    text: text.clone(),
+                },
                 StableIdPatch::Remove { target } => PatchOp::Remove {
                     target: target.to_attr_value(),
                 },
@@ -213,6 +218,18 @@ pub enum PatchOp {
     Text {
         /// CSS selector or StableId (hex) to target
         target: String,
+        /// New text content
+        text: String,
+    },
+
+    /// Update text content at a specific child position
+    /// Used when text nodes don't have their own data-tola-id
+    #[serde(rename = "text_at_pos")]
+    TextAtPosition {
+        /// Parent element's StableId (hex)
+        parent: String,
+        /// Child position (0-based index)
+        position: u32,
         /// New text content
         text: String,
     },
