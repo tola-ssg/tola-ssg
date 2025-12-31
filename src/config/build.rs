@@ -247,25 +247,8 @@ pub struct SlugConfig {
 /// `[build.typst]` section
 #[derive(Debug, Clone, Educe, Serialize, Deserialize)]
 #[educe(Default)]
-#[serde(deny_unknown_fields)]
+#[serde(default)] // Allow unknown fields for backward compatibility with old configs
 pub struct TypstConfig {
-    /// Use typst library directly instead of CLI (experimental, faster but less stable)
-    #[serde(default = "defaults::r#true")]
-    #[educe(Default = true)]
-    pub use_lib: bool,
-
-    /// Use VDOM pipeline for HTML generation (experimental, enables incremental updates).
-    /// Requires `use_lib = true`. When enabled, uses the TTG (Trees That Grow)
-    /// architecture for type-safe, multi-phase VDOM processing.
-    #[serde(default = "defaults::r#false")]
-    #[educe(Default = false)]
-    pub use_vdom: bool,
-
-    /// Typst command and arguments (only used when `use_lib` = false)
-    #[serde(default = "defaults::build::typst::command")]
-    #[educe(Default = defaults::build::typst::command())]
-    pub command: Vec<String>,
-
     /// SVG processing options
     #[serde(default)]
     pub svg: TypstSvgConfig,
@@ -536,7 +519,7 @@ mod tests {
         "#;
         let config: SiteConfig = toml::from_str(config).unwrap();
 
-        assert_eq!(config.build.typst.command, vec!["typst-custom".to_string()]);
+        // Note: typst.command has been removed, VDOM is now always used
         assert!(matches!(
             config.build.typst.svg.extract_type,
             ExtractSvgType::Magick
@@ -914,7 +897,7 @@ mod tests {
             description = "Test"
         "#;
         let config: SiteConfig = toml::from_str(config).unwrap();
-        assert_eq!(config.build.typst.command, vec!["typst".to_string()]);
+        // Note: typst.command has been removed, VDOM is now always used
         assert!(matches!(
             config.build.typst.svg.extract_type,
             ExtractSvgType::Embedded
@@ -1029,18 +1012,8 @@ mod tests {
         assert!(both.is_async());
     }
 
-    #[test]
-    fn test_typst_command_multiple_args() {
-        let config = r#"
-            [base]
-            title = "Test"
-            description = "Test"
-            [build.typst]
-            command = ["typst", "--root", "/path"]
-        "#;
-        let config: SiteConfig = toml::from_str(config).unwrap();
-        assert_eq!(config.build.typst.command, vec!["typst", "--root", "/path"]);
-    }
+    // Note: test_typst_command_multiple_args has been removed as
+    // typst.command field was deleted when VDOM became the only pipeline
 
     #[test]
     fn test_tailwind_command_multiple_args() {

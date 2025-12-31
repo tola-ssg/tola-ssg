@@ -26,9 +26,22 @@ use std::{
     io::{Write, stdout},
     sync::{
         Mutex, OnceLock,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
+
+/// Global verbose flag (set by --verbose CLI argument)
+static VERBOSE: AtomicBool = AtomicBool::new(false);
+
+/// Set verbose mode globally
+pub fn set_verbose(v: bool) {
+    VERBOSE.store(v, Ordering::SeqCst);
+}
+
+/// Check if verbose mode is enabled
+pub fn is_verbose() -> bool {
+    VERBOSE.load(Ordering::SeqCst)
+}
 
 /// Cached terminal width (fetched once on first use)
 static TERMINAL_WIDTH: OnceLock<u16> = OnceLock::new();
@@ -85,6 +98,21 @@ fn get_terminal_width() -> u16 {
 macro_rules! log {
     ($module:expr; $($arg:tt)*) => {{
         $crate::logger::log($module, &format!($($arg)*))
+    }};
+}
+
+/// Log a debug message (only shown when --verbose is enabled).
+///
+/// # Usage
+/// ```ignore
+/// debug!("module"; "debug info: {}", value);
+/// ```
+#[macro_export]
+macro_rules! debug {
+    ($module:expr; $($arg:tt)*) => {{
+        if $crate::logger::is_verbose() {
+            $crate::logger::log($module, &format!($($arg)*))
+        }
     }};
 }
 

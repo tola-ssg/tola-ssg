@@ -76,10 +76,8 @@ fn build_site_internal(config: &SiteConfig, quiet: bool, dev_mode: bool) -> Resu
     let output = &config.build.output;
     let assets = &config.build.assets;
 
-    // Pre-warm typst library resources if using lib mode
-    if config.build.typst.use_lib {
-        typst_lib::warmup_with_root(config.get_root());
-    }
+    // Pre-warm typst library resources
+    typst_lib::warmup_with_root(config.get_root());
 
     // Ensure output directory has git repo (for deploy)
     let repo = ensure_output_repo(output, config.build.clean)?;

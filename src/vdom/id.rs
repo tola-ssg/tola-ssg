@@ -258,7 +258,7 @@ mod tests {
     fn test_detached_id() {
         let id = StableId::detached();
         assert!(id.is_detached());
-        assert!(!id.has_span());
+        // Note: has_span was removed when switching from Span to content hash
     }
 
     #[test]

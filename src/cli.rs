@@ -62,6 +62,10 @@ pub struct BuildArgs {
     ///   tola build --base-url "https://tola-ssg.github.io/example-sites/starter"
     #[arg(long = "base-url")]
     pub base_url: Option<String>,
+
+    /// Enable verbose output for debugging
+    #[arg(short = 'V', long)]
+    pub verbose: bool,
 }
 
 /// Available subcommands

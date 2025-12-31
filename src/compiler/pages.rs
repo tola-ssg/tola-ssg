@@ -3,24 +3,12 @@ use crate::compiler::{collect_all_files, is_up_to_date};
 use crate::data::{PageData, GLOBAL_SITE_DATA};
 use crate::utils::minify::{minify, MinifyType};
 use crate::utils::xml::process_html;
-use crate::utils::exec::FilterRule;
-use crate::{config::SiteConfig, exec, log, typst_lib};
+use crate::{config::SiteConfig, log, typst_lib};
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
 use std::time::SystemTime;
 use rayon::prelude::*;
-
-/// Skip known HTML export warnings (used by `compile_cli`).
-const TYPST_FILTER: FilterRule = FilterRule::new(&[
-    "warning: html export is under active development",
-    "and incomplete",
-    "= hint: its behaviour may change at any time",
-    "= hint: do not rely on this feature for production use cases",
-    "= hint: see https://github.com/typst/typst/issues/5512",
-    "for more information",
-    "warning: elem",
-]);
 
 // TOLA_META_LABEL is imported from crate::compiler::meta
 
@@ -129,11 +117,6 @@ pub fn process_page_for_dev(
 ) -> Result<Option<DevPageResult>> {
     let mut page = PageMeta::from_paths(path.to_path_buf(), config)?;
 
-    // Only works with lib mode and VDOM enabled
-    if !config.build.typst.use_lib || !config.build.typst.use_vdom {
-        anyhow::bail!("Dev mode requires use_lib and use_vdom to be enabled");
-    }
-
     // Compile with VDOM output
     let result = typst_lib::compile_for_dev_with_vdom(path, config.get_root(), TOLA_META_LABEL)?;
 
@@ -202,13 +185,10 @@ fn write_page(
         fs::create_dir_all(parent)?;
     }
 
-    // Get HTML content
-    let html_content = if let Some(ref html) = page.compiled_html {
-        html.clone()
-    } else {
-        // CLI mode in batch: compile now
-        compile_cli(&page.paths.source, config)?
-    };
+    // Get HTML content (must have been compiled, no CLI fallback)
+    let html_content = page.compiled_html.as_ref()
+        .ok_or_else(|| anyhow::anyhow!("Page has no compiled HTML: {:?}", page.paths.source))?
+        .clone();
 
     // Post-process and write
     // Check if the source file was named "index.typ" for relative path resolution
@@ -222,10 +202,10 @@ fn write_page(
     Ok(())
 }
 
-/// Compile a typst file and extract metadata (lib or CLI mode).
+/// Compile a typst file and extract metadata.
 ///
 /// Also records dependencies for incremental rebuild tracking.
-/// When `use_vdom` is enabled, uses the VDOM pipeline for HTML generation.
+/// Uses the VDOM pipeline for HTML generation.
 ///
 /// For development mode with hot reload support, use `compile_meta_for_dev()` instead.
 pub fn compile_meta(path: &Path, config: &SiteConfig) -> Result<(Vec<u8>, Option<ContentMeta>)> {
@@ -242,96 +222,34 @@ pub fn compile_meta_for_dev(path: &Path, config: &SiteConfig) -> Result<(Vec<u8>
 
 /// Internal: compile with configurable dev mode flag.
 fn compile_meta_internal(path: &Path, config: &SiteConfig, dev_mode: bool) -> Result<(Vec<u8>, Option<ContentMeta>)> {
-    if config.build.typst.use_lib {
-        let root = config.get_root();
+    let root = config.get_root();
 
-        // Choose between VDOM and legacy pipeline
-        if config.build.typst.use_vdom {
-            if dev_mode {
-                let result = typst_lib::compile_vdom_for_dev(path, root, TOLA_META_LABEL)?;
-                let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
-                super::deps::DEPENDENCY_GRAPH
-                    .write()
-                    .record_dependencies(path, &result.accessed_files);
+    if dev_mode {
+        let result = typst_lib::compile_vdom_for_dev(path, root, TOLA_META_LABEL)?;
+        let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
+        super::deps::DEPENDENCY_GRAPH
+            .write()
+            .record_dependencies(path, &result.accessed_files);
 
-                // Cache the indexed VDOM for hot reload
-                crate::hotreload::VDOM_CACHE.insert(path.to_path_buf(), result.indexed_vdom);
+        // Cache the indexed VDOM for hot reload
+        crate::hotreload::VDOM_CACHE.insert(path.to_path_buf(), result.indexed_vdom);
 
-                return Ok((result.html, meta));
-            } else {
-                let result = typst_lib::compile_vdom(path, root, TOLA_META_LABEL)?;
-                let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
-                super::deps::DEPENDENCY_GRAPH
-                    .write()
-                    .record_dependencies(path, &result.accessed_files);
-                return Ok((result.html, meta));
-            }
-        } else {
-            let result = typst_lib::compile_meta(path, root, TOLA_META_LABEL)?;
-            let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
-            super::deps::DEPENDENCY_GRAPH
-                .write()
-                .record_dependencies(path, &result.accessed_files);
-            return Ok((result.html, meta));
-        }
+        Ok((result.html, meta))
     } else {
-        let meta = query_meta(path, config);
-        let html = compile_cli(path, config)?;
-        Ok((html, meta))
+        let result = typst_lib::compile_vdom(path, root, TOLA_META_LABEL)?;
+        let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
+        super::deps::DEPENDENCY_GRAPH
+            .write()
+            .record_dependencies(path, &result.accessed_files);
+        Ok((result.html, meta))
     }
 }
 
-/// Query metadata only (lib or CLI mode).
+/// Query metadata only.
 pub fn query_meta(path: &Path, config: &SiteConfig) -> Option<ContentMeta> {
-    if config.build.typst.use_lib {
-        let root = config.get_root();
-        let result = typst_lib::compile_meta(path, root, TOLA_META_LABEL).ok()?;
-        result.metadata.and_then(|json| serde_json::from_value(json).ok())
-    } else {
-        query_meta_cli(path, config)
-    }
-}
-
-// ============================================================================
-// Internal: CLI helpers
-// ============================================================================
-
-/// Compile using typst CLI.
-fn compile_cli(source: &Path, config: &SiteConfig) -> Result<Vec<u8>> {
     let root = config.get_root();
-
-    let output = exec!(
-        pty=false;
-        filter=&TYPST_FILTER;
-        &config.build.typst.command;
-        "compile", "--features", "html", "--format", "html",
-        "--font-path", root, "--root", root,
-        source, "-"
-    )?;
-
-    Ok(output.stdout)
-}
-
-/// Query metadata using typst CLI.
-fn query_meta_cli(path: &Path, config: &SiteConfig) -> Option<ContentMeta> {
-    use crate::utils::exec::SILENT_FILTER;
-    let root = config.get_root();
-
-    // Format label with angle brackets for typst query selector
-    let label_selector = format!("<{TOLA_META_LABEL}>");
-
-    let output = exec!(
-        filter=&SILENT_FILTER;
-        &config.build.typst.command;
-        "query", "--features", "html", "--format", "json",
-        "--font-path", root, "--root", root,
-        path, &label_selector, "--field", "value", "--one"
-    );
-
-    output.ok().and_then(|out| {
-        let json_str = std::str::from_utf8(&out.stdout).ok()?;
-        serde_json::from_str(json_str).ok()
-    })
+    let result = typst_lib::compile_meta(path, root, TOLA_META_LABEL).ok()?;
+    result.metadata.and_then(|json| serde_json::from_value(json).ok())
 }
 
 /// Check if content metadata indicates a draft.
@@ -389,19 +307,15 @@ pub fn collect_metadata(
             let page = PageMeta::from_paths(path.clone(), config)?;
 
             // Compile to extract metadata (HTML discarded)
-            let content_meta = if config.build.typst.use_lib {
-                let root = config.get_root();
-                let result = typst_lib::compile_meta(path, root, TOLA_META_LABEL)?;
+            let root = config.get_root();
+            let result = typst_lib::compile_meta(path, root, TOLA_META_LABEL)?;
 
-                // Record dependencies for incremental rebuild
-                super::deps::DEPENDENCY_GRAPH
-                    .write()
-                    .record_dependencies(path, &result.accessed_files);
+            // Record dependencies for incremental rebuild
+            super::deps::DEPENDENCY_GRAPH
+                .write()
+                .record_dependencies(path, &result.accessed_files);
 
-                result.metadata.and_then(|json| serde_json::from_value(json).ok())
-            } else {
-                query_meta(path, config)
-            };
+            let content_meta: Option<ContentMeta> = result.metadata.and_then(|json| serde_json::from_value(json).ok());
 
             // Skip drafts
             if is_draft(content_meta.as_ref()) {
@@ -510,14 +424,10 @@ pub fn collect_pages(config: &SiteConfig) -> Result<Pages> {
         .map(|path| {
             let mut page = PageMeta::from_paths(path.clone(), config)?;
 
-            let (html, content_meta) = if config.build.typst.use_lib {
-                // Lib mode: compile once, get both HTML and metadata (metadata may be None)
-                let result = compile_meta(path, config)?;
-                (Some(result.0), result.1)
-            } else {
-                // CLI mode: only query metadata, compile later (metadata may be None)
-                (None, query_meta(path, config))
-            };
+            // Compile once, get both HTML and metadata (metadata may be None)
+            let result = compile_meta(path, config)?;
+            let html = Some(result.0);
+            let content_meta = result.1;
 
             // Skip drafts
             if is_draft(content_meta.as_ref()) {
@@ -558,7 +468,6 @@ mod tests {
         let mut config = SiteConfig::default();
         config.build.content = content_dir;
         config.build.output = output_dir;
-        config.build.typst.use_lib = true;
         config
     }
 
@@ -596,7 +505,6 @@ mod tests {
         fs::write(&file_path, "= Hello World").unwrap();
 
         let mut config = SiteConfig::default();
-        config.build.typst.use_lib = true;
         config.set_root(dir.path());
 
         let result = compile_meta(&file_path, &config);
@@ -625,7 +533,6 @@ mod tests {
         .unwrap();
 
         let mut config = SiteConfig::default();
-        config.build.typst.use_lib = true;
         config.set_root(dir.path());
 
         let result = compile_meta(&file_path, &config);
@@ -658,7 +565,6 @@ mod tests {
         .unwrap();
 
         let mut config = SiteConfig::default();
-        config.build.typst.use_lib = true;
         config.set_root(dir.path());
 
         let result = compile_meta(&file_path, &config);
@@ -678,7 +584,6 @@ mod tests {
         fs::write(&file_path, "#invalid-syntax-that-will-fail").unwrap();
 
         let mut config = SiteConfig::default();
-        config.build.typst.use_lib = true;
         config.set_root(dir.path());
 
         let result = compile_meta(&file_path, &config);
@@ -723,41 +628,5 @@ mod tests {
         assert!(page.is_ok());
         let page = page.unwrap();
         assert_eq!(page.paths.relative, "posts/hello");
-    }
-
-    #[test]
-    fn test_compile_cli_pipe() {
-        // Skip if typst not available
-        if std::process::Command::new("typst").arg("--version").output().is_err() {
-            eprintln!("Skipping test_compile_cli_pipe: typst not found");
-            return;
-        }
-
-        let dir = TempDir::new().unwrap();
-        let file_path = dir.path().join("test_pipe.typ");
-
-        fs::write(&file_path, "Hello Pipe").unwrap();
-
-        let mut config = SiteConfig::default();
-        config.build.typst.use_lib = false; // Enable CLI mode
-        config.set_root(dir.path());
-
-        // compile_meta calls compile_cli internally when use_lib is false
-        let result = compile_meta(&file_path, &config);
-
-        match result {
-            Ok((html, _)) => {
-                let html_str = String::from_utf8_lossy(&html);
-                assert!(!html.is_empty(), "Captured stdout should not be empty");
-                // Typst HTML output usually contains the content
-                assert!(html_str.contains("Hello Pipe"), "Output should contain content. Got: {}", html_str);
-            }
-            Err(e) => {
-                 // Fail the test if Typst exists but compilation fails (e.g. pipe error)
-                 // Unless it's a version mismatch/feature missing issue.
-                 // We will panic to signal failure.
-                 panic!("CLI compilation failed: {}", e);
-            }
-        }
     }
 }

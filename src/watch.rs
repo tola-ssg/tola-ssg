@@ -296,54 +296,24 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
             }
         }
 
-        // Check if we should use VDOM-based hot reload
-        let c = cfg();
-        let use_vdom_diff = c.build.typst.use_lib && c.build.typst.use_vdom;
-
-        if use_vdom_diff {
-            // VDOM diff path: compile with VDOM output and diff
-            match process_with_vdom_diff(&incremental_targets, &c, clean, status, &rel) {
-                Ok(count) => {
-                    let msg = if count == 1 {
-                        format!("rebuilt: {}", rel(&incremental_targets[0]))
-                    } else {
-                        format!("rebuilt {} files", count)
-                    };
-                    status.success(&msg);
-                }
-                Err(e) => {
-                    let context = if clean {
-                        dependency_triggers.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
-                    } else {
-                        incremental_targets.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
-                    };
-                    status.error(&format!("failed: {context}"), &e.to_string());
-                    return false;
-                }
+        // Use VDOM diff for incremental hot reload
+        match process_with_vdom_diff(&incremental_targets, &c, clean, status, &rel) {
+            Ok(count) => {
+                let msg = if count == 1 {
+                    format!("rebuilt: {}", rel(&incremental_targets[0]))
+                } else {
+                    format!("rebuilt {} files", count)
+                };
+                status.success(&msg);
             }
-        } else {
-            // Legacy path: full reload
-            match process_watched_files(&incremental_targets, &cfg(), clean) {
-                Ok(count) => {
-                    let msg = if count == 1 {
-                        format!("rebuilt: {}", rel(&incremental_targets[0]))
-                    } else {
-                        format!("rebuilt {} files", count)
-                    };
-                    status.success(&msg);
-
-                    // Broadcast hot reload to connected browsers
-                    crate::hotreload::broadcast_reload();
-                }
-                Err(e) => {
-                    let context = if clean {
-                        dependency_triggers.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
-                    } else {
-                        incremental_targets.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
-                    };
-                    status.error(&format!("failed: {context}"), &e.to_string());
-                    return false;
-                }
+            Err(e) => {
+                let context = if clean {
+                    dependency_triggers.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
+                } else {
+                    incremental_targets.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
+                };
+                status.error(&format!("failed: {context}"), &e.to_string());
+                return false;
             }
         }
     }
@@ -496,11 +466,6 @@ fn handle_full_rebuild(reason: &str, status: &mut WatchStatus) -> bool {
 /// instead of falling back to full reload.
 fn populate_vdom_cache(config: &SiteConfig) {
     use crate::compiler::pages::process_page_for_dev;
-
-    // Only populate if VDOM pipeline is enabled
-    if !config.build.typst.use_lib || !config.build.typst.use_vdom {
-        return;
-    }
 
     let content_files = crate::compiler::collect_all_files(&config.build.content);
     let typ_files: Vec<_> = content_files

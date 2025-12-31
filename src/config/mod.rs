@@ -392,6 +392,9 @@ impl SiteConfig {
     ///
     /// `is_serve`: If true, rss/sitemap default to disabled for faster local preview.
     fn apply_build_args(&mut self, args: &BuildArgs, is_serve: bool) {
+        // Set verbose mode globally
+        crate::logger::set_verbose(args.verbose);
+
         Self::update_option(&mut self.build.minify, args.minify.as_ref());
         Self::update_option(&mut self.build.css.tailwind.enable, args.tailwind.as_ref());
         self.build.clean = args.clean;
@@ -554,10 +557,8 @@ impl SiteConfig {
     }
 
     fn validate_typst(&self) -> Result<()> {
-        if self.build.typst.use_lib {
-            return Ok(());
-        }
-        Self::check_command_installed("[build.typst.command]", &self.build.typst.command)
+        // VDOM pipeline is always used, no CLI to validate
+        Ok(())
     }
 
     fn validate_tailwind(&self) -> Result<()> {

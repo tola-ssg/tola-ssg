@@ -116,10 +116,6 @@ pub mod build {
     pub mod typst {
         use super::super::super::ExtractSvgType;
 
-        pub fn command() -> Vec<String> {
-            vec!["typst".into()]
-        }
-
         pub mod svg {
             use super::ExtractSvgType;
 
