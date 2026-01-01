@@ -99,6 +99,19 @@ pub fn get_accessed_files() -> Vec<FileId> {
     ACCESSED_FILES.with(|files| files.borrow().iter().copied().collect())
 }
 
+/// Clear all typst compilation caches.
+///
+/// Call when template/dependency files change to ensure fresh data is loaded.
+/// This clears:
+/// 1. GLOBAL_FILE_CACHE - forces files to be re-read from disk
+/// 2. comemo cache - forces typst to recompile with new show rules
+/// 3. FRESHNESS_CACHE - forces hash recomputation for freshness detection
+pub fn clear_file_cache() {
+    GLOBAL_FILE_CACHE.write().clear();
+    typst::comemo::evict(0);
+    crate::freshness::clear_cache();
+}
+
 // =============================================================================
 // SlotCell - Fingerprint-based Caching
 // =============================================================================

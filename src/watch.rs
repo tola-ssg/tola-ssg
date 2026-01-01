@@ -286,6 +286,10 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
     // Template/utils changes: query dependency graph for precise rebuild
     // All paths are already canonical from Debouncer
     if !dependency_triggers.is_empty() {
+        // Clear all typst caches (file cache + comemo) to force recompilation
+        // This is critical for `jj edit` scenarios where files change outside normal editing
+        crate::typst_lib::clear_file_cache();
+
         // NOTE: Do NOT clear VDOM cache here!
         // We need the old VDOM to diff against the new compilation result.
         // The cache will be updated after successful compilation in process_with_vdom_diff.

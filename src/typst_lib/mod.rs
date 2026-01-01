@@ -63,6 +63,7 @@ use typst::introspection::MetadataElem;
 use typst::utils::PicoStr;
 use typst::Document;
 
+pub use file::clear_file_cache;
 pub use world::SystemWorld;
 
 // =============================================================================
