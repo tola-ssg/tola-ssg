@@ -1,5 +1,14 @@
 #let base(body) = {
   // ==========================================================================
+  // Text Settings
+  // ==========================================================================
+  set text(
+    font: "Maple Mono",
+    size: 12pt,
+    fill: white,
+  )
+
+  // ==========================================================================
   // Show Rules: Figures & Tables
   // ==========================================================================
 
@@ -11,7 +20,7 @@
   }
 
   set table(stroke: white, inset: 10pt)
-  show table: set text(fill: blue, size: 12pt)
+  show table: set text(fill: white, size: 12pt)
 
   show table: it => context {
     if not inside-figure.get() {

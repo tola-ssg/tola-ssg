@@ -12,4 +12,6 @@ __test_site
 !/other-projects/typst-preview
 !/other-projects/dioxus
 !/other-projects/typst_blog
+!/other-projects/typst-font-nondeterminism
+target/
 /docs
