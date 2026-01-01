@@ -24,9 +24,11 @@
 
 pub mod attr;
 pub mod convert;
+pub mod diff;
 pub mod family;
 pub mod folder;
 pub mod id;
+pub mod lcs;
 #[macro_use]
 pub mod macros;
 pub mod node;
@@ -58,6 +60,11 @@ pub use transform::{IdentityTransform, Pipeline, Transform};
 pub use convert::{from_typst_html, from_typst_html_with_meta};
 #[allow(unused_imports)]
 pub use id::StableId;
+// Diff algorithm exports
+#[allow(unused_imports)]
+pub use diff::{diff, DiffResult, DiffStats, Patch};
+#[allow(unused_imports)]
+pub use lcs::{diff_sequences, Edit, LcsResult, LcsStats};
 
 // =============================================================================
 // High-level API for compilation pipeline integration

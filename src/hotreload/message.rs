@@ -119,43 +119,43 @@ impl HotReloadMessage {
     }
 
     /// Create a patch message from StableIdPatches
-    pub fn from_stable_id_patches(path: &str, patches: &[super::diff::StableIdPatch]) -> Self {
-        use super::diff::StableIdPatch;
+    pub fn from_stable_id_patches(path: &str, patches: &[crate::vdom::diff::Patch]) -> Self {
+        use crate::vdom::diff::Patch;
 
         let ops: Vec<PatchOp> = patches
             .iter()
             .map(|p| match p {
-                StableIdPatch::Replace { target, html } => PatchOp::Replace {
+                Patch::Replace { target, html } => PatchOp::Replace {
                     target: target.to_attr_value(),
                     html: html.clone(),
                 },
-                StableIdPatch::UpdateText { target, text } => PatchOp::Text {
+                Patch::UpdateText { target, text } => PatchOp::Text {
                     target: target.to_attr_value(),
                     text: text.clone(),
                 },
-                StableIdPatch::UpdateTextAtPosition { parent, position, text } => PatchOp::TextAtPosition {
+                Patch::UpdateTextAtPosition { parent, position, text } => PatchOp::TextAtPosition {
                     parent: parent.to_attr_value(),
                     position: *position,
                     text: text.clone(),
                 },
-                StableIdPatch::Remove { target } => PatchOp::Remove {
+                Patch::Remove { target } => PatchOp::Remove {
                     target: target.to_attr_value(),
                 },
-                StableIdPatch::RemoveAtPosition { parent, position } => PatchOp::RemoveAtPosition {
+                Patch::RemoveAtPosition { parent, position } => PatchOp::RemoveAtPosition {
                     parent: parent.to_attr_value(),
                     position: *position,
                 },
-                StableIdPatch::Insert { parent, position, html } => PatchOp::Insert {
+                Patch::Insert { parent, position, html } => PatchOp::Insert {
                     parent: parent.to_attr_value(),
                     position: position.to_string(),
                     html: html.clone(),
                 },
-                StableIdPatch::Move { target, new_parent, position } => PatchOp::Move {
+                Patch::Move { target, new_parent, position } => PatchOp::Move {
                     from: target.to_attr_value(),
                     to_parent: new_parent.to_attr_value(),
                     position: position.to_string(),
                 },
-                StableIdPatch::UpdateAttrs { target, attrs } => PatchOp::Update {
+                Patch::UpdateAttrs { target, attrs } => PatchOp::Update {
                     target: target.to_attr_value(),
                     attrs: attrs.clone(),
                 },

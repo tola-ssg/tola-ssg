@@ -32,6 +32,11 @@
 //! - `patch`: Incremental DOM update (primary)
 //! - `css`: CSS-only update (fast path)
 //! - `ping`/`pong`: Keep-alive
+//!
+//! # Diff Algorithm
+//!
+//! The diff algorithm has been moved to `crate::vdom::diff` for better modularity.
+//! This module re-exports the diff types for backward compatibility.
 
 pub mod cache;
 pub mod diff;
@@ -41,17 +46,18 @@ pub mod protocol;
 pub mod server;
 
 // Public API - these are used by serve.rs and watch.rs
-pub use server::{HotReloadServer, broadcast_reload, broadcast_patches};
 pub use cache::VDOM_CACHE;
+pub use server::{broadcast_patches, broadcast_reload, HotReloadServer};
 
-// Re-export for future use (allow unused for now)
+// Re-export diff types for backward compatibility
+// The actual algorithm is in crate::vdom::diff, re-exported via sub-modules
+pub use diff::{diff_indexed_documents, IndexedDiffResult, DiffStats, StableIdPatch};
+pub use lcs::{diff_sequences, Edit, LcsResult, LcsStats};
+
+// Legacy re-exports (allow unused for now)
 #[allow(unused_imports)]
 pub use message::{HotReloadMessage, PatchOp};
 #[allow(unused_imports)]
+pub use protocol::{PatchOp as BinaryPatchOp, ServerMessage, ARCH_FINGERPRINT};
+#[allow(unused_imports)]
 pub use server::broadcast;
-#[allow(unused_imports)]
-pub use diff::{DiffResult, DiffStats, IndexedDiffResult, StableIdPatch, diff_indexed_documents};
-#[allow(unused_imports)]
-pub use protocol::{ServerMessage, PatchOp as BinaryPatchOp, ARCH_FINGERPRINT};
-#[allow(unused_imports)]
-pub use lcs::{Edit, LcsResult, LcsStats, diff_sequences};

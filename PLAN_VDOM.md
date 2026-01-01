@@ -85,17 +85,16 @@ graph TD
 
 ## 3. 模块职责定义 (Module Responsibilities)
 
-### 3.1 `crate::vdom` (The Pure Core) 🚧 **WIP**
+### 3.1 `crate::vdom` (The Pure Core) ✅ **CORE COMPLETE**
 **绝对纯净**。不依赖 compiler/network/fs。
 *   **Structs**: `Node`, `Document`, `StableId` ✅
-*   **Algos**: `diff(old, new) -> Patch` 📋, `fold(doc) -> doc` ✅
+*   **Algos**: `diff(old, new) -> Patch` ✅, `lcs` ✅, `fold(doc) -> doc` ✅
 *   **Render**: `html_renderer` ✅, `xml_renderer` 📋 **PLANNED**
 *   **Input**: `Node` tree -> **Output**: `PatchOps` / `String`
 
-> [!IMPORTANT]
-> **Diff 迁移**: 当前 diff 实现位于 `src/hotreload/diff.rs`（存在两套并行实现）。
-> 计划将 `diff_indexed_documents` 迁移到 `src/vdom/diff.rs` 作为**核心算法**。
-> `hotreload` 模块应只负责序列化和 WebSocket 传输。
+> [!NOTE]
+> **Diff 迁移已完成**: `diff` 和 `lcs` 算法已迁移到 `src/vdom/diff.rs` 和 `src/vdom/lcs.rs`。
+> `hotreload` 模块现在只包含 re-exports 和 WebSocket 传输逻辑。
 
 > [!TIP]
 > **模块简化**: `folder.rs` 和 `transform.rs` 职责重叠，建议合并：
@@ -2329,17 +2328,24 @@ git checkout -b experiment/salsa
 - `vdom/transforms/indexer.rs`: `Indexer`
 - `hotreload/diff.rs`: diff 算法
 
-### 4.4 Diff 模块统一
+### 4.4 Diff 模块统一 ✅ **DONE**
 
 **当前问题**:
 - `hotreload/diff.rs` 存在两套实现
 - diff 是纯算法，应属于 `vdom` 核心
 
 **迁移步骤**:
-1. [ ] 创建 `src/vdom/diff.rs`
-2. [ ] 迁移 `diff_indexed_documents` 到 vdom
-3. [ ] 删除 `hotreload/diff.rs` 中的 `diff_documents` (旧版)
-4. [ ] `hotreload` 只负责序列化和 WebSocket
+1. [x] 创建 `src/vdom/diff.rs`
+2. [x] 迁移 `diff_indexed_documents` 到 vdom
+3. [x] 删除 `hotreload/diff.rs` 中的 `diff_documents` (旧版)
+4. [x] `hotreload` 只负责序列化和 WebSocket
+
+**完成于**: 2025-01-XX
+- 新建 `vdom/diff.rs` (~800行) 包含完整 diff 算法
+- 新建 `vdom/lcs.rs` (~330行) 包含 LCS 算法
+- `hotreload/diff.rs` 简化为 re-export 层 (~40行)
+- `hotreload/lcs.rs` 简化为 re-export 层 (~20行)
+- 所有 455 测试通过
 
 ---
 

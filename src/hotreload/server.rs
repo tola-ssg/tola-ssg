@@ -41,7 +41,7 @@ pub fn broadcast_reload_reason(reason: &str) {
 ///
 /// Converts StableIdPatch operations to JSON-serializable PatchOp and sends them.
 /// Falls back to full reload if patch list is empty.
-pub fn broadcast_patches(path: &str, patches: &[super::diff::StableIdPatch]) {
+pub fn broadcast_patches(path: &str, patches: &[crate::vdom::diff::Patch]) {
     if patches.is_empty() {
         // No patches - page unchanged (should rarely happen)
         return;
