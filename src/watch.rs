@@ -224,6 +224,7 @@ impl Debouncer {
             && self
                 .last_event
                 .is_some_and(|t| t.elapsed() >= Duration::from_millis(DEBOUNCE_MS))
+            && !self.in_cooldown()
     }
 
     fn take(&mut self) -> Vec<PathBuf> {
@@ -643,7 +644,8 @@ pub fn watch_for_changes_blocking() -> Result<()> {
 
     loop {
         match rx.recv_timeout(debouncer.timeout()) {
-            Ok(Ok(event)) if is_relevant(&event) && !debouncer.in_cooldown() => {
+            Ok(Ok(event)) if is_relevant(&event) => {
+                // Always collect events, cooldown is checked in ready()
                 debouncer.add(event);
             }
             Ok(Err(e)) => log!("watch"; "error: {e}"),
