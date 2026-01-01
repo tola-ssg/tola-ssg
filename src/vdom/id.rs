@@ -104,31 +104,21 @@ impl StableId {
         occurrence: usize,
         parent_seed: u64,
     ) -> Self {
-        use std::collections::hash_map::DefaultHasher;
+        use crate::utils::hash::StableHasher;
 
-        let mut hasher = DefaultHasher::new();
-
-        // Mix in parent seed for global uniqueness
-        parent_seed.hash(&mut hasher);
-
-        // Hash tag
-        tag.hash(&mut hasher);
+        let mut hasher = StableHasher::new()
+            .update_u64(parent_seed)
+            .update_str(tag);
 
         // Hash ONLY key attributes (id, key, data-key-*) for stable identity
-        // Regular attrs like class/style should NOT affect ID
-        // This ensures attr changes → UpdateAttrs (not Replace)
         for (k, v) in attrs {
             if k == "id" || k == "key" || k.starts_with("data-key") {
-                k.hash(&mut hasher);
-                v.hash(&mut hasher);
+                hasher = hasher.update_str(k).update_str(v);
             }
         }
 
         // Hash occurrence index (NOT absolute position!)
-        // This enables Move detection when elements reorder
-        occurrence.hash(&mut hasher);
-
-        Self(hasher.finish())
+        Self(hasher.update_usize(occurrence).finish())
     }
 
     /// Create a StableId for a text node
@@ -156,13 +146,13 @@ impl StableId {
     /// - With position only: "Hello" → "World" is recognized as Keep + UpdateText
     #[inline]
     pub fn for_text(occurrence: usize, parent_seed: u64) -> Self {
-        use std::collections::hash_map::DefaultHasher;
+        use crate::utils::hash::StableHasher;
 
-        let mut hasher = DefaultHasher::new();
-        parent_seed.hash(&mut hasher);
-        "__text__".hash(&mut hasher);
-        occurrence.hash(&mut hasher);
-        Self(hasher.finish())
+        Self(StableHasher::new()
+            .update_u64(parent_seed)
+            .update_str("__text__")
+            .update_usize(occurrence)
+            .finish())
     }
 
     /// Create a StableId for a frame node (SVG content)
@@ -173,14 +163,14 @@ impl StableId {
     /// * `occurrence` - How many same-frame_id siblings appeared before this one
     #[inline]
     pub fn for_frame(frame_id: usize, occurrence: usize, parent_seed: u64) -> Self {
-        use std::collections::hash_map::DefaultHasher;
+        use crate::utils::hash::StableHasher;
 
-        let mut hasher = DefaultHasher::new();
-        parent_seed.hash(&mut hasher);
-        "__frame__".hash(&mut hasher);
-        frame_id.hash(&mut hasher);
-        occurrence.hash(&mut hasher);
-        Self(hasher.finish())
+        Self(StableHasher::new()
+            .update_u64(parent_seed)
+            .update_str("__frame__")
+            .update_usize(frame_id)
+            .update_usize(occurrence)
+            .finish())
     }
 
     /// Create from content hash (legacy API, kept for compatibility)

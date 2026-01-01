@@ -98,10 +98,8 @@ pub fn is_cache_valid_for_arch(path: &std::path::Path) -> bool {
 ///
 /// Uses the path's string representation for consistent hashing.
 pub fn path_to_cache_hash(path: &std::path::Path) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    path.hash(&mut hasher);
-    hasher.finish()
+    // Use our deterministic hash module
+    crate::utils::hash::compute(path.to_string_lossy().as_bytes())
 }
 
 #[cfg(test)]

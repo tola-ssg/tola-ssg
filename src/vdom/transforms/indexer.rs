@@ -381,17 +381,15 @@ enum ContentKey {
 impl ContentKey {
     /// Create a ContentKey from a Raw node
     fn from_raw_node(node: &Node<Raw>) -> Self {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        use crate::utils::hash::StableHasher;
 
         match node {
             Node::Element(elem) => {
-                let mut hasher = DefaultHasher::new();
+                let mut hasher = StableHasher::new();
                 // Only hash key attributes (id, key, data-key-*)
                 for (k, v) in &elem.attrs {
                     if k == "id" || k == "key" || k.starts_with("data-key") {
-                        k.hash(&mut hasher);
-                        v.hash(&mut hasher);
+                        hasher = hasher.update_str(k).update_str(v);
                     }
                 }
                 ContentKey::Element {
