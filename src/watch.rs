@@ -278,9 +278,13 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
     // Template/utils changes: query dependency graph for precise rebuild
     if !dependency_triggers.is_empty() {
         // Clear VDOM cache for affected files since template changes affect output
+        // Paths from DEPENDENCY_GRAPH are already canonicalized (see deps.rs)
         for path in &dependency_triggers {
-            if let Some(dependents) = crate::compiler::deps::DEPENDENCY_GRAPH.read().get_dependents(path) {
+            // Canonicalize trigger path to match DEPENDENCY_GRAPH keys
+            let canonical_trigger = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            if let Some(dependents) = crate::compiler::deps::DEPENDENCY_GRAPH.read().get_dependents(&canonical_trigger) {
                 for dep in dependents {
+                    // dep is already canonical from DEPENDENCY_GRAPH
                     VDOM_CACHE.remove(dep);
                 }
             }
@@ -498,6 +502,7 @@ fn handle_full_rebuild(reason: &str, status: &mut WatchStatus) -> bool {
 ///
 /// Note: All entries in the dependency graph's reverse map are content files
 /// (only content files call `record_dependencies`), so no category check needed.
+/// Paths are canonicalized to match DEPENDENCY_GRAPH keys.
 fn collect_affected_content(changed_files: &[&PathBuf]) -> Vec<PathBuf> {
     use crate::compiler::deps::DEPENDENCY_GRAPH;
 
@@ -505,7 +510,9 @@ fn collect_affected_content(changed_files: &[&PathBuf]) -> Vec<PathBuf> {
     let mut affected = FxHashSet::default();
 
     for path in changed_files {
-        if let Some(dependents) = graph.get_dependents(path) {
+        // Canonicalize to match DEPENDENCY_GRAPH keys
+        let canonical = path.canonicalize().unwrap_or_else(|_| (*path).clone());
+        if let Some(dependents) = graph.get_dependents(&canonical) {
             affected.extend(dependents.iter().cloned());
         }
     }

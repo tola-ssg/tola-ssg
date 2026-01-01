@@ -56,18 +56,23 @@ impl DependencyGraph {
     /// Record dependencies for a content file after compilation.
     ///
     /// Call this after compiling a `.typ` file with the list of accessed files.
+    /// Paths are canonicalized for consistent matching with VDOM_CACHE.
     pub fn record_dependencies(&mut self, content_file: &Path, accessed_files: &[PathBuf]) {
+        // Canonicalize content file path for consistent key matching
+        let content_file = content_file
+            .canonicalize()
+            .unwrap_or_else(|_| content_file.to_path_buf());
+
         // Remove old mappings first
-        self.remove_forward_entry(content_file);
+        self.remove_forward_entry(&content_file);
 
         // Build new dependency set (excluding the content file itself)
+        // Canonicalize dependency paths for consistent matching
         let deps: FxHashSet<PathBuf> = accessed_files
             .iter()
-            .filter(|p| p.as_path() != content_file)
-            .cloned()
+            .filter(|p| p.as_path() != content_file.as_path())
+            .filter_map(|p| p.canonicalize().ok().or_else(|| Some(p.clone())))
             .collect();
-
-        let content_file = content_file.to_path_buf();
 
         // Update reverse mapping
         for dep in &deps {
