@@ -86,36 +86,66 @@ impl DiffResult {
     }
 }
 
+// =============================================================================
+// Anchor-based Patch System
+// =============================================================================
+//
+// All operations use StableId for targeting. No position indices.
+// This eliminates index drift and order-dependent bugs.
+//
+// For structural changes (insert/move), we use anchor-based positioning:
+// - InsertAfter/Before: relative to sibling element
+// - InsertFirst/Last: relative to parent
+//
+// Text nodes don't have IDs in DOM, so we handle them specially:
+// - Single text child: UpdateText on parent
+// - Mixed children with structure change: Replace parent
+
+/// Anchor for insert/move operations
+///
+/// Specifies WHERE to place an element relative to existing nodes.
+/// All anchors reference elements by StableId, never by position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Anchor {
+    /// Insert/move after an element (anchor.insertAdjacentHTML('afterend', ...))
+    After(StableId),
+    /// Insert/move before an element (anchor.insertAdjacentHTML('beforebegin', ...))
+    Before(StableId),
+    /// Insert/move as first child (parent.insertAdjacentHTML('afterbegin', ...))
+    FirstChildOf(StableId),
+    /// Insert/move as last child (parent.insertAdjacentHTML('beforeend', ...))
+    LastChildOf(StableId),
+}
+
 /// Patch operation using StableId for targeting
+///
+/// All operations are anchor-based or ID-based. No position indices.
+/// This design ensures:
+/// - Order independence (mostly)
+/// - No index drift
+/// - Simple JS execution (just insertAdjacent* calls)
 #[derive(Debug, Clone)]
 pub enum Patch {
-    /// Replace entire element
+    /// Replace entire element's outerHTML
     Replace { target: StableId, html: String },
-    /// Update text content of an element (sets textContent)
+
+    /// Update text content (element.textContent = text)
+    /// Used for elements with single text child: `<p>Hello</p>` → `<p>World</p>`
     UpdateText { target: StableId, text: String },
-    /// Update text content at a specific child position
-    /// Used when text nodes don't have their own data-tola-id
-    UpdateTextAtPosition {
-        parent: StableId,
-        position: u32,
-        text: String,
-    },
-    /// Remove element by StableId
+
+    /// Replace inner HTML (element.innerHTML = html)
+    /// Used when child structure changes but we want to preserve the parent element
+    ReplaceChildren { target: StableId, html: String },
+
+    /// Remove element by ID
     Remove { target: StableId },
-    /// Remove child at specific position (for text nodes without data-tola-id)
-    RemoveAtPosition { parent: StableId, position: u32 },
-    /// Insert new element
-    Insert {
-        parent: StableId,
-        position: u32,
-        html: String,
-    },
-    /// Move element to new position
-    Move {
-        target: StableId,
-        new_parent: StableId,
-        position: u32,
-    },
+
+    /// Insert new content at anchor position
+    Insert { anchor: Anchor, html: String },
+
+    /// Move existing element to new anchor position
+    Move { target: StableId, to: Anchor },
+
     /// Update attributes
     UpdateAttrs {
         target: StableId,
@@ -125,17 +155,25 @@ pub enum Patch {
 }
 
 impl Patch {
-    /// Get the target StableId of this patch
+    /// Get the primary target StableId of this patch
     pub fn target(&self) -> StableId {
         match self {
             Self::Replace { target, .. } => *target,
             Self::UpdateText { target, .. } => *target,
-            Self::UpdateTextAtPosition { parent, .. } => *parent,
+            Self::ReplaceChildren { target, .. } => *target,
             Self::Remove { target } => *target,
-            Self::RemoveAtPosition { parent, .. } => *parent,
-            Self::Insert { parent, .. } => *parent,
+            Self::Insert { anchor, .. } => anchor.target_id(),
             Self::Move { target, .. } => *target,
             Self::UpdateAttrs { target, .. } => *target,
+        }
+    }
+}
+
+impl Anchor {
+    /// Get the StableId referenced by this anchor
+    pub fn target_id(&self) -> StableId {
+        match self {
+            Self::After(id) | Self::Before(id) | Self::FirstChildOf(id) | Self::LastChildOf(id) => *id,
         }
     }
 }
@@ -316,10 +354,14 @@ impl DiffContext {
         }
     }
 
-    /// Diff child nodes using LCS algorithm
+    /// Diff child nodes using anchor-based approach
     ///
-    /// For text nodes, we use position-based matching since text content changes
-    /// would cause StableId to change (making LCS see them as different nodes).
+    /// # Strategy
+    ///
+    /// 1. **Element-only children**: Use LCS for move detection, anchor-based inserts
+    /// 2. **Contains text nodes**: If structure matches, update text; otherwise Replace parent
+    ///
+    /// This avoids position indices entirely, using StableId anchors instead.
     fn diff_children(
         &mut self,
         old_children: &[Node<Indexed>],
@@ -337,304 +379,222 @@ impl DiffContext {
 
         // Quick path: old empty, insert all new
         if old_children.is_empty() {
-            for (i, child) in new_children.iter().enumerate() {
-                self.ops.push(Patch::Insert {
-                    parent: parent_id,
-                    position: i as u32,
-                    html: render_node_html(child),
-                });
-            }
+            self.insert_all_children(new_children, parent_id);
             return;
         }
 
-        // Quick path: new empty, remove all old
-        // Use RemoveAtPosition for text nodes since they don't have data-tola-id
+        // Quick path: new empty, remove all old elements
         if new_children.is_empty() {
-            for (i, child) in old_children.iter().enumerate().rev() {
-                match child {
-                    Node::Text(_) => {
-                        self.ops.push(Patch::RemoveAtPosition {
-                            parent: parent_id,
-                            position: i as u32,
-                        });
-                    }
-                    _ => {
-                        self.ops.push(Patch::Remove {
-                            target: get_node_stable_id(child),
-                        });
-                    }
-                }
-            }
+            self.remove_all_element_children(old_children);
             return;
         }
 
-        // For small child lists with mostly text nodes, use simple position-based diff
-        // This handles the common case of editing text content without false Delete+Insert
-        if self.should_use_position_based_diff(old_children, new_children) {
-            self.diff_children_by_position(old_children, new_children, parent_id);
-            return;
-        }
+        // Check if we can do element-only diff (no text nodes involved in structure)
+        let old_has_text = old_children.iter().any(|n| matches!(n, Node::Text(_)));
+        let new_has_text = new_children.iter().any(|n| matches!(n, Node::Text(_)));
 
-        // For larger/complex structures, use LCS-based diff for move detection
-        self.diff_children_by_lcs(old_children, new_children, parent_id);
+        if !old_has_text && !new_has_text {
+            // Pure element children - use LCS with anchors
+            self.diff_element_children(old_children, new_children, parent_id);
+        } else {
+            // Mixed content with text - use structure-aware diff
+            self.diff_mixed_children(old_children, new_children, parent_id);
+        }
     }
 
-    /// Check if we should use simpler position-based diff
-    ///
-    /// Position-based is better when:
-    /// - Children are mostly text nodes (whose StableId changes with content)
-    /// - Few structural changes expected (just content updates)
-    fn should_use_position_based_diff(
-        &self,
-        old_children: &[Node<Indexed>],
-        new_children: &[Node<Indexed>],
-    ) -> bool {
-        // If counts differ significantly, use LCS for better diff
-        let len_diff = (old_children.len() as isize - new_children.len() as isize).abs();
-        if len_diff > 2 {
-            return false;
-        }
+    /// Insert all children (used when old is empty)
+    fn insert_all_children(&mut self, children: &[Node<Indexed>], parent_id: StableId) {
+        // Insert all as children of parent
+        // First one goes first, subsequent ones go after previous element (if any)
+        let mut last_element_id: Option<StableId> = None;
 
-        // If most children are text nodes, use position-based
-        let old_text_count = old_children
-            .iter()
-            .filter(|n| matches!(n, Node::Text(_)))
-            .count();
-        let new_text_count = new_children
-            .iter()
-            .filter(|n| matches!(n, Node::Text(_)))
-            .count();
+        for child in children {
+            let html = render_node_html(child);
+            let anchor = match last_element_id {
+                Some(prev_id) => Anchor::After(prev_id),
+                None => Anchor::FirstChildOf(parent_id),
+            };
+            self.ops.push(Patch::Insert { anchor, html });
 
-        // More than half are text nodes -> position-based is safer
-        old_text_count * 2 >= old_children.len() || new_text_count * 2 >= new_children.len()
-    }
-
-    /// Position-based child diffing - compare nodes at same indices
-    fn diff_children_by_position(
-        &mut self,
-        old_children: &[Node<Indexed>],
-        new_children: &[Node<Indexed>],
-        parent_id: StableId,
-    ) {
-        let max_len = old_children.len().max(new_children.len());
-
-        for i in 0..max_len {
-            if self.should_abort() {
-                return;
-            }
-
-            match (old_children.get(i), new_children.get(i)) {
-                (Some(old_node), Some(new_node)) => {
-                    // Both exist at this position - diff them
-                    self.diff_nodes_at_position(old_node, new_node, parent_id, i);
-                }
-                (None, Some(new_node)) => {
-                    // New node added at end
-                    self.ops.push(Patch::Insert {
-                        parent: parent_id,
-                        position: i as u32,
-                        html: render_node_html(new_node),
-                    });
-                }
-                (Some(old_node), None) => {
-                    // Old node removed - use appropriate removal strategy
-                    match old_node {
-                        Node::Text(_) => {
-                            // Text nodes don't have data-tola-id, use position-based removal
-                            self.ops.push(Patch::RemoveAtPosition {
-                                parent: parent_id,
-                                position: i as u32,
-                            });
-                        }
-                        _ => {
-                            // Elements have data-tola-id, use ID-based removal
-                            self.ops.push(Patch::Remove {
-                                target: get_node_stable_id(old_node),
-                            });
-                        }
-                    }
-                }
-                (None, None) => unreachable!(),
+            // Track last element for anchoring
+            if let Node::Element(elem) = child {
+                last_element_id = Some(elem.ext.stable_id());
             }
         }
     }
 
-    /// Diff two nodes at the same position
-    ///
-    /// This is used for position-based diffing where we know the nodes
-    /// are at the same index, even if their StableIds differ.
-    fn diff_nodes_at_position(
-        &mut self,
-        old: &Node<Indexed>,
-        new: &Node<Indexed>,
-        parent_id: StableId,
-        position: usize,
-    ) {
-        match (old, new) {
-            (Node::Element(old_elem), Node::Element(new_elem)) => {
-                // Elements: check if same tag, then diff or replace
-                if old_elem.tag == new_elem.tag {
-                    self.diff_element(old_elem, new_elem);
-                } else {
-                    // Different tags - replace
-                    self.ops.push(Patch::Replace {
-                        target: old_elem.ext.stable_id(),
-                        html: render_element_html(new_elem),
-                    });
-                    self.stats.nodes_replaced += 1;
-                }
-            }
-            (Node::Text(old_text), Node::Text(new_text)) => {
-                // Text nodes at same position: update content using PARENT's ID
-                // since text nodes don't have data-tola-id in DOM
-                self.stats.text_nodes_compared += 1;
-                if old_text.content != new_text.content {
-                    self.ops.push(Patch::UpdateTextAtPosition {
-                        parent: parent_id,
-                        position: position as u32,
-                        text: new_text.content.clone(),
-                    });
-                    self.stats.text_updates += 1;
-                }
-            }
-            // Different node types at same position
-            // Text nodes don't have data-tola-id in DOM, so we need to handle them specially
-            (Node::Text(_), _) => {
-                // Old is text, new is element: remove text at position, insert new element
-                self.ops.push(Patch::RemoveAtPosition {
-                    parent: parent_id,
-                    position: position as u32,
-                });
-                self.ops.push(Patch::Insert {
-                    parent: parent_id,
-                    position: position as u32,
-                    html: render_node_html(new),
-                });
-                self.stats.nodes_replaced += 1;
-            }
-            (_, Node::Text(_)) => {
-                // Old is element, new is text: remove element by ID, insert text
+    /// Remove all element children (text nodes ignored - they'll be gone with elements)
+    fn remove_all_element_children(&mut self, children: &[Node<Indexed>]) {
+        for child in children {
+            if let Node::Element(elem) = child {
                 self.ops.push(Patch::Remove {
-                    target: get_node_stable_id(old),
+                    target: elem.ext.stable_id(),
                 });
-                self.ops.push(Patch::Insert {
-                    parent: parent_id,
-                    position: position as u32,
-                    html: render_node_html(new),
-                });
-                self.stats.nodes_replaced += 1;
             }
-            // Both are elements but different types (Frame to Element, etc.) - replace by ID
-            _ => {
-                self.ops.push(Patch::Replace {
-                    target: get_node_stable_id(old),
-                    html: render_node_html(new),
-                });
-                self.stats.nodes_replaced += 1;
-            }
+            // Text nodes are removed implicitly when parent's innerHTML changes
+            // or when surrounding elements are removed
         }
     }
 
-    /// LCS-based child diffing for complex structural changes
-    fn diff_children_by_lcs(
+    /// Diff pure element children using LCS with anchor-based operations
+    fn diff_element_children(
         &mut self,
         old_children: &[Node<Indexed>],
         new_children: &[Node<Indexed>],
         parent_id: StableId,
     ) {
+        // Build ID lists for LCS
         let old_ids: Vec<StableId> = old_children.iter().map(get_node_stable_id).collect();
         let new_ids: Vec<StableId> = new_children.iter().map(get_node_stable_id).collect();
 
         // Compute LCS diff
         let lcs_result = diff_sequences(&old_ids, &new_ids);
 
-        // Collect edits and apply in safe order to avoid duplication issues
-        let mut deletes: Vec<usize> = Vec::new();
-        let mut inserts: Vec<(usize, &Node<Indexed>)> = Vec::new();
-        let mut moves: Vec<(usize, usize)> = Vec::new(); // (old_idx, new_idx)
+        // Categorize edits
         let mut keeps: Vec<(usize, usize)> = Vec::new();
+        let mut moves: Vec<(usize, usize)> = Vec::new();
+        let mut deletes: Vec<usize> = Vec::new();
+        let mut inserts: Vec<usize> = Vec::new();
 
         for edit in &lcs_result.edits {
             match edit {
                 Edit::Keep { old_idx, new_idx } => keeps.push((*old_idx, *new_idx)),
-                Edit::Insert { new_idx } => inserts.push((*new_idx, &new_children[*new_idx])),
-                Edit::Delete { old_idx } => deletes.push(*old_idx),
                 Edit::Move { old_idx, new_idx } => moves.push((*old_idx, *new_idx)),
+                Edit::Delete { old_idx } => deletes.push(*old_idx),
+                Edit::Insert { new_idx } => inserts.push(*new_idx),
             }
         }
 
-        if self.should_abort() {
-            return;
+        // 1. Remove deleted elements (order doesn't matter - they're by ID)
+        for old_idx in &deletes {
+            self.ops.push(Patch::Remove {
+                target: old_ids[*old_idx],
+            });
         }
 
-        // Remove deletions first in reverse order to preserve indices
-        deletes.sort_unstable_by(|a, b| b.cmp(a));
-        for old_idx in deletes {
-            let old_node = &old_children[old_idx];
-            // Use RemoveAtPosition for text nodes since they don't have data-tola-id
-            match old_node {
-                Node::Text(_) => {
-                    self.ops.push(Patch::RemoveAtPosition {
-                        parent: parent_id,
-                        position: old_idx as u32,
-                    });
-                }
-                _ => {
-                    self.ops.push(Patch::Remove {
-                        target: get_node_stable_id(old_node),
-                    });
-                }
-            }
-        }
-
-        if self.should_abort() {
-            return;
-        }
-
-        // Apply moves next
+        // 2. Apply moves with anchors (sort by target position for correct ordering)
+        moves.sort_unstable_by_key(|(_, new_idx)| *new_idx);
         for (old_idx, new_idx) in &moves {
-            let old_node = &old_children[*old_idx];
+            let anchor = self.compute_anchor_for_position(*new_idx, new_children, parent_id);
             self.ops.push(Patch::Move {
-                target: get_node_stable_id(old_node),
-                new_parent: parent_id,
-                position: *new_idx as u32,
+                target: old_ids[*old_idx],
+                to: anchor,
             });
             self.stats.nodes_moved += 1;
         }
 
-        if self.should_abort() {
-            return;
-        }
-
-        // Apply inserts in ascending order of position
-        inserts.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        for (new_idx, new_node) in inserts {
+        // 3. Insert new elements with anchors (MUST be sorted by position ascending!)
+        // This ensures earlier inserts happen first, so later anchors (After(prev)) are valid
+        inserts.sort_unstable();
+        for new_idx in &inserts {
+            let anchor = self.compute_anchor_for_position(*new_idx, new_children, parent_id);
             self.ops.push(Patch::Insert {
-                parent: parent_id,
-                position: new_idx as u32,
-                html: render_node_html(new_node),
+                anchor,
+                html: render_node_html(&new_children[*new_idx]),
             });
         }
 
-        if self.should_abort() {
-            return;
-        }
-
-        // Finally, diff content of kept nodes and moved nodes
-        for (old_idx, new_idx) in keeps {
-            let old_node = &old_children[old_idx];
-            let new_node = &new_children[new_idx];
-            self.diff_nodes(old_node, new_node);
-        }
-
-        for (old_idx, new_idx) in moves {
-            let old_node = &old_children[old_idx];
-            let new_node = &new_children[new_idx];
-            self.diff_nodes(old_node, new_node);
+        // 4. Recursively diff kept and moved elements
+        for (old_idx, new_idx) in keeps.iter().chain(moves.iter()) {
+            self.diff_nodes(&old_children[*old_idx], &new_children[*new_idx]);
         }
     }
 
-    /// Diff two nodes
+    /// Compute anchor for inserting/moving to a position in new_children
+    ///
+    /// Strategy: Find the nearest preceding element sibling that will exist in final DOM
+    fn compute_anchor_for_position(
+        &self,
+        new_idx: usize,
+        new_children: &[Node<Indexed>],
+        parent_id: StableId,
+    ) -> Anchor {
+        // Look for preceding element sibling
+        for i in (0..new_idx).rev() {
+            if let Node::Element(elem) = &new_children[i] {
+                return Anchor::After(elem.ext.stable_id());
+            }
+        }
+        // No preceding element - insert at start
+        Anchor::FirstChildOf(parent_id)
+    }
+
+    /// Diff mixed children (contains text nodes)
+    ///
+    /// Strategy: Compare structure. If same, update content. If different, Replace parent.
+    fn diff_mixed_children(
+        &mut self,
+        old_children: &[Node<Indexed>],
+        new_children: &[Node<Indexed>],
+        parent_id: StableId,
+    ) {
+        // Check if structure is compatible (same length, same node types at each position)
+        if self.children_structure_matches(old_children, new_children) {
+            // Structure matches - check if any text content changed
+            let text_changed = old_children.iter().zip(new_children.iter()).any(|(old, new)| {
+                match (old, new) {
+                    (Node::Text(old_t), Node::Text(new_t)) => old_t.content != new_t.content,
+                    _ => false,
+                }
+            });
+
+            if text_changed {
+                // Text changed in mixed content - use innerHTML replacement
+                // (text nodes don't have IDs, can't patch individually)
+                let new_inner_html = new_children
+                    .iter()
+                    .map(render_node_html)
+                    .collect::<Vec<_>>()
+                    .join("");
+
+                self.ops.push(Patch::ReplaceChildren {
+                    target: parent_id,
+                    html: new_inner_html,
+                });
+                self.stats.text_updates += 1;
+            } else {
+                // No text changes - diff element children recursively
+                for (old, new) in old_children.iter().zip(new_children.iter()) {
+                    self.diff_nodes(old, new);
+                }
+            }
+        } else {
+            // Structure differs - Replace children with new innerHTML
+            // This is the "escape hatch" for complex mixed content changes
+            let new_inner_html = new_children
+                .iter()
+                .map(render_node_html)
+                .collect::<Vec<_>>()
+                .join("");
+
+            self.ops.push(Patch::ReplaceChildren {
+                target: parent_id,
+                html: new_inner_html,
+            });
+            self.stats.nodes_replaced += 1;
+        }
+    }
+
+    /// Check if two child lists have matching structure (same length, same node types)
+    fn children_structure_matches(
+        &self,
+        old: &[Node<Indexed>],
+        new: &[Node<Indexed>],
+    ) -> bool {
+        if old.len() != new.len() {
+            return false;
+        }
+        old.iter().zip(new.iter()).all(|(o, n)| {
+            matches!(
+                (o, n),
+                (Node::Element(_), Node::Element(_))
+                    | (Node::Text(_), Node::Text(_))
+                    | (Node::Frame(_), Node::Frame(_))
+            )
+        })
+    }
+
+    /// Diff two nodes (recursive entry point)
     fn diff_nodes(&mut self, old: &Node<Indexed>, new: &Node<Indexed>) {
         if self.should_abort() {
             return;
@@ -646,17 +606,15 @@ impl DiffContext {
             }
             (Node::Text(old_text), Node::Text(new_text)) => {
                 self.stats.text_nodes_compared += 1;
+                // Text node content change - but text nodes don't have DOM IDs
+                // This case is handled by parent (diff_mixed_children or single-text optimization)
                 if old_text.content != new_text.content {
-                    self.ops.push(Patch::UpdateText {
-                        target: old_text.ext.stable_id,
-                        text: new_text.content.clone(),
-                    });
+                    // This shouldn't happen if `diff_mixed_children` works correctly
+                    crate::log!("hotreload"; "WARNING: diff_nodes found text mismatch that wasn't handled by parent!");
                     self.stats.text_updates += 1;
                 }
             }
             (Node::Frame(old_frame), Node::Frame(new_frame)) => {
-                // Frames at Indexed phase are placeholders (SVG content is in ext)
-                // They should have been converted to SVG Elements, so just compare by ID
                 if old_frame.ext.stable_id != new_frame.ext.stable_id {
                     self.ops.push(Patch::Replace {
                         target: old_frame.ext.stable_id,
@@ -665,13 +623,9 @@ impl DiffContext {
                     self.stats.nodes_replaced += 1;
                 }
             }
-            // Different node types - replace
+            // Different node types - shouldn't happen if structure_matches is correct
             _ => {
-                self.ops.push(Patch::Replace {
-                    target: get_node_stable_id(old),
-                    html: render_node_html(new),
-                });
-                self.stats.nodes_replaced += 1;
+                // Fallback: this case should be handled by parent's Replace
             }
         }
     }
@@ -705,6 +659,11 @@ fn get_node_stable_id(node: &Node<Indexed>) -> StableId {
 
 /// Render an Indexed element to HTML string with data-tola-id attribute
 fn render_element_html(elem: &Element<Indexed>) -> String {
+    render_element_html_ctx(elem, false)
+}
+
+/// Render an Indexed element to HTML string with context
+fn render_element_html_ctx(elem: &Element<Indexed>, in_svg: bool) -> String {
     let mut html = String::new();
     html.push('<');
     html.push_str(&elem.tag);
@@ -724,8 +683,11 @@ fn render_element_html(elem: &Element<Indexed>) -> String {
 
     html.push('>');
 
+    // Check if this element is SVG - content should not be escaped
+    let is_svg = elem.tag == "svg" || in_svg;
+
     for child in &elem.children {
-        html.push_str(&render_node_html(child));
+        html.push_str(&render_node_html_ctx(child, is_svg));
     }
 
     // Close tag (skip void elements)
@@ -740,11 +702,21 @@ fn render_element_html(elem: &Element<Indexed>) -> String {
 
 /// Render an Indexed node to HTML string
 fn render_node_html(node: &Node<Indexed>) -> String {
+    render_node_html_ctx(node, false)
+}
+
+/// Render an Indexed node to HTML string with context
+fn render_node_html_ctx(node: &Node<Indexed>, in_svg: bool) -> String {
     match node {
-        Node::Element(elem) => render_element_html(elem),
+        Node::Element(elem) => render_element_html_ctx(elem, in_svg),
         Node::Text(text) => {
-            // Render text directly without wrapper - matches production HTML output
-            html_escape(&text.content)
+            // Inside SVG: content is raw SVG markup, don't escape
+            // Outside SVG: normal text, escape HTML characters
+            if in_svg {
+                text.content.clone()
+            } else {
+                html_escape(&text.content)
+            }
         }
         Node::Frame(frame) => {
             // Frame at Indexed phase is a placeholder

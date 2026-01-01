@@ -380,11 +380,15 @@ fn process_with_vdom_diff(
         let ext = path.extension().and_then(|e| e.to_str());
 
         if ext == Some("typ") {
+            // Canonicalize path for consistent cache lookup
+            // (notify events may use different path formats than build)
+            let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
             // Get old VDOM from cache BEFORE compilation
-            let old_vdom = VDOM_CACHE.get(path);
+            let old_vdom = VDOM_CACHE.get(&canonical_path);
 
             // Content file: use VDOM diff
-            match process_page(&Development, path, config) {
+            match process_page(&Development, &canonical_path, config) {
                 Ok(Some(result)) => {
                     count += 1;
                     any_content_changed = true;
@@ -435,7 +439,7 @@ fn process_with_vdom_diff(
 
                     // Update VDOM cache AFTER successful write/broadcast
                     // This keeps cache in sync with what browser should display
-                    VDOM_CACHE.insert(path.to_path_buf(), new_vdom.clone());
+                    VDOM_CACHE.insert(canonical_path, new_vdom.clone());
                 }
                 Ok(None) => {
                     // Skipped (draft or up-to-date)
@@ -477,34 +481,6 @@ fn handle_full_rebuild(reason: &str, status: &mut WatchStatus) -> bool {
         Err(e) => {
             status.error(&format!("full rebuild failed: {reason}"), &e.to_string());
             false
-        }
-    }
-}
-
-/// Pre-populate VDOM cache for all content files.
-///
-/// This enables immediate incremental patching on first edit
-/// instead of falling back to full reload.
-fn populate_vdom_cache(config: &SiteConfig) {
-    let content_files = crate::compiler::collect_all_files(&config.build.content);
-    let typ_files: Vec<_> = content_files
-        .into_iter()
-        .filter(|p| p.extension().is_some_and(|e| e == "typ"))
-        .collect();
-
-    if typ_files.is_empty() {
-        return;
-    }
-
-    log!("vdom"; "populating cache for {} files", typ_files.len());
-
-    for path in &typ_files {
-        // process_page with Development driver compiles and returns indexed VDOM
-        if let Ok(Some(result)) = process_page(&Development, path, config) {
-            // Cache the indexed VDOM for later diffing
-            if let Some(indexed_vdom) = result.indexed_vdom {
-                VDOM_CACHE.insert(path.to_path_buf(), indexed_vdom);
-            }
         }
     }
 }
@@ -639,7 +615,8 @@ pub fn watch_for_changes_blocking() -> Result<()> {
     let mut content_cache = ContentCache::new();
     let mut status = WatchStatus::new();
     content_cache.populate(&c);
-    populate_vdom_cache(&c);
+    // Note: VDOM cache is populated during build_all(Development) in main.rs
+    // No need to populate again here - that would create StableId mismatch!
 
     let root = c.get_root().to_path_buf();
 

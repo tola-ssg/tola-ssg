@@ -1,8 +1,8 @@
 //! Content-based stable node identity system for VDOM
 //!
 //! Implements a pure content hash strategy for stable node identification:
-//! - **Elements**: Hash(tag + sorted_attrs + child_ids + position_in_parent)
-//! - **Text**: Hash(content + position_in_parent)
+//! - **Elements**: Hash(tag + key_attrs + occurrence_in_siblings)
+//! - **Text**: Hash(content + occurrence_in_siblings)
 //!
 //! # Design Decision
 //!
@@ -11,11 +11,18 @@
 //! - Content hash is deterministic and reproducible
 //! - Same content always produces same ID, enabling reliable diffing
 //!
-//! # Position Disambiguation
+//! # Occurrence Index (not Position!)
 //!
 //! To handle identical siblings (e.g., multiple `<p>same text</p>`),
-//! we include position-in-parent in the hash. This ensures each node
-//! has a unique ID even with identical content.
+//! we use **occurrence index** instead of absolute position:
+//! - occurrence = "how many times this same content appeared before in siblings"
+//!
+//! This enables **Move detection**: when elements reorder, their IDs stay the same
+//! because their content and occurrence count haven't changed.
+//!
+//! Example: `[A, B, C]` → `[C, A, B]`
+//! - Position-based: all IDs change → Replace × 3
+//! - Occurrence-based: IDs unchanged → Move × 3 (preserves CSS transitions!)
 
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -37,7 +44,7 @@ use std::hash::{Hash, Hasher};
 /// - Copy, no heap allocation
 /// - Null-optimized: `Option<StableId>` is also 8 bytes
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct StableId(u64);
+pub struct StableId(pub u64);
 
 impl StableId {
     /// Create a StableId from a raw u64 value
@@ -71,9 +78,19 @@ impl StableId {
     ///
     /// Hash is computed from:
     /// - Tag name
-    /// - Sorted attributes (for order-independence)
-    /// - Child StableIds (structural identity)
-    /// - Position in parent (disambiguate identical siblings)
+    /// - Key attributes only (id, key, data-key-*) for stable identity
+    /// - Occurrence index (how many same-tag elements appeared before)
+    ///
+    /// Note: Regular attributes (class, style) are NOT included in hash.
+    /// This means attribute changes generate `UpdateAttrs` not `Replace`,
+    /// preserving DOM node identity and CSS transitions.
+    ///
+    /// # Arguments
+    ///
+    /// * `tag` - Element tag name
+    /// * `attrs` - All attributes (only key attrs will be hashed)
+    /// * `_children` - Child StableIds (unused, kept for API compatibility)
+    /// * `occurrence` - How many same-(tag, key_attrs) siblings appeared before this one
     ///
     /// # Example
     ///
@@ -84,32 +101,32 @@ impl StableId {
         tag: &str,
         attrs: &[(String, String)],
         _children: &[StableId],
-        position: usize,
+        occurrence: usize,
+        parent_seed: u64,
     ) -> Self {
         use std::collections::hash_map::DefaultHasher;
 
         let mut hasher = DefaultHasher::new();
 
+        // Mix in parent seed for global uniqueness
+        parent_seed.hash(&mut hasher);
+
         // Hash tag
         tag.hash(&mut hasher);
 
-        // Hash attributes (sort by key for order-independence)
-        let mut sorted_attrs: Vec<_> = attrs.iter().collect();
-        sorted_attrs.sort_by(|a, b| a.0.cmp(&b.0));
-        for (k, v) in sorted_attrs {
-            k.hash(&mut hasher);
-            v.hash(&mut hasher);
+        // Hash ONLY key attributes (id, key, data-key-*) for stable identity
+        // Regular attrs like class/style should NOT affect ID
+        // This ensures attr changes → UpdateAttrs (not Replace)
+        for (k, v) in attrs {
+            if k == "id" || k == "key" || k.starts_with("data-key") {
+                k.hash(&mut hasher);
+                v.hash(&mut hasher);
+            }
         }
 
-        // Hash child IDs (REMOVED: StableId should not depend on children content)
-        // If we include children, ANY change in a leaf node changes the ENTIRE path of StableIds to the root.
-        // This causes the VDOM diff to see the root as "Replaced" instead of finding the small change deep down.
-        // for child in children {
-        //     child.0.hash(&mut hasher);
-        // }
-
-        // Hash position to disambiguate identical siblings
-        position.hash(&mut hasher);
+        // Hash occurrence index (NOT absolute position!)
+        // This enables Move detection when elements reorder
+        occurrence.hash(&mut hasher);
 
         Self(hasher.finish())
     }
@@ -118,33 +135,53 @@ impl StableId {
     ///
     /// Hash is computed from:
     /// - Text content
-    /// - Position in parent (disambiguate identical text nodes)
+    /// - Occurrence index (how many same-content text nodes appeared before)
+    ///
+    /// # Arguments
+    ///
+    /// * `content` - Text content
+    /// * `occurrence` - How many same-content text siblings appeared before this one
     ///
     /// # Example
     ///
     /// ```ignore
-    /// let id = StableId::for_text("Hello, world!", 0);
+    /// let id = StableId::for_text(0);  // First text node at this position
     /// ```
+    ///
+    /// # Design Note
+    ///
+    /// Text node IDs are based on occurrence index only, NOT content.
+    /// This is critical for correct diffing:
+    /// - If content were included: "Hello" → "World" would be Delete + Insert
+    /// - With position only: "Hello" → "World" is recognized as Keep + UpdateText
     #[inline]
-    pub fn for_text(content: &str, position: usize) -> Self {
+    #[inline]
+    pub fn for_text(occurrence: usize, parent_seed: u64) -> Self {
         use std::collections::hash_map::DefaultHasher;
 
         let mut hasher = DefaultHasher::new();
+        parent_seed.hash(&mut hasher);
         "__text__".hash(&mut hasher);
-        content.hash(&mut hasher);
-        position.hash(&mut hasher);
+        occurrence.hash(&mut hasher);
         Self(hasher.finish())
     }
 
     /// Create a StableId for a frame node (SVG content)
+    ///
+    /// # Arguments
+    ///
+    /// * `frame_id` - Unique frame identifier
+    /// * `occurrence` - How many same-frame_id siblings appeared before this one
     #[inline]
-    pub fn for_frame(frame_id: usize, position: usize) -> Self {
+    #[inline]
+    pub fn for_frame(frame_id: usize, occurrence: usize, parent_seed: u64) -> Self {
         use std::collections::hash_map::DefaultHasher;
 
         let mut hasher = DefaultHasher::new();
+        parent_seed.hash(&mut hasher);
         "__frame__".hash(&mut hasher);
         frame_id.hash(&mut hasher);
-        position.hash(&mut hasher);
+        occurrence.hash(&mut hasher);
         Self(hasher.finish())
     }
 
@@ -153,15 +190,16 @@ impl StableId {
     /// # Deprecated
     /// Use `for_element()` instead which includes position for disambiguation.
     pub fn from_content_hash(tag: &str, attrs: &[(String, String)], children: &[StableId]) -> Self {
-        Self::for_element(tag, attrs, children, 0)
+        Self::for_element(tag, attrs, children, 0, 0)
     }
 
     /// Create from text content (legacy API, kept for compatibility)
     ///
     /// # Deprecated
-    /// Use `for_text()` instead which includes position for disambiguation.
+    /// Use `for_text()` instead - text IDs no longer include content.
+    #[allow(unused_variables)]
     pub fn from_text_content(content: &str) -> Self {
-        Self::for_text(content, 0)
+        Self::for_text(0, 0)
     }
 
     /// Create a detached/placeholder ID
@@ -276,6 +314,22 @@ mod tests {
 
     #[test]
     fn test_content_hash_differs() {
+        // Use key attributes (id, key) to test hash difference
+        // Note: class is NOT a key attribute, so it won't affect hash
+        let attrs1 = vec![("id".to_string(), "foo".to_string())];
+        let attrs2 = vec![("id".to_string(), "bar".to_string())];
+        let children: Vec<StableId> = vec![];
+
+        let id1 = StableId::from_content_hash("div", &attrs1, &children);
+        let id2 = StableId::from_content_hash("div", &attrs2, &children);
+
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_non_key_attrs_dont_affect_hash() {
+        // class and style are NOT key attributes
+        // Changing them should NOT change the StableId
         let attrs1 = vec![("class".to_string(), "foo".to_string())];
         let attrs2 = vec![("class".to_string(), "bar".to_string())];
         let children: Vec<StableId> = vec![];
@@ -283,7 +337,8 @@ mod tests {
         let id1 = StableId::from_content_hash("div", &attrs1, &children);
         let id2 = StableId::from_content_hash("div", &attrs2, &children);
 
-        assert_ne!(id1, id2);
+        // Same ID because class is not a key attribute!
+        assert_eq!(id1, id2, "class attr should not affect StableId");
     }
 
     #[test]

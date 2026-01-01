@@ -5,8 +5,16 @@
 //! 2. Extracts family-specific data from attributes
 //! 3. Collects node references by family type
 //!
-//! This is the first transform in the pipeline after conversion from typst-html.
+//! # Occurrence-based StableId
+//!
+//! Instead of using absolute position for StableId disambiguation,
+//! we use "occurrence index" - how many times the same content key
+//! appeared before in the sibling list.
+//!
+//! This enables Move detection: when `[A, B]` becomes `[B, A]`,
+//! the IDs stay the same (Move) instead of changing (Replace).
 
+use std::collections::HashMap;
 use smallvec::SmallVec;
 
 use crate::vdom::family::{
@@ -82,7 +90,7 @@ impl Indexer {
 
     /// Index a document
     fn index_document(&mut self, doc: Document<Raw>) -> Document<Indexed> {
-        let root = self.index_element(doc.root, 0); // Root is at position 0
+        let root = self.index_element(doc.root, 0, 0); // Root is at position 0, seed 0
         let node_count = self.next_id;
 
         Document {
@@ -106,7 +114,12 @@ impl Indexer {
     ///
     /// Children are indexed first (bottom-up) so we can collect their StableIds
     /// for content hash computation.
-    fn index_element(&mut self, elem: Element<Raw>, position: usize) -> Element<Indexed> {
+    ///
+    /// # Occurrence-based ID
+    ///
+    /// The `occurrence` parameter is the count of how many siblings with the
+    /// same content key appeared before this element. This enables Move detection.
+    fn index_element(&mut self, elem: Element<Raw>, occurrence: usize, parent_seed: u64) -> Element<Indexed> {
         self.element_count += 1;
         let node_id = self.next_node_id();
 
@@ -114,27 +127,25 @@ impl Indexer {
         let tag = elem.tag;
         let attrs = elem.attrs;
 
-        // Index children first (bottom-up) to collect their StableIds
-        let (children, child_stable_ids): (SmallVec<[Node<Indexed>; 8]>, Vec<StableId>) = elem
-            .children
-            .into_iter()
-            .enumerate()
-            .map(|(pos, child)| {
-                let indexed_child = self.index_node(child, pos);
-                let stable_id = match &indexed_child {
-                    Node::Element(e) => e.ext.stable_id(),
-                    Node::Text(t) => t.ext.stable_id,
-                    Node::Frame(f) => f.ext.stable_id(),
-                };
-                (indexed_child, stable_id)
-            })
-            .unzip();
-
-        // Determine family
+        // Generate StableId FIRST (using parent seed)
+        // We need this ID to use as seed for children
         let kind = identify_family_kind(&tag, &attrs);
 
-        // Generate StableId using pure content hash
-        let stable_id = StableId::for_element(&tag, &attrs, &child_stable_ids, position);
+        // Children processing logic moved AFTER ID generation because we need my_stable_id
+        // But `StableId::for_element` signature previously took children IDs?
+        // Wait, current signature is `(tag, attrs, children_ids, occ, seed)`.
+        // BUT children_ids are ignored now!
+        // So we can compute our ID first.
+        let child_ids_placeholder: &[StableId] = &[]; // Ignored by id.rs
+        let stable_id = StableId::for_element(&tag, &attrs, child_ids_placeholder, occurrence, parent_seed);
+
+        // Use my StableId as seed for children (cast to u64 via StableId internal representation)
+        // Since StableId wraps u64, we can access it (if pub) or re-hash it.
+        // StableId(pub u64).
+        let my_seed = stable_id.0;
+
+        // Index children with occurrence-based IDs + parent seed
+        let (children, _) = self.index_children(elem.children, my_seed);
 
         let ext = self.create_indexed_ext(node_id, stable_id, kind, &tag, &attrs);
 
@@ -152,6 +163,77 @@ impl Indexer {
             attrs,
             children,
             ext,
+        }
+    }
+
+    /// Index a list of children using occurrence-based IDs
+    ///
+    /// For each child, we compute a "content key" and count how many times
+    /// it has appeared before in this sibling list. This count becomes the
+    /// `occurrence` parameter for StableId generation.
+    ///
+    /// Content key:
+    /// - Element: (tag, key_attrs) where key_attrs are id/key/data-key-*
+    /// - Text: content string
+    /// - Frame: frame_id
+    fn index_children(
+        &mut self,
+        children: SmallVec<[Node<Raw>; 8]>,
+        parent_seed: u64,
+    ) -> (SmallVec<[Node<Indexed>; 8]>, Vec<StableId>) {
+        // Track occurrence count for each content key
+        let mut occurrence_counts: HashMap<ContentKey, usize> = HashMap::new();
+
+        children
+            .into_iter()
+            .map(|child| {
+                // Compute content key and get occurrence count
+                let content_key = ContentKey::from_raw_node(&child);
+                let occurrence = occurrence_counts.entry(content_key).or_insert(0);
+                let current_occurrence = *occurrence;
+                *occurrence += 1;
+
+                // Index the child with its occurrence and parent seed
+                let indexed_child = self.index_node_with_occurrence(child, current_occurrence, parent_seed);
+                let stable_id = match &indexed_child {
+                    Node::Element(e) => e.ext.stable_id(),
+                    Node::Text(t) => t.ext.stable_id,
+                    Node::Frame(f) => f.ext.stable_id(),
+                };
+                (indexed_child, stable_id)
+            })
+            .unzip()
+    }
+
+    /// Index a single node with its computed occurrence
+    fn index_node_with_occurrence(&mut self, node: Node<Raw>, occurrence: usize, parent_seed: u64) -> Node<Indexed> {
+        match node {
+            Node::Element(elem) => {
+                Node::Element(Box::new(self.index_element(*elem, occurrence, parent_seed)))
+            }
+            Node::Text(text) => {
+                self.text_count += 1;
+                // Text node ID is based on occurrence only, NOT content.
+                // This ensures "Hello" → "World" is recognized as Keep + UpdateText
+                // instead of Delete + Insert (which would cause position drift)
+                let stable_id = StableId::for_text(occurrence, parent_seed);
+                Node::Text(Text {
+                    content: text.content,
+                    ext: crate::vdom::phase::IndexedTextExt::new(stable_id),
+                })
+            }
+            Node::Frame(_frame) => {
+                self.frame_count += 1;
+                let node_id = self.next_node_id();
+                self.frame_nodes.push(node_id);
+                let stable_id = StableId::for_frame(node_id.0 as usize, occurrence, parent_seed);
+                Node::Frame(Box::new(Frame::new(IndexedFrameExt {
+                    stable_id,
+                    node_id,
+                    frame_id: 0,
+                    estimated_svg_size: 0,
+                })))
+            }
         }
     }
 
@@ -251,42 +333,6 @@ impl Indexer {
         let height = get_attr(attrs, "height").and_then(|h| parse_dimension(h));
         width.zip(height)
     }
-
-    /// Index a node with its position in parent
-    fn index_node(&mut self, node: Node<Raw>, position: usize) -> Node<Indexed> {
-        match node {
-            Node::Element(elem) => Node::Element(Box::new(self.index_element(*elem, position))),
-            Node::Text(text) => {
-                self.text_count += 1;
-
-                // Generate StableId for text node using content hash + position
-                let stable_id = StableId::for_text(&text.content, position);
-
-                Node::Text(Text {
-                    content: text.content,
-                    ext: crate::vdom::phase::IndexedTextExt::new(stable_id),
-                })
-            }
-            // Note: Frame nodes should not exist at Raw phase anymore.
-            // Frames are converted to SVG Elements during from_typst_html().
-            // This branch exists for type completeness only.
-            Node::Frame(_frame) => {
-                self.frame_count += 1;
-                let node_id = self.next_node_id();
-                self.frame_nodes.push(node_id);
-
-                // Frame nodes use content hash with position
-                let stable_id = StableId::for_frame(node_id.0 as usize, position);
-
-                Node::Frame(Box::new(Frame::new(IndexedFrameExt {
-                    stable_id,
-                    node_id,
-                    frame_id: 0,
-                    estimated_svg_size: 0,
-                })))
-            }
-        }
-    }
 }
 
 impl Default for Indexer {
@@ -300,6 +346,64 @@ impl Transform<Raw> for Indexer {
 
     fn transform(mut self, doc: Document<Raw>) -> Document<Indexed> {
         self.index_document(doc)
+    }
+}
+
+// =============================================================================
+// ContentKey: For occurrence counting
+// =============================================================================
+
+/// Content key for occurrence counting
+///
+/// Used to determine if two nodes are "the same" for occurrence counting.
+/// Two nodes with the same ContentKey in the same sibling list will get
+/// different occurrence indices.
+///
+/// # Design Note
+///
+/// Text nodes use a fixed key (not content-based) so that text content changes
+/// are handled as Keep + UpdateText instead of Delete + Insert.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ContentKey {
+    /// Element: (tag, key_attrs_hash)
+    /// Only id/key/data-key-* attributes are considered
+    Element { tag: String, key_attrs_hash: u64 },
+    /// Text: all text nodes share the same key type
+    /// (occurrence index differentiates them, not content).
+    /// This intentionally ignores content so that text updates are detected
+    /// as "Same Node, New Content" (Keep + UpdateText/ReplaceChildren)
+    /// rather than "Different Node" (Delete + Insert).
+    Text,
+    /// Frame: frame_id (always unique, so occurrence is always 0)
+    Frame,
+}
+
+impl ContentKey {
+    /// Create a ContentKey from a Raw node
+    fn from_raw_node(node: &Node<Raw>) -> Self {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        match node {
+            Node::Element(elem) => {
+                let mut hasher = DefaultHasher::new();
+                // Only hash key attributes (id, key, data-key-*)
+                for (k, v) in &elem.attrs {
+                    if k == "id" || k == "key" || k.starts_with("data-key") {
+                        k.hash(&mut hasher);
+                        v.hash(&mut hasher);
+                    }
+                }
+                ContentKey::Element {
+                    tag: elem.tag.clone(),
+                    key_attrs_hash: hasher.finish(),
+                }
+            }
+            // Text nodes all share the same key type
+            // The occurrence index will differentiate them
+            Node::Text(_) => ContentKey::Text,
+            Node::Frame(_) => ContentKey::Frame,
+        }
     }
 }
 
@@ -387,5 +491,168 @@ mod tests {
 
         assert_eq!(indexed.ext.node_count, 1);
         assert_eq!(indexed.ext.element_count, 1);
+    }
+
+    #[test]
+    fn test_occurrence_based_stable_id() {
+        use crate::vdom::phase::{RawDocExt, RawElemExt, RawTextExt};
+        use crate::vdom::node::FamilyExt;
+        use crate::vdom::attr::Attrs;
+
+        // Helper to create Raw elements with proper ext type
+        fn make_element(tag: &str, attrs: Attrs, children: SmallVec<[Node<Raw>; 8]>) -> Element<Raw> {
+            Element {
+                tag: tag.to_string(),
+                attrs,
+                children,
+                ext: FamilyExt::Other(RawElemExt::detached()),
+            }
+        }
+
+        fn make_text(content: &str) -> Text<Raw> {
+            Text {
+                content: content.to_string(),
+                ext: RawTextExt::default(),
+            }
+        }
+
+        // Create document with identical siblings: [p(A), p(B), p(A)]
+        // The two p(A) elements should have different IDs due to occurrence
+        let raw_doc = Document {
+            root: make_element("div", vec![], smallvec::smallvec![
+                Node::Element(Box::new(make_element(
+                    "p",
+                    vec![("class".to_string(), "item".to_string())],
+                    smallvec::smallvec![Node::Text(make_text("A"))],
+                ))),
+                Node::Element(Box::new(make_element(
+                    "p",
+                    vec![("class".to_string(), "item".to_string())],
+                    smallvec::smallvec![Node::Text(make_text("B"))],
+                ))),
+                Node::Element(Box::new(make_element(
+                    "p",
+                    vec![("class".to_string(), "item".to_string())],
+                    smallvec::smallvec![Node::Text(make_text("A"))],
+                ))),
+            ]),
+            ext: RawDocExt::default(),
+        };
+
+        let indexed = Indexer::new().transform(raw_doc);
+
+        // Get the three p elements
+        let children = &indexed.root.children;
+        assert_eq!(children.len(), 3);
+
+        let p1_id = match &children[0] {
+            Node::Element(e) => e.ext.stable_id(),
+            _ => panic!("Expected element"),
+        };
+        let p2_id = match &children[1] {
+            Node::Element(e) => e.ext.stable_id(),
+            _ => panic!("Expected element"),
+        };
+        let p3_id = match &children[2] {
+            Node::Element(e) => e.ext.stable_id(),
+            _ => panic!("Expected element"),
+        };
+
+        // All three should have different IDs
+        // p1 and p3 have same tag but different occurrence (0 vs 1)
+        // because their key attrs (class is NOT a key attr) are the same
+        assert_ne!(p1_id, p2_id, "p1 and p2 should have different IDs");
+        assert_ne!(p2_id, p3_id, "p2 and p3 should have different IDs");
+        assert_ne!(p1_id, p3_id, "p1 and p3 should have different IDs (different occurrence)");
+    }
+
+    #[test]
+    fn test_occurrence_stable_on_reorder() {
+        use crate::vdom::phase::{RawDocExt, RawElemExt};
+        use crate::vdom::node::FamilyExt;
+        use crate::vdom::attr::Attrs;
+
+        // Helper to create Raw elements with proper ext type
+        fn make_element(tag: &str, attrs: Attrs, children: SmallVec<[Node<Raw>; 8]>) -> Element<Raw> {
+            Element {
+                tag: tag.to_string(),
+                attrs,
+                children,
+                ext: FamilyExt::Other(RawElemExt::detached()),
+            }
+        }
+
+        // Create two documents: [A, B] and [B, A]
+        // The elements should have the SAME IDs after reorder
+
+        // Document 1: [A, B]
+        let doc1 = Document {
+            root: make_element("div", vec![], smallvec::smallvec![
+                Node::Element(Box::new(make_element(
+                    "p",
+                    vec![("id".to_string(), "a".to_string())], // key attr
+                    smallvec::smallvec![],
+                ))),
+                Node::Element(Box::new(make_element(
+                    "p",
+                    vec![("id".to_string(), "b".to_string())], // key attr
+                    smallvec::smallvec![],
+                ))),
+            ]),
+            ext: RawDocExt::default(),
+        };
+
+        // Document 2: [B, A] (reordered)
+        let doc2 = Document {
+            root: make_element("div", vec![], smallvec::smallvec![
+                Node::Element(Box::new(make_element(
+                    "p",
+                    vec![("id".to_string(), "b".to_string())], // key attr
+                    smallvec::smallvec![],
+                ))),
+                Node::Element(Box::new(make_element(
+                    "p",
+                    vec![("id".to_string(), "a".to_string())], // key attr
+                    smallvec::smallvec![],
+                ))),
+            ]),
+            ext: RawDocExt::default(),
+        };
+
+        let indexed1 = Indexer::new().transform(doc1);
+        let indexed2 = Indexer::new().transform(doc2);
+
+        // Get IDs from doc1
+        let doc1_a_id = match &indexed1.root.children[0] {
+            Node::Element(e) => e.ext.stable_id(),
+            _ => panic!("Expected element"),
+        };
+        let doc1_b_id = match &indexed1.root.children[1] {
+            Node::Element(e) => e.ext.stable_id(),
+            _ => panic!("Expected element"),
+        };
+
+        // Get IDs from doc2 (reordered)
+        let doc2_b_id = match &indexed2.root.children[0] {
+            Node::Element(e) => e.ext.stable_id(),
+            _ => panic!("Expected element"),
+        };
+        let doc2_a_id = match &indexed2.root.children[1] {
+            Node::Element(e) => e.ext.stable_id(),
+            _ => panic!("Expected element"),
+        };
+
+        // Key: IDs should be STABLE across reorder!
+        // Because we use occurrence (count of same content key) not position
+        // p#a appears once in both docs -> occurrence = 0
+        // p#b appears once in both docs -> occurrence = 0
+        assert_eq!(
+            doc1_a_id, doc2_a_id,
+            "Element with id='a' should have same StableId after reorder"
+        );
+        assert_eq!(
+            doc1_b_id, doc2_b_id,
+            "Element with id='b' should have same StableId after reorder"
+        );
     }
 }

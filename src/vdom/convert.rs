@@ -112,13 +112,15 @@ impl<'a> Converter<'a> {
 
     /// Convert typst HtmlFrame directly to SVG Element
     ///
-    /// Uses `typst_svg::svg_html_frame()` to render the frame as inline SVG,
-    /// then wraps it in an Element node.
+    /// Uses `typst_svg::svg_html_frame()` to render the frame as inline SVG.
+    /// The returned SVG string already contains the complete `<svg>` element,
+    /// so we parse it to extract attributes and create a proper Element.
     ///
     /// Note: Frames don't have a direct Span, so we use detached Span.
     /// StableId is computed from the SVG content hash during indexing.
     fn convert_frame_to_svg(&mut self, frame: &HtmlFrame) -> Node<Raw> {
         // Render frame to SVG string using typst-svg
+        // This returns a COMPLETE <svg>...</svg> string
         let svg_string = typst_svg::svg_html_frame(
             &frame.inner,
             frame.text_size,
@@ -127,18 +129,138 @@ impl<'a> Converter<'a> {
             self.introspector,
         );
 
-        // Create SVG wrapper element
-        // StableId will be computed from the svg_string content during indexing
-        let mut svg_elem = Element::auto_with_span("svg", &[], Span::detached());
-        svg_elem.attrs = vec![]; // No dynamic attributes - use content hash for StableId
-        // Store the raw SVG content as a text child
-        svg_elem.children = SmallVec::from_vec(vec![Node::Text(Text {
-            content: svg_string,
-            ext: RawTextExt::detached(),
-        })]);
+        // Parse the SVG string to extract attributes and inner content
+        // Format: <svg attr1="val1" attr2="val2">...inner content...</svg>
+        let (attrs, inner_content) = parse_svg_string(&svg_string);
+
+        // Create SVG element with parsed attributes
+        let mut svg_elem = Element::auto_with_span("svg", &attrs, Span::detached());
+        svg_elem.attrs = attrs;
+
+        // The inner content is raw SVG (paths, groups, etc.)
+        // Store as a single text child - renderer will output it unescaped
+        // because it's inside an SVG element
+        if !inner_content.is_empty() {
+            svg_elem.children = SmallVec::from_vec(vec![Node::Text(Text {
+                content: inner_content,
+                ext: RawTextExt::detached(),
+            })]);
+        }
 
         Node::Element(Box::new(svg_elem))
     }
+}
+
+/// Parse an SVG string to extract attributes and inner content
+///
+/// Input: `<svg viewBox="0 0 100 100" class="foo">inner content</svg>`
+/// Output: (vec![("viewBox", "0 0 100 100"), ("class", "foo")], "inner content")
+fn parse_svg_string(svg: &str) -> (Vec<(String, String)>, String) {
+    // Find the opening tag end
+    let Some(tag_start) = svg.find('<') else {
+        return (vec![], svg.to_string());
+    };
+
+    let Some(tag_end) = svg[tag_start..].find('>') else {
+        return (vec![], svg.to_string());
+    };
+    let tag_end = tag_start + tag_end;
+
+    // Check if it's self-closing
+    let is_self_closing = svg[..tag_end].ends_with('/');
+
+    // Extract opening tag content: "svg viewBox="0 0 100 100" ..."
+    let tag_content = &svg[tag_start + 1..if is_self_closing { tag_end - 1 } else { tag_end }];
+    let tag_content = tag_content.trim();
+
+    // Skip "svg" tag name
+    let attr_start = tag_content.find(char::is_whitespace).unwrap_or(tag_content.len());
+    let attr_str = &tag_content[attr_start..].trim();
+
+    // Parse attributes
+    let attrs = parse_attributes(attr_str);
+
+    // Extract inner content (between > and </svg>)
+    let inner_content = if is_self_closing {
+        String::new()
+    } else {
+        let content_start = tag_end + 1;
+        let content_end = svg.rfind("</svg>").unwrap_or(svg.len());
+        svg[content_start..content_end].to_string()
+    };
+
+    (attrs, inner_content)
+}
+
+/// Parse HTML-style attributes from a string
+///
+/// Input: `viewBox="0 0 100 100" class="foo" disabled`
+/// Output: vec![("viewBox", "0 0 100 100"), ("class", "foo"), ("disabled", "")]
+fn parse_attributes(s: &str) -> Vec<(String, String)> {
+    let mut attrs = Vec::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        // Skip whitespace
+        if c.is_whitespace() {
+            continue;
+        }
+
+        // Read attribute name
+        let mut name = String::new();
+        name.push(c);
+        while let Some(&next) = chars.peek() {
+            if next == '=' || next.is_whitespace() {
+                break;
+            }
+            name.push(chars.next().unwrap());
+        }
+
+        // Skip whitespace
+        while chars.peek().map(|c| c.is_whitespace()).unwrap_or(false) {
+            chars.next();
+        }
+
+        // Check for value
+        if chars.peek() == Some(&'=') {
+            chars.next(); // consume '='
+
+            // Skip whitespace
+            while chars.peek().map(|c| c.is_whitespace()).unwrap_or(false) {
+                chars.next();
+            }
+
+            // Read value
+            let value = if chars.peek() == Some(&'"') || chars.peek() == Some(&'\'') {
+                let quote = chars.next().unwrap();
+                let mut val = String::new();
+                while let Some(c) = chars.next() {
+                    if c == quote {
+                        break;
+                    }
+                    val.push(c);
+                }
+                val
+            } else {
+                // Unquoted value (read until whitespace)
+                let mut val = String::new();
+                while let Some(&c) = chars.peek() {
+                    if c.is_whitespace() {
+                        break;
+                    }
+                    val.push(chars.next().unwrap());
+                }
+                val
+            };
+
+            attrs.push((name, value));
+        } else {
+            // Boolean attribute (no value)
+            attrs.push((name, String::new()));
+        }
+    }
+
+    attrs
 }
 
 // =============================================================================
@@ -179,4 +301,51 @@ pub fn from_typst_html_with_meta(
         content_meta: None,
     };
     document
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_svg_string_basic() {
+        let svg = r#"<svg viewBox="0 0 100 100" class="test">inner content</svg>"#;
+        let (attrs, inner) = parse_svg_string(svg);
+
+        assert_eq!(attrs.len(), 2);
+        assert_eq!(attrs[0], ("viewBox".to_string(), "0 0 100 100".to_string()));
+        assert_eq!(attrs[1], ("class".to_string(), "test".to_string()));
+        assert_eq!(inner, "inner content");
+    }
+
+    #[test]
+    fn test_parse_svg_string_complex() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 595.28 841.89"><g>paths...</g></svg>"#;
+        let (attrs, inner) = parse_svg_string(svg);
+
+        assert_eq!(attrs.len(), 2);
+        assert_eq!(attrs[0].0, "xmlns");
+        assert_eq!(attrs[1].0, "viewBox");
+        assert!(inner.contains("<g>"));
+    }
+
+    #[test]
+    fn test_parse_svg_string_self_closing() {
+        let svg = r#"<svg viewBox="0 0 10 10"/>"#;
+        let (attrs, inner) = parse_svg_string(svg);
+
+        assert_eq!(attrs.len(), 1);
+        assert_eq!(attrs[0].0, "viewBox");
+        assert!(inner.is_empty());
+    }
+
+    #[test]
+    fn test_parse_attributes() {
+        let attrs = parse_attributes(r#"a="1" b='2' c=3 disabled"#);
+        assert_eq!(attrs.len(), 4);
+        assert_eq!(attrs[0], ("a".to_string(), "1".to_string()));
+        assert_eq!(attrs[1], ("b".to_string(), "2".to_string()));
+        assert_eq!(attrs[2], ("c".to_string(), "3".to_string()));
+        assert_eq!(attrs[3], ("disabled".to_string(), "".to_string()));
+    }
 }

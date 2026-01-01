@@ -289,12 +289,12 @@ use similar::{ChangeTag, TextDiff};
 
 fn diff_text_content(old: &str, new: &str) -> Vec<TextPatchOp> {
     let diff = TextDiff::from_chars(old, new);
-    
+
     // 如果差异太大，直接全量替换
     if diff.ratio() < 0.5 {
         return vec![TextPatchOp::ReplaceAll(new.to_string())];
     }
-    
+
     // 否则生成字符级操作
     let mut ops = Vec::new();
     for change in diff.iter_all_changes() {

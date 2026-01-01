@@ -157,8 +157,11 @@ impl HtmlRenderer {
         self.write_byte(b'>');
 
         // Children
+        // For SVG elements, inner content is raw SVG (already escaped/safe)
+        // so we output text children without escaping
+        let is_svg = elem.tag == "svg";
         for child in &elem.children {
-            self.render_node(child);
+            self.render_node_in_context(child, is_svg);
         }
 
         // Closing tag
@@ -168,9 +171,21 @@ impl HtmlRenderer {
     }
 
     fn render_node(&mut self, node: &Node<Processed>) {
+        self.render_node_in_context(node, false)
+    }
+
+    fn render_node_in_context(&mut self, node: &Node<Processed>, raw_text: bool) {
         match node {
             Node::Element(elem) => self.render_element(elem),
-            Node::Text(text) => self.render_text(text),
+            Node::Text(text) => {
+                if raw_text {
+                    // Output raw (for SVG inner content)
+                    self.write_str(&text.content);
+                } else {
+                    // Normal HTML escaping
+                    self.write_text_escaped(&text.content);
+                }
+            }
             Node::Frame(_) => {
                 // Frame<Processed> cannot exist (FrameExt = Infallible)
                 // This branch is unreachable

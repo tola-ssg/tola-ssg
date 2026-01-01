@@ -186,7 +186,8 @@ pub fn compile_meta<D: crate::driver::BuildDriver>(
 
     // Cache the indexed VDOM if available (development mode)
     if let Some(indexed) = result.indexed_vdom {
-        crate::hotreload::VDOM_CACHE.insert(path.to_path_buf(), indexed);
+        let cache_key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        crate::hotreload::VDOM_CACHE.insert(cache_key, indexed);
     }
 
     Ok((result.html, meta))
@@ -257,6 +258,14 @@ pub fn collect_metadata_smart<D: crate::driver::BuildDriver + Copy>(
             // Compile to extract metadata
             let root = config.get_root();
             let result = typst_lib::compile_vdom(&driver, path, root, TOLA_META_LABEL)?;
+
+            // Cache indexed VDOM for hot reload (Development mode only)
+            // This ensures the cache matches the HTML written to disk
+            // Use canonicalize to match watch.rs cache lookup
+            if let Some(ref indexed_vdom) = result.indexed_vdom {
+                let cache_key = path.canonicalize().unwrap_or_else(|_| path.clone());
+                crate::hotreload::VDOM_CACHE.insert(cache_key, indexed_vdom.clone());
+            }
 
             // Check if this page uses virtual data
             let uses_virtual_data = result.uses_virtual_data();
