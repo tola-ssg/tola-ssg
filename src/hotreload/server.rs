@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_client_script_tag() {
-        let tag = HOTRELOAD_JS.html_tag();
+        let tag = HOTRELOAD_JS.html_tag(&[]);
         assert!(tag.starts_with("<script"), "Should be a script tag");
         assert!(tag.contains("src="), "Should have src attribute");
         assert!(tag.contains(".hotreload-"), "Should reference hotreload file");

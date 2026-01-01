@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn test_html_tag_css() {
-        let tag = ENHANCE_CSS.html_tag();
+        let tag = ENHANCE_CSS.html_tag(&[]);
         assert!(tag.starts_with(r#"<link rel="stylesheet" href="/.enhance-"#));
         assert!(tag.contains("data-tola-generated"));
         assert!(tag.ends_with(r#">"#));
@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_html_tag_js() {
-        let tag = HOTRELOAD_JS.html_tag();
+        let tag = HOTRELOAD_JS.html_tag(&[]);
         assert!(tag.starts_with(r#"<script src="/.hotreload-"#));
         assert!(tag.contains("data-tola-generated"));
         assert!(tag.ends_with(r#"></script>"#));
