@@ -39,14 +39,8 @@ use std::{
 use tiny_http::{Header, Request, Response, Server, StatusCode};
 
 // ============================================================================
-// Constants - HTML Templates
+// Constants
 // ============================================================================
-
-/// Directory listing HTML template (embedded at compile time)
-const DIRECTORY_TEMPLATE: &str = include_str!("embed/serve/directory.html");
-
-/// Welcome page HTML template (shown when output directory is empty)
-const WELCOME_TEMPLATE: &str = include_str!("embed/serve/welcome.html");
 
 /// Try binding to port, retry with incremented port if in use
 const MAX_PORT_RETRIES: u16 = 10;
@@ -87,8 +81,8 @@ pub fn serve_site() -> Result<()> {
                 if let Err(e) = hotreload::server::generate_hotreload_js(&c.build.output, port) {
                     log!("hotreload"; "failed to generate JS: {}", e);
                 }
-                // Clean up old versions
-                let _ = hotreload::server::cleanup_old_hotreload_js(&c.build.output);
+                // Clean up old versions (pass port for correct filename matching)
+                let _ = hotreload::server::cleanup_old_hotreload_js(&c.build.output, port);
 
                 Some(port)
             }
@@ -267,9 +261,9 @@ fn serve_not_found(request: Request) -> Result<()> {
 ///
 /// Inserts the script tag before the closing </body> tag,
 /// or at the end of the document if </body> is not found.
-fn inject_hot_reload_script(content: &[u8], _ws_port: u16) -> Vec<u8> {
-    use crate::embed::HOTRELOAD_JS;
-    let script = HOTRELOAD_JS.html_tag();
+fn inject_hot_reload_script(content: &[u8], ws_port: u16) -> Vec<u8> {
+    use crate::embed::{HOTRELOAD_JS, TemplateVar};
+    let script = HOTRELOAD_JS.html_tag(&[TemplateVar::WsPort(ws_port)]);
 
     // Try to find </body> tag (case-insensitive)
     let html = String::from_utf8_lossy(content);
@@ -373,9 +367,11 @@ fn generate_directory_listing(dir_path: &PathBuf, request_path: &str, data_dir_n
 
     // If no visible entries, show welcome page
     if entries.is_empty() {
-        return Ok(WELCOME_TEMPLATE
-            .replace("{title}", "Welcome")
-            .replace("{version}", env!("CARGO_PKG_VERSION")));
+        use crate::embed::HtmlVar;
+        return Ok(crate::embed::WELCOME_HTML.render(&[
+            HtmlVar::Title("Welcome"),
+            HtmlVar::Version(env!("CARGO_PKG_VERSION")),
+        ]));
     }
 
     // Generate parent link if not at root
@@ -396,9 +392,11 @@ fn generate_directory_listing(dir_path: &PathBuf, request_path: &str, data_dir_n
         )
     };
 
-    #[allow(clippy::literal_string_with_formatting_args)] // These are template placeholders, not format args
-    Ok(DIRECTORY_TEMPLATE
-        .replace("{path}", request_path)
-        .replace("{parent_link}", &parent_link)
-        .replace("{entries}", &entries.join("\n            ")))
+    use crate::embed::HtmlVar;
+    let entries_str = entries.join("\n            ");
+    Ok(crate::embed::DIRECTORY_HTML.render(&[
+        HtmlVar::Path(request_path),
+        HtmlVar::ParentLink(&parent_link),
+        HtmlVar::Entries(&entries_str),
+    ]))
 }

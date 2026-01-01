@@ -33,7 +33,7 @@ pub fn generate_enhance_css(output_dir: &Path) -> Result<PathBuf> {
 ///
 /// Keeps only the current version based on hash.
 pub fn cleanup_old_enhance_css(output_dir: &Path) -> Result<()> {
-    Ok(ENHANCE_CSS.cleanup_old(output_dir)?)
+    Ok(ENHANCE_CSS.cleanup_old(output_dir, &[])?)
 }
 
 // ============================================================================

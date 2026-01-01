@@ -270,8 +270,8 @@ pub fn generate_hotreload_js(
 /// Clean up old hotreload JS files (files matching `.hotreload-*.js` pattern).
 ///
 /// Keeps only the current version based on hash.
-pub fn cleanup_old_hotreload_js(output_dir: &std::path::Path) -> std::io::Result<()> {
-    HOTRELOAD_JS.cleanup_old(output_dir)
+pub fn cleanup_old_hotreload_js(output_dir: &std::path::Path, ws_port: u16) -> std::io::Result<()> {
+    HOTRELOAD_JS.cleanup_old(output_dir, &[TemplateVar::WsPort(ws_port)])
 }
 
 #[cfg(test)]
