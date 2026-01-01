@@ -155,7 +155,6 @@ impl StableId {
     /// - If content were included: "Hello" → "World" would be Delete + Insert
     /// - With position only: "Hello" → "World" is recognized as Keep + UpdateText
     #[inline]
-    #[inline]
     pub fn for_text(occurrence: usize, parent_seed: u64) -> Self {
         use std::collections::hash_map::DefaultHasher;
 
@@ -172,7 +171,6 @@ impl StableId {
     ///
     /// * `frame_id` - Unique frame identifier
     /// * `occurrence` - How many same-frame_id siblings appeared before this one
-    #[inline]
     #[inline]
     pub fn for_frame(frame_id: usize, occurrence: usize, parent_seed: u64) -> Self {
         use std::collections::hash_map::DefaultHasher;

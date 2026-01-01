@@ -266,6 +266,11 @@ impl DiffContext {
         // Diff attributes
         self.diff_attrs(old, new);
 
+        // SVG elements: use ReplaceChildren (innerHTML) instead of UpdateText (textContent)
+        // because SVG internal content is HTML markup, not plain text.
+        // Using textContent would display "<path d=...>" as literal text.
+        let is_svg = old.tag == "svg";
+
         // Fast path: single text child optimization
         // Text nodes don't have data-tola-id in the DOM, so we handle them specially
         // by updating the parent element's textContent directly.
@@ -281,10 +286,19 @@ impl DiffContext {
             // Case 1: Both have single text child
             (Some(old_text), Some(new_text)) => {
                 if old_text != new_text {
-                    self.ops.push(Patch::UpdateText {
-                        target: old_id,
-                        text: new_text.to_string(),
-                    });
+                    if is_svg {
+                        // SVG: use innerHTML because content is SVG markup
+                        self.ops.push(Patch::ReplaceChildren {
+                            target: old_id,
+                            html: new_text.to_string(),
+                        });
+                    } else {
+                        // Normal element: use textContent
+                        self.ops.push(Patch::UpdateText {
+                            target: old_id,
+                            text: new_text.to_string(),
+                        });
+                    }
                     self.stats.text_updates += 1;
                 }
                 self.stats.nodes_kept += 1;
@@ -292,20 +306,34 @@ impl DiffContext {
             }
             // Case 2: Old has text, new is empty -> clear content
             (Some(_old_text), None) if new.children.is_empty() => {
-                self.ops.push(Patch::UpdateText {
-                    target: old_id,
-                    text: String::new(),
-                });
+                if is_svg {
+                    self.ops.push(Patch::ReplaceChildren {
+                        target: old_id,
+                        html: String::new(),
+                    });
+                } else {
+                    self.ops.push(Patch::UpdateText {
+                        target: old_id,
+                        text: String::new(),
+                    });
+                }
                 self.stats.text_updates += 1;
                 self.stats.nodes_kept += 1;
                 return;
             }
             // Case 3: Old is empty, new has text -> set content
             (None, Some(new_text)) if old.children.is_empty() => {
-                self.ops.push(Patch::UpdateText {
-                    target: old_id,
-                    text: new_text.to_string(),
-                });
+                if is_svg {
+                    self.ops.push(Patch::ReplaceChildren {
+                        target: old_id,
+                        html: new_text.to_string(),
+                    });
+                } else {
+                    self.ops.push(Patch::UpdateText {
+                        target: old_id,
+                        text: new_text.to_string(),
+                    });
+                }
                 self.stats.text_updates += 1;
                 self.stats.nodes_kept += 1;
                 return;

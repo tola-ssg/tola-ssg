@@ -25,7 +25,7 @@ use anyhow::Result;
 use build::build_site;
 use clap::Parser;
 use cli::{Cli, Commands};
-use config::{cfg, init_config, SiteConfig};
+use config::{cfg, clear_clean_flag, init_config, SiteConfig};
 use deploy::deploy_site;
 use driver::{Development, Production};
 use generator::{rss::build_rss, sitemap::build_sitemap};
@@ -47,6 +47,8 @@ fn main() -> Result<()> {
         Commands::Serve { .. } => {
             // Use dev mode build for serve to emit data-tola-id attributes
             build_all(Development)?;
+            // Clear --clean flag so watch mode rebuilds don't clear output
+            clear_clean_flag();
             serve_site()
         }
     }

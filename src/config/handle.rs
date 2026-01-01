@@ -129,3 +129,14 @@ pub fn init_config(config: SiteConfig) {
     CONFIG.store(Arc::new(config));
 }
 
+/// Clear the clean flag after initial build.
+///
+/// This prevents watch mode full rebuilds from clearing the output directory.
+/// The `--clean` flag should only affect the initial build, not subsequent
+/// rebuilds triggered by file changes.
+pub fn clear_clean_flag() {
+    let mut config = (*cfg()).clone();
+    config.build.clean = false;
+    CONFIG.store(Arc::new(config));
+}
+
