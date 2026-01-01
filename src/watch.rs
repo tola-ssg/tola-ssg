@@ -113,6 +113,7 @@ impl ContentCache {
     ///
     /// Called at startup to establish baseline, so first touch without
     /// content change won't trigger rebuild.
+    /// Uses canonical paths (must match Debouncer which canonicalizes at entry).
     fn populate(&mut self, config: &SiteConfig) {
         use walkdir::WalkDir;
 
@@ -125,7 +126,9 @@ impl ContentCache {
                     if path.is_file() && !is_temp_file(path)
                         && let Ok(file) = std::fs::File::open(path)
                             && let Ok(hash) = crate::utils::hash::compute_reader(file) {
-                                self.hashes.insert(path.to_path_buf(), hash);
+                                // Canonicalize to match Debouncer's canonical paths
+                                let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+                                self.hashes.insert(key, hash);
                             }
                 }
             }
@@ -137,11 +140,14 @@ impl ContentCache {
     /// - Deleted files go into `changed` (and removed from cache)
     /// - Files with different content go into `changed`
     /// - Files with identical content go into `unchanged`
+    ///
+    /// Assumes paths are already canonical (from Debouncer).
     fn filter(&mut self, paths: &[PathBuf]) -> FilterResult {
         let mut changed = Vec::new();
         let mut unchanged = Vec::new();
 
         for path in paths {
+            // paths are already canonical from Debouncer
             if !path.exists() {
                 // File deleted - always process, remove from cache
                 self.hashes.remove(path);
@@ -205,7 +211,9 @@ impl Debouncer {
     fn add(&mut self, event: Event) {
         for path in event.paths {
             if !is_temp_file(&path) {
-                self.pending.insert(path);
+                // Canonicalize at entry point - all downstream code assumes canonical paths
+                let canonical = path.canonicalize().unwrap_or(path);
+                self.pending.insert(canonical);
             }
         }
         self.last_event = Some(Instant::now());
@@ -276,15 +284,13 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
     }
 
     // Template/utils changes: query dependency graph for precise rebuild
+    // All paths are already canonical from Debouncer
     if !dependency_triggers.is_empty() {
         // Clear VDOM cache for affected files since template changes affect output
-        // Paths from DEPENDENCY_GRAPH are already canonicalized (see deps.rs)
         for path in &dependency_triggers {
-            // Canonicalize trigger path to match DEPENDENCY_GRAPH keys
-            let canonical_trigger = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-            if let Some(dependents) = crate::compiler::deps::DEPENDENCY_GRAPH.read().get_dependents(&canonical_trigger) {
+            // path is already canonical, DEPENDENCY_GRAPH keys are also canonical
+            if let Some(dependents) = crate::compiler::deps::DEPENDENCY_GRAPH.read().get_dependents(path) {
                 for dep in dependents {
-                    // dep is already canonical from DEPENDENCY_GRAPH
                     VDOM_CACHE.remove(dep);
                 }
             }
@@ -393,15 +399,13 @@ fn process_with_vdom_diff(
         let ext = path.extension().and_then(|e| e.to_str());
 
         if ext == Some("typ") {
-            // Canonicalize path for consistent cache lookup
-            // (notify events may use different path formats than build)
-            let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            // path is already canonical from Debouncer
 
             // Get old VDOM from cache BEFORE compilation
-            let old_vdom = VDOM_CACHE.get(&canonical_path);
+            let old_vdom = VDOM_CACHE.get(path);
 
             // Content file: use VDOM diff
-            match process_page(&Development, &canonical_path, config) {
+            match process_page(&Development, path, config) {
                 Ok(Some(result)) => {
                     count += 1;
                     any_content_changed = true;
@@ -452,7 +456,7 @@ fn process_with_vdom_diff(
 
                     // Update VDOM cache AFTER successful write/broadcast
                     // This keeps cache in sync with what browser should display
-                    VDOM_CACHE.insert(canonical_path, new_vdom.clone());
+                    VDOM_CACHE.insert(path.clone(), new_vdom.clone());
                 }
                 Ok(None) => {
                     // Skipped (draft or up-to-date)
@@ -502,7 +506,8 @@ fn handle_full_rebuild(reason: &str, status: &mut WatchStatus) -> bool {
 ///
 /// Note: All entries in the dependency graph's reverse map are content files
 /// (only content files call `record_dependencies`), so no category check needed.
-/// Paths are canonicalized to match DEPENDENCY_GRAPH keys.
+///
+/// Assumes paths are already canonical (from Debouncer).
 fn collect_affected_content(changed_files: &[&PathBuf]) -> Vec<PathBuf> {
     use crate::compiler::deps::DEPENDENCY_GRAPH;
 
@@ -510,9 +515,8 @@ fn collect_affected_content(changed_files: &[&PathBuf]) -> Vec<PathBuf> {
     let mut affected = FxHashSet::default();
 
     for path in changed_files {
-        // Canonicalize to match DEPENDENCY_GRAPH keys
-        let canonical = path.canonicalize().unwrap_or_else(|_| (*path).clone());
-        if let Some(dependents) = graph.get_dependents(&canonical) {
+        // path is already canonical, DEPENDENCY_GRAPH keys are also canonical
+        if let Some(dependents) = graph.get_dependents(path.as_path()) {
             affected.extend(dependents.iter().cloned());
         }
     }
@@ -608,7 +612,10 @@ fn setup_watchers(watcher: &mut impl Watcher, config: &SiteConfig) -> Result<()>
 }
 
 const fn is_relevant(event: &Event) -> bool {
-    matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_))
+    matches!(
+        event.kind,
+        EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+    )
 }
 
 

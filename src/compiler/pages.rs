@@ -198,8 +198,9 @@ pub fn compile_meta<D: crate::driver::BuildDriver>(
         .record_dependencies(path, &result.accessed_files);
 
     // Cache the indexed VDOM if available (development mode)
+    // Canonicalize for consistent VDOM_CACHE key matching
     if let Some(indexed) = result.indexed_vdom {
-        let cache_key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let cache_key = super::canonicalize(path);
         crate::hotreload::VDOM_CACHE.insert(cache_key, indexed);
     }
 
@@ -274,9 +275,9 @@ pub fn collect_metadata_smart<D: crate::driver::BuildDriver + Copy>(
 
             // Cache indexed VDOM for hot reload (Development mode only)
             // This ensures the cache matches the HTML written to disk
-            // Use canonicalize to match watch.rs cache lookup
+            // Canonicalize for consistent VDOM_CACHE key matching
             if let Some(ref indexed_vdom) = result.indexed_vdom {
-                let cache_key = path.canonicalize().unwrap_or_else(|_| path.clone());
+                let cache_key = super::canonicalize(path);
                 crate::hotreload::VDOM_CACHE.insert(cache_key, indexed_vdom.clone());
             }
 
