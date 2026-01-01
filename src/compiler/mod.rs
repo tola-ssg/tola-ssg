@@ -63,7 +63,7 @@ pub fn collect_all_files(dir: &Path) -> Vec<PathBuf> {
 /// # Arguments
 ///
 /// * `src` - Source file path
-/// * `dst` - Destination/output file path  
+/// * `dst` - Destination/output file path
 /// * `deps_hash` - Optional hash of dependencies (templates, config, etc.)
 pub fn is_up_to_date(src: &Path, dst: &Path, deps_hash: Option<ContentHash>) -> bool {
     freshness::is_fresh(src, dst, deps_hash)

@@ -1,27 +1,28 @@
-//! Content-based freshness detection using blake3 hashing.
+//! Unified freshness detection module.
 //!
-//! This module provides unified file freshness detection that works reliably
-//! with version control systems like jujutsu (jj) where file modification times
-//! may not change when switching commits.
+//! Provides two strategies for detecting file freshness:
+//!
+//! - **Content-hash (blake3)**: For source files where VCS (jj/git) may not update mtimes
+//! - **Mtime**: For tola-generated outputs where timestamps are reliable
 //!
 //! # Architecture
 //!
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
-//! │                        Freshness Detection                               │
+//! │                        Freshness Detection                              │
 //! ├─────────────────────────────────────────────────────────────────────────┤
-//! │                                                                          │
+//! │                                                                         │
+//! │  ┌────────────────────────────────────┐  ┌────────────────────────────┐ │
+//! │  │       Content-Hash (blake3)        │  │         Mtime-based        │ │
+//! │  │  ────────────────────────────────  │  │  ────────────────────────  │ │
+//! │  │  • Source file detection           │  │  • Generated file checks   │ │
+//! │  │  • VCS-friendly (jj/git)           │  │  • HTML → SVG compression  │ │
+//! │  │  • .typ → .html freshness          │  │  • Output vs output        │ │
+//! │  └────────────────────────────────────┘  └────────────────────────────┘ │
+//! │                                                                         │
 //! │  ┌──────────────┐     ┌──────────────┐     ┌──────────────────────────┐ │
 //! │  │ Source File  │────▶│ ContentHash  │────▶│ FreshnessCache (Global)  │ │
 //! │  └──────────────┘     └──────────────┘     └──────────────────────────┘ │
-//! │                              │                         │                 │
-//! │                              ▼                         ▼                 │
-//! │                       ┌─────────────┐          ┌─────────────┐          │
-//! │                       │ blake3 hash │          │ HashMap<    │          │
-//! │                       │ (streaming) │          │   Path,     │          │
-//! │                       └─────────────┘          │   Hash      │          │
-//! │                                                │ >           │          │
-//! │                                                └─────────────┘          │
 //! └─────────────────────────────────────────────────────────────────────────┘
 //! ```
 //!
@@ -36,14 +37,18 @@
 //!
 //! ```ignore
 //! use crate::freshness::{is_fresh, compute_deps_hash, clear_cache};
+//! use crate::freshness::mtime::{is_output_fresh, get_mtime};
 //!
-//! // Check if output is fresh relative to source
+//! // Content-hash: source file detection
 //! if is_fresh(&source_path, &output_path) {
 //!     // Skip rebuild
 //! }
 //!
-//! // Get combined hash of all dependency files
-//! let deps_hash = compute_deps_hash(&config);
+//! // Mtime: generated file comparison
+//! let html_mtime = get_mtime(&html_path);
+//! if is_output_fresh(&svg_path, html_mtime) {
+//!     // Skip SVG compression
+//! }
 //!
 //! // Clear cache at start of new build
 //! clear_cache();
@@ -51,6 +56,7 @@
 
 mod cache;
 mod hash;
+pub mod mtime;
 
 pub use cache::clear_cache;
 pub use hash::{build_hash_marker, compute_deps_hash, compute_file_hash, is_fresh, ContentHash};

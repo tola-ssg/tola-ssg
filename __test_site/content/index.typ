@@ -16,7 +16,7 @@
   [zettabyte], [ZB], [$1000^7$], [zebibyte], [ZiB], [$2^70$], [18%],
   [yottabyte], [YB], [$1000^8$], [yobibyte], [YiB], [$2^80$], [21%],
   [ronnayte], [RB], [$1000^9$], [robibyte], [RiB], [$2^90$], [24%],
-  [queccabyte], [QB], [$1000^10$], [quebibyte], [QiB], [$2^100$], [27%], 
+  [queccabyte], [QB], [$1000^10$], [quebibyte], [QiB], [$2^100$], [27%],
 )]
 
 上图通过为常用容量加一个二进制标记, 以解决 $2^x$ 与 $10^y$ 字节的模糊性 \

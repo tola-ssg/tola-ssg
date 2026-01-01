@@ -3,9 +3,9 @@ use rayon::prelude::*;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::time::SystemTime;
 
 use crate::config::{ExtractSvgType, SiteConfig};
+use crate::freshness::mtime::{get_mtime, is_output_fresh};
 use crate::{exec_with_stdin, log};
 use super::{Svg, OutputFormat};
 
@@ -20,12 +20,12 @@ pub fn compress_svgs_parallel(
     let scale = config.get_scale();
 
     // Get HTML file's mtime for cache invalidation
-    let html_mtime = html_path.metadata().and_then(|m| m.modified()).ok();
+    let html_mtime = get_mtime(html_path);
 
     svgs.par_iter().try_for_each(|svg| {
         let output_path = output_dir.join(svg.filename(config));
 
-        if should_skip_compression(&output_path, html_mtime) {
+        if is_output_fresh(&output_path, html_mtime) {
             return Ok(());
         }
 
@@ -42,16 +42,6 @@ fn get_log_prefix(html_path: &Path, config: &SiteConfig) -> String {
         .map(|p| p.to_string_lossy())
         .unwrap_or_default();
     rel_path.trim_end_matches("index.html").to_string()
-}
-
-fn should_skip_compression(output_path: &Path, html_mtime: Option<SystemTime>) -> bool {
-    if let Some(html_time) = html_mtime
-        && let Ok(svg_time) = output_path.metadata().and_then(|m| m.modified())
-        && svg_time >= html_time
-    {
-        return true;
-    }
-    false
 }
 
 /// Compress a single SVG based on configuration
