@@ -119,10 +119,18 @@ impl HotReloadMessage {
     }
 
     /// Create a patch message from VDOM Patches
+    ///
+    /// # Index Drift Prevention
+    ///
+    /// Position-based operations (`RemoveAtPosition`, `TextAtPosition`) are sorted
+    /// to prevent index drift during sequential execution:
+    /// - `RemoveAtPosition` ops with same parent are sorted by position descending
+    ///   (remove from back to front to preserve indices)
+    /// - Remove operations execute before inserts
     pub fn from_patches(path: &str, patches: &[crate::vdom::diff::Patch]) -> Self {
         use crate::vdom::diff::Patch;
 
-        let ops: Vec<PatchOp> = patches
+        let mut ops: Vec<PatchOp> = patches
             .iter()
             .map(|p| match p {
                 Patch::Replace { target, html } => PatchOp::Replace {
@@ -161,6 +169,31 @@ impl HotReloadMessage {
                 },
             })
             .collect();
+
+        // Sort operations to prevent index drift:
+        // 1. RemoveAtPosition with same parent: sort by position descending (back to front)
+        // 2. All remove operations should come before inserts
+        ops.sort_by(|a, b| {
+            use std::cmp::Ordering;
+            match (a, b) {
+                // Both RemoveAtPosition with same parent: sort by position descending
+                (
+                    PatchOp::RemoveAtPosition { parent: p1, position: pos1 },
+                    PatchOp::RemoveAtPosition { parent: p2, position: pos2 },
+                ) if p1 == p2 => pos2.cmp(pos1), // Descending: remove from back first
+
+                // RemoveAtPosition before other operations
+                (PatchOp::RemoveAtPosition { .. }, PatchOp::Insert { .. }) => Ordering::Less,
+                (PatchOp::Insert { .. }, PatchOp::RemoveAtPosition { .. }) => Ordering::Greater,
+
+                // Remove (by ID) before Insert
+                (PatchOp::Remove { .. }, PatchOp::Insert { .. }) => Ordering::Less,
+                (PatchOp::Insert { .. }, PatchOp::Remove { .. }) => Ordering::Greater,
+
+                // Keep other operations in original order
+                _ => Ordering::Equal,
+            }
+        });
 
         Self::Patch {
             path: path.to_string(),
@@ -329,5 +362,104 @@ mod tests {
         let json = msg.to_json();
         assert!(json.contains(r#""type":"reload""#));
         assert!(json.contains(r#""reason":"template changed""#));
+    }
+
+    #[test]
+    fn test_remove_at_position_sorted_descending() {
+        // Test that RemoveAtPosition ops with same parent are sorted by position descending
+        // This prevents index drift when removing multiple children
+        use crate::vdom::diff::Patch;
+        use crate::vdom::id::StableId;
+
+        let parent_id = StableId::from_raw(0x1234);
+
+        // Create patches in ascending order (wrong execution order)
+        let patches = vec![
+            Patch::RemoveAtPosition {
+                parent: parent_id,
+                position: 0,
+            },
+            Patch::RemoveAtPosition {
+                parent: parent_id,
+                position: 2,
+            },
+            Patch::RemoveAtPosition {
+                parent: parent_id,
+                position: 1,
+            },
+        ];
+
+        let msg = HotReloadMessage::from_patches("/test.html", &patches);
+        if let HotReloadMessage::Patch { ops, .. } = msg {
+            // Should be sorted descending: 2, 1, 0
+            let positions: Vec<u32> = ops
+                .iter()
+                .filter_map(|op| {
+                    if let PatchOp::RemoveAtPosition { position, .. } = op {
+                        Some(*position)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            assert_eq!(positions, vec![2, 1, 0], "RemoveAtPosition should be sorted descending");
+        } else {
+            panic!("Expected Patch message");
+        }
+    }
+
+    #[test]
+    fn test_removes_before_inserts() {
+        // Test that remove operations come before insert operations
+        use crate::vdom::diff::Patch;
+        use crate::vdom::id::StableId;
+
+        let parent_id = StableId::from_raw(0x1234);
+        let target_id = StableId::from_raw(0x5678);
+
+        let patches = vec![
+            Patch::Insert {
+                parent: parent_id,
+                position: 0,
+                html: "<span>new</span>".to_string(),
+            },
+            Patch::Remove { target: target_id },
+            Patch::RemoveAtPosition {
+                parent: parent_id,
+                position: 1,
+            },
+        ];
+
+        let msg = HotReloadMessage::from_patches("/test.html", &patches);
+        if let HotReloadMessage::Patch { ops, .. } = msg {
+            // Find positions of each op type
+            let mut first_remove_idx = None;
+            let mut first_remove_at_pos_idx = None;
+            let mut first_insert_idx = None;
+
+            for (i, op) in ops.iter().enumerate() {
+                match op {
+                    PatchOp::Remove { .. } if first_remove_idx.is_none() => first_remove_idx = Some(i),
+                    PatchOp::RemoveAtPosition { .. } if first_remove_at_pos_idx.is_none() => {
+                        first_remove_at_pos_idx = Some(i)
+                    }
+                    PatchOp::Insert { .. } if first_insert_idx.is_none() => first_insert_idx = Some(i),
+                    _ => {}
+                }
+            }
+
+            // Both remove operations should come before insert
+            assert!(
+                first_remove_at_pos_idx.unwrap() < first_insert_idx.unwrap(),
+                "RemoveAtPosition should come before Insert"
+            );
+            assert!(
+                first_remove_idx.unwrap() < first_insert_idx.unwrap(),
+                "Remove should come before Insert"
+            );
+        } else {
+            panic!("Expected Patch message");
+        }
     }
 }

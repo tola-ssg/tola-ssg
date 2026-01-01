@@ -155,45 +155,43 @@
         }
         case 'insert': {
           const parent = this.getById(op.parent);
-          if (parent) {
-            // Defensive insert: avoid duplicating elements that already exist
-            const temp = document.createElement('div');
-            temp.innerHTML = op.html;
-            const newIds = Array.from(temp.querySelectorAll('[data-tola-id]')).map(el => el.dataset.tolaId);
+          if (!parent) break;
 
-            // If any of the new IDs already exist in the document, perform targeted replaces
-            if (newIds.some(id => document.querySelector(`[data-tola-id="${id}"]`))) {
-              newIds.forEach(id => {
-                const newEl = temp.querySelector(`[data-tola-id="${id}"]`);
-                const existing = document.querySelector(`[data-tola-id="${id}"]`);
-                if (newEl && existing) {
-                  existing.outerHTML = newEl.outerHTML;
-                }
-              });
-            } else {
-              // Insert at specific position
-              const children = parent.children;
-              if (op.position >= children.length) {
-                parent.insertAdjacentHTML('beforeend', op.html);
-              } else {
-                children[op.position].insertAdjacentHTML('beforebegin', op.html);
-              }
-            }
+          // Parse HTML using template element (handles all node types correctly)
+          const template = document.createElement('template');
+          template.innerHTML = op.html;
+          const fragment = template.content;
+
+          // Use childNodes for consistent indexing (includes text nodes)
+          // This matches Rust's position calculation which counts all nodes
+          const childNodes = parent.childNodes;
+          const pos = parseInt(op.position, 10);
+
+          if (pos >= childNodes.length) {
+            parent.appendChild(fragment);
+          } else {
+            // insertBefore works with DocumentFragment and TextNode references
+            parent.insertBefore(fragment, childNodes[pos]);
           }
           break;
         }
         case 'move': {
           const target = this.getById(op.target);
           const newParent = this.getById(op.new_parent);
-          if (target && newParent) {
-            // Remove from current position
-            target.remove();
-            // Insert at new position
-            const children = newParent.children;
-            if (op.position >= children.length) {
-              newParent.appendChild(target);
-            } else {
-              newParent.insertBefore(target, children[op.position]);
+          if (!target || !newParent) break;
+
+          // Use childNodes for consistent indexing (includes text nodes)
+          const childNodes = newParent.childNodes;
+          const pos = parseInt(op.position, 10);
+
+          // insertBefore automatically removes target from its current position
+          // (no need to call target.remove() first)
+          if (pos >= childNodes.length) {
+            newParent.appendChild(target);
+          } else {
+            // Don't insert before self (no-op if already at correct position)
+            if (childNodes[pos] !== target) {
+              newParent.insertBefore(target, childNodes[pos]);
             }
           }
           break;
