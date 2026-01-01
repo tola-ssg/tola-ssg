@@ -277,6 +277,15 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
 
     // Template/utils changes: query dependency graph for precise rebuild
     if !dependency_triggers.is_empty() {
+        // Clear VDOM cache for affected files since template changes affect output
+        for path in &dependency_triggers {
+            if let Some(dependents) = crate::compiler::deps::DEPENDENCY_GRAPH.read().get_dependents(path) {
+                for dep in dependents {
+                    VDOM_CACHE.remove(dep);
+                }
+            }
+        }
+
         let affected = collect_affected_content(&dependency_triggers);
 
         if affected.is_empty() {

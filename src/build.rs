@@ -29,11 +29,11 @@ use crate::{
     config::SiteConfig,
     data::virtual_fs,
     driver::BuildDriver,
+    freshness,
     log,
     logger::ProgressBars,
     typst_lib,
     utils::{
-        category::get_deps_mtime,
         css,
         git,
     },
@@ -77,8 +77,11 @@ pub fn build_site<D: BuildDriver + Copy>(
     // Ensure output directory has git repo (for deploy)
     let repo = ensure_output_repo(output, config.build.clean)?;
 
-    // Calculate deps mtime once for all content files
-    let deps_mtime = get_deps_mtime(config);
+    // Clear freshness cache at start of build for accurate detection
+    freshness::clear_cache();
+
+    // Calculate deps hash once for all content files (blake3-based)
+    let deps_hash = freshness::compute_deps_hash(config);
 
     // Collect asset files early for progress bar
     let asset_files = collect_all_files(assets);
@@ -118,7 +121,7 @@ pub fn build_site<D: BuildDriver + Copy>(
         driver,
         config,
         clean,
-        deps_mtime,
+        Some(deps_hash),
         || {
             if let Some(ref p) = phase1_progress {
                 p.inc_by_name("phase1");
@@ -161,7 +164,7 @@ pub fn build_site<D: BuildDriver + Copy>(
                 return Ok(Pages { items: vec![] });
             }
 
-            match crate::compiler::pages::compile_dynamic_pages(driver, &dynamic_paths, config, clean, deps_mtime, || {
+            match crate::compiler::pages::compile_dynamic_pages(driver, &dynamic_paths, config, clean, Some(deps_hash), || {
                 if let Some(ref p) = progress {
                     p.inc_by_name("phase2");
                 }

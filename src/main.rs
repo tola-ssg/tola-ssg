@@ -11,6 +11,7 @@ mod data;
 mod deploy;
 mod driver;
 mod embed;
+mod freshness;
 mod generator;
 mod hotreload;
 mod init;

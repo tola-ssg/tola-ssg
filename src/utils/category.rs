@@ -24,9 +24,7 @@ use crate::config::SiteConfig;
 use std::{
     env,
     path::{Path, PathBuf},
-    time::SystemTime,
 };
-use walkdir::WalkDir;
 
 /// Category of a changed file, used to determine rebuild strategy in watch mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,50 +106,6 @@ pub fn normalize_path(path: &Path) -> PathBuf {
                 .map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
         }
     })
-}
-
-/// Get the latest modification time from shared dependencies.
-///
-/// Shared dependencies include:
-/// - `tola.toml` (site configuration)
-/// - All directories in `deps` array (templates, utils, etc.)
-///
-/// If any of these are newer than a content file's output, that content
-/// needs to be recompiled even if the source `.typ` file hasn't changed.
-pub fn get_deps_mtime(config: &SiteConfig) -> Option<SystemTime> {
-    // Config file mtime
-    let config_mtime = get_latest_mtime(&config.config_path);
-
-    // All deps directories mtime
-    let deps_mtime = config
-        .build
-        .deps
-        .iter()
-        .filter_map(|p| get_latest_mtime(p))
-        .max();
-
-    [config_mtime, deps_mtime].into_iter().flatten().max()
-}
-
-/// Get the latest modification time of a file or directory.
-///
-/// For directories, recursively finds the newest file's mtime.
-fn get_latest_mtime(path: &Path) -> Option<SystemTime> {
-    if path.is_file() {
-        return path.metadata().and_then(|m| m.modified()).ok();
-    }
-
-    if path.is_dir() {
-        return WalkDir::new(path)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|e| e.file_type().is_file())
-            .filter_map(|e| e.metadata().ok())
-            .filter_map(|m| m.modified().ok())
-            .max();
-    }
-
-    None
 }
 
 #[cfg(test)]

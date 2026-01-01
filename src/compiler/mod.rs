@@ -23,8 +23,9 @@ pub mod meta;
 pub mod pages;
 
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 use walkdir::WalkDir;
+
+use crate::freshness::{self, ContentHash};
 
 // ============================================================================
 // Public API
@@ -55,32 +56,15 @@ pub fn collect_all_files(dir: &Path) -> Vec<PathBuf> {
 }
 
 /// Check if destination is up-to-date compared to source and dependencies.
-pub fn is_up_to_date(src: &Path, dst: &Path, deps_mtime: Option<SystemTime>) -> bool {
-    let Ok(src_meta) = src.metadata() else {
-        return false;
-    };
-    let Ok(dst_meta) = dst.metadata() else {
-        return false;
-    };
-
-    let Ok(src_time) = src_meta.modified() else {
-        return false;
-    };
-    let Ok(dst_time) = dst_meta.modified() else {
-        return false;
-    };
-
-    // Check if source is newer than destination
-    if src_time > dst_time {
-        return false;
-    }
-
-    // Check if any dependency is newer than destination
-    if let Some(deps) = deps_mtime
-        && deps > dst_time
-    {
-        return false;
-    }
-
-    true
+///
+/// Uses content-based hashing (blake3) instead of mtime for reliable detection
+/// with version control systems like jujutsu that may not update timestamps.
+///
+/// # Arguments
+///
+/// * `src` - Source file path
+/// * `dst` - Destination/output file path  
+/// * `deps_hash` - Optional hash of dependencies (templates, config, etc.)
+pub fn is_up_to_date(src: &Path, dst: &Path, deps_hash: Option<ContentHash>) -> bool {
+    freshness::is_fresh(src, dst, deps_hash)
 }

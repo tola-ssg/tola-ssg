@@ -11,4 +11,5 @@ __test_site
 /other-projects
 !/other-projects/typst-preview
 !/other-projects/dioxus
+!/other-projects/typst_blog
 /docs

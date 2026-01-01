@@ -1,13 +1,13 @@
 use crate::compiler::meta::{PageMeta, ContentMeta, Pages, TOLA_META_LABEL};
 use crate::compiler::{collect_all_files, is_up_to_date};
 use crate::data::{PageData, GLOBAL_SITE_DATA};
+use crate::freshness::{self, ContentHash};
 use crate::utils::minify::{minify, MinifyType};
 use crate::utils::xml::process_html;
 use crate::{config::SiteConfig, log, typst_lib};
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
-use std::time::SystemTime;
 use rayon::prelude::*;
 
 // TOLA_META_LABEL is imported from crate::compiler::meta
@@ -33,11 +33,11 @@ fn compile_pages_legacy(
     pages: &Pages,
     config: &SiteConfig,
     clean: bool,
-    deps_mtime: Option<SystemTime>,
+    deps_hash: Option<ContentHash>,
     on_progress: impl Fn() + Sync,
 ) -> Result<()> {
     pages.items.par_iter().try_for_each(|page| {
-        let result = write_page(page, config, clean, deps_mtime, false);
+        let result = write_page(page, config, clean, deps_hash, false);
         on_progress();
         result
     })
@@ -125,11 +125,11 @@ fn write_page(
     page: &PageMeta,
     config: &SiteConfig,
     clean: bool,
-    deps_mtime: Option<SystemTime>,
+    deps_hash: Option<ContentHash>,
     log_file: bool,
 ) -> Result<()> {
     // Check if up-to-date (only for batch mode, process_page already checked)
-    if !clean && is_up_to_date(&page.paths.source, &page.paths.html, deps_mtime) {
+    if !clean && is_up_to_date(&page.paths.source, &page.paths.html, deps_hash) {
         return Ok(());
     }
 
@@ -154,7 +154,20 @@ fn write_page(
         .is_some_and(|stem| stem == "index");
     let html_content = process_html(&page.paths.html, &html_content, config, is_source_index)?;
     let html_content = minify(MinifyType::Html(&html_content), config);
-    fs::write(&page.paths.html, &*html_content)?;
+
+    // Compute source hash and embed marker for freshness detection
+    let source_hash = freshness::compute_file_hash(&page.paths.source);
+    let hash_marker = freshness::build_hash_marker(&source_hash, deps_hash.as_ref());
+
+    // Embed hash marker at the end of HTML content (before closing </html>)
+    let html_str = String::from_utf8_lossy(&html_content);
+    let final_html = if let Some(pos) = html_str.rfind("</html>") {
+        format!("{}{}\n</html>", &html_str[..pos], hash_marker)
+    } else {
+        format!("{}\n{}", html_str, hash_marker)
+    };
+
+    fs::write(&page.paths.html, final_html)?;
 
     Ok(())
 }
@@ -237,7 +250,7 @@ pub fn collect_metadata_smart<D: crate::driver::BuildDriver + Copy>(
     driver: D,
     config: &SiteConfig,
     clean: bool,
-    deps_mtime: Option<SystemTime>,
+    deps_hash: Option<ContentHash>,
     on_progress: impl Fn() + Sync,
 ) -> Result<(Vec<std::path::PathBuf>, usize, usize)> {
     let content_files = collect_all_files(&config.build.content);
@@ -292,7 +305,7 @@ pub fn collect_metadata_smart<D: crate::driver::BuildDriver + Copy>(
 
             // For static pages, write immediately (their HTML is complete)
             if !uses_virtual_data {
-                write_page(&page, config, clean, deps_mtime, false)?;
+                write_page(&page, config, clean, deps_hash, false)?;
             }
 
             on_progress();
@@ -332,7 +345,7 @@ pub fn compile_dynamic_pages<D: crate::driver::BuildDriver + Copy>(
     paths: &[std::path::PathBuf],
     config: &SiteConfig,
     clean: bool,
-    deps_mtime: Option<SystemTime>,
+    deps_hash: Option<ContentHash>,
     on_progress: impl Fn() + Sync,
 ) -> Result<Vec<PageMeta>> {
     let results: Vec<Result<PageMeta>> = paths
@@ -347,7 +360,7 @@ pub fn compile_dynamic_pages<D: crate::driver::BuildDriver + Copy>(
             page.compiled_html = Some(html);
 
             // Write the page
-            write_page(&page, config, clean, deps_mtime, false)?;
+            write_page(&page, config, clean, deps_hash, false)?;
 
             on_progress();
             Ok(page)

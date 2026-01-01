@@ -82,6 +82,9 @@ tungstenite = "0.27"
 # Hex encoding for cache file names
 hex = "0.4"
 
+# Fast cryptographic hashing for content-based freshness detection
+blake3 = "1.8"
+
 # Async runtime for Actor model (Phase 5)
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"], optional = true }
 
