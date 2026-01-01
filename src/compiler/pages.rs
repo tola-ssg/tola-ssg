@@ -3,7 +3,7 @@ use crate::compiler::{collect_all_files, is_up_to_date};
 use crate::data::{PageData, GLOBAL_SITE_DATA};
 use crate::utils::minify::{minify, MinifyType};
 use crate::utils::xml::process_html;
-use crate::{config::SiteConfig, driver::Production, log, typst_lib};
+use crate::{config::SiteConfig, log, typst_lib};
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
@@ -46,49 +46,6 @@ fn compile_pages_legacy(
 // ============================================================================
 // process_page: Single page compilation (for watch mode)
 // ============================================================================
-
-/// Process a single .typ file: compile and write HTML.
-///
-/// Used by build mode to compile and write individual files.
-/// Also updates `GLOBAL_SITE_DATA` with the page's metadata for virtual JSON files.
-/// Returns `Some(PageMeta)` if compiled, `None` if skipped (up-to-date or draft).
-pub fn compile_and_write_page(
-    path: &Path,
-    config: &SiteConfig,
-    clean: bool,
-    deps_mtime: Option<SystemTime>,
-    log_file: bool,
-) -> Result<Option<PageMeta>> {
-    let mut page = PageMeta::from_paths(path.to_path_buf(), config)?;
-
-    // Check if up-to-date
-    if !clean && is_up_to_date(path, &page.paths.html, deps_mtime) {
-        return Ok(None);
-    }
-
-    // Compile the page and get metadata
-    let (html_content, content_meta) = compile_meta(&Production, path, config)?;
-
-    // Skip drafts
-    if is_draft(content_meta.as_ref()) {
-        // Remove from global data if it was previously published
-        // (This handles the case where a page is marked as draft after being published)
-        return Ok(None);
-    }
-
-    page.content_meta = content_meta;
-    page.compiled_html = Some(html_content);
-
-    // Update global site data for virtual JSON files
-    GLOBAL_SITE_DATA.insert_page(page_meta_to_data(&page));
-
-    // Write the page
-    write_page(&page, config, true, None, log_file)?;
-
-    Ok(Some(page))
-}
-
-// ============================================================================
 // Page Processing with Driver
 // ============================================================================
 
@@ -100,8 +57,6 @@ pub struct PageResult {
     pub indexed_vdom: Option<crate::vdom::Document<crate::vdom::Indexed>>,
     /// URL path for the page (e.g., "/blog/post")
     pub url_path: String,
-    /// Whether this page depends on virtual data files (pages.json, tags.json)
-    pub uses_virtual_data: bool,
 }
 
 /// Process a single .typ file.
@@ -121,9 +76,6 @@ pub fn process_page<D: crate::driver::BuildDriver>(
 
     // Compile with driver
     let result = typst_lib::compile_vdom(driver, path, config.get_root(), TOLA_META_LABEL)?;
-
-    // Track if this page depends on virtual data (before moving metadata)
-    let uses_virtual_data = result.uses_virtual_data();
 
     // Extract metadata
     let content_meta: Option<ContentMeta> = result
@@ -156,49 +108,12 @@ pub fn process_page<D: crate::driver::BuildDriver>(
         page,
         indexed_vdom: result.indexed_vdom,
         url_path,
-        uses_virtual_data,
     }))
 }
 
 /// Write a page's HTML to disk.
 pub fn write_page_html(page: &PageMeta, config: &SiteConfig) -> Result<()> {
     write_page(page, config, true, None, false)
-}
-
-// ============================================================================
-// Deprecated APIs (backward compatibility)
-// ============================================================================
-
-/// Result of development mode page compilation
-///
-/// Deprecated: Use `PageResult` instead.
-pub struct DevPageResult {
-    /// Page metadata
-    pub page: PageMeta,
-    /// Indexed VDOM for diff comparison
-    pub indexed_vdom: crate::vdom::Document<crate::vdom::Indexed>,
-    /// URL path for the page (e.g., "/blog/post")
-    pub url_path: String,
-}
-
-/// Deprecated: Use `process_page(&Development, ...)` instead.
-#[deprecated(since = "0.7.0", note = "Use `process_page(&Development, ...)` instead")]
-pub fn process_page_for_dev(
-    path: &Path,
-    config: &SiteConfig,
-) -> Result<Option<DevPageResult>> {
-    let result = process_page(&crate::driver::Development, path, config)?;
-    Ok(result.map(|r| DevPageResult {
-        page: r.page,
-        indexed_vdom: r.indexed_vdom.expect("Development driver should cache VDOM"),
-        url_path: r.url_path,
-    }))
-}
-
-/// Deprecated: Use `write_page_html` instead.
-#[deprecated(since = "0.7.0", note = "Use `write_page_html` instead")]
-pub fn write_page_for_dev(page: &PageMeta, config: &SiteConfig) -> Result<()> {
-    write_page_html(page, config)
 }
 
 // ============================================================================
@@ -277,13 +192,6 @@ pub fn compile_meta<D: crate::driver::BuildDriver>(
     Ok((result.html, meta))
 }
 
-/// Query metadata only.
-pub fn query_meta(path: &Path, config: &SiteConfig) -> Option<ContentMeta> {
-    let root = config.get_root();
-    let result = typst_lib::compile_meta(path, root, TOLA_META_LABEL).ok()?;
-    result.metadata.and_then(|json| serde_json::from_value(json).ok())
-}
-
 /// Check if content metadata indicates a draft.
 #[inline]
 fn is_draft(meta: Option<&ContentMeta>) -> bool {
@@ -311,72 +219,6 @@ fn page_meta_to_data(page: &PageMeta) -> PageData {
             .unwrap_or_default(),
         draft: content.is_some_and(|c| c.draft),
     }
-}
-
-/// Phase 1: Collect metadata from all pages.
-///
-/// Compiles all pages to extract metadata, populating `GLOBAL_SITE_DATA`.
-/// HTML output is discarded since it may be incomplete (virtual JSON returns empty).
-///
-/// After this phase, `GLOBAL_SITE_DATA` contains complete metadata from all pages.
-pub fn collect_metadata(
-    config: &SiteConfig,
-    on_progress: impl Fn() + Sync,
-) -> Result<Vec<std::path::PathBuf>> {
-    let content_files = collect_all_files(&config.build.content);
-
-    let typ_files: Vec<_> = content_files
-        .into_iter()
-        .filter(|p| p.extension().is_some_and(|ext| ext == "typ"))
-        .collect();
-
-    // Clear global data store for fresh collection
-    GLOBAL_SITE_DATA.clear();
-
-    let results: Vec<Result<Option<(std::path::PathBuf, PageMeta)>>> = typ_files
-        .par_iter()
-        .map(|path| {
-            let page = PageMeta::from_paths(path.clone(), config)?;
-
-            // Compile to extract metadata (HTML discarded)
-            let root = config.get_root();
-            let result = typst_lib::compile_meta(path, root, TOLA_META_LABEL)?;
-
-            // Record dependencies for incremental rebuild
-            super::deps::DEPENDENCY_GRAPH
-                .write()
-                .record_dependencies(path, &result.accessed_files);
-
-            let content_meta: Option<ContentMeta> = result.metadata.and_then(|json| serde_json::from_value(json).ok());
-
-            // Skip drafts
-            if is_draft(content_meta.as_ref()) {
-                on_progress();
-                return Ok(None);
-            }
-
-            let mut page = page;
-            page.content_meta = content_meta;
-
-            // Store in global data
-            GLOBAL_SITE_DATA.insert_page(page_meta_to_data(&page));
-
-            on_progress();
-            Ok(Some((path.clone(), page)))
-        })
-        .collect();
-
-    // Collect paths of non-draft pages
-    let mut paths = Vec::with_capacity(results.len());
-    for result in results {
-        match result {
-            Ok(Some((path, _))) => paths.push(path),
-            Ok(None) => {} // Draft, skip
-            Err(e) => return Err(e),
-        }
-    }
-
-    Ok(paths)
 }
 
 /// Phase 1: Collect metadata and classify pages as static or dynamic.
@@ -510,109 +352,6 @@ pub fn compile_dynamic_pages<D: crate::driver::BuildDriver + Copy>(
     }
 
     Ok(items)
-}
-
-/// Phase 2: Compile pages with complete global data (legacy).
-///
-/// Compiles all pages again, this time with `GLOBAL_SITE_DATA` fully populated.
-/// Virtual JSON files now return complete data, so HTML output is correct.
-///
-/// # Type Parameter
-/// * `D` - Build driver (Production or Development)
-pub fn compile_pages<D: crate::driver::BuildDriver + Copy>(
-    driver: D,
-    paths: &[std::path::PathBuf],
-    config: &SiteConfig,
-    clean: bool,
-    deps_mtime: Option<SystemTime>,
-    on_progress: impl Fn() + Sync,
-) -> Result<Pages> {
-    let results: Vec<Result<PageMeta>> = paths
-        .par_iter()
-        .map(|path| {
-            let mut page = PageMeta::from_paths(path.clone(), config)?;
-
-            // Compile with complete data
-            let (html, content_meta) = compile_meta(&driver, path, config)?;
-
-            page.content_meta = content_meta;
-            page.compiled_html = Some(html);
-
-            // Write the page
-            write_page(&page, config, clean, deps_mtime, false)?;
-
-            on_progress();
-            Ok(page)
-        })
-        .collect();
-
-    // Collect successful pages
-    let mut items = Vec::with_capacity(results.len());
-    for result in results {
-        items.push(result?);
-    }
-
-    Ok(Pages { items })
-}
-
-/// Collect all pages from content directory with metadata.
-///
-/// This function scans the content directory for `.typ` files and collects
-/// their metadata using either lib mode or CLI mode based on config.
-///
-/// # Behavior
-///
-/// - **Lib mode**: Compiles each file once, extracting both HTML and metadata.
-///   The compiled HTML is stored in `PageMeta.compiled_html` for later use.
-/// - **CLI mode**: Only queries metadata (no compilation yet).
-///   `PageMeta.compiled_html` will be `None`.
-///
-/// Draft pages (with `draft: true` in metadata) are automatically filtered out.
-/// Pages without `<tola-meta>` are still built (`content_meta` = None).
-///
-/// Note: This is the legacy single-phase collection. For two-phase compilation
-/// with virtual data support, use `collect_metadata` + `compile_pages_with_data`.
-#[allow(dead_code)]
-pub fn collect_pages(config: &SiteConfig) -> Result<Pages> {
-    let content_files = collect_all_files(&config.build.content);
-
-    let typ_files: Vec<_> = content_files
-        .into_iter()
-        .filter(|p| p.extension().is_some_and(|ext| ext == "typ"))
-        .collect();
-
-    let results: Vec<Result<Option<PageMeta>>> = typ_files
-        .par_iter()
-        .map(|path| {
-            let mut page = PageMeta::from_paths(path.clone(), config)?;
-
-            // Compile once, get both HTML and metadata (metadata may be None)
-            let result = compile_meta(&Production, path, config)?;
-            let html = Some(result.0);
-            let content_meta = result.1;
-
-            // Skip drafts
-            if is_draft(content_meta.as_ref()) {
-                return Ok(None);
-            }
-
-            page.content_meta = content_meta;
-            page.compiled_html = html;
-            Ok(Some(page))
-        })
-        .collect();
-
-    // Check for errors and collect successful pages
-    let mut items = Vec::with_capacity(results.len());
-    for result in results {
-        match result {
-            Ok(Some(page)) => items.push(page),
-            Ok(None) => {} // Draft, skip
-            Err(e) => return Err(e), // Propagate compilation error
-        }
-    }
-
-    Ok(Pages { items })
 }
 
 // ============================================================================

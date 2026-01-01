@@ -21,7 +21,6 @@ pub mod assets;
 pub mod deps;
 pub mod meta;
 pub mod pages;
-pub mod watch;
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -33,13 +32,6 @@ use walkdir::WalkDir;
 
 pub use assets::process_asset;
 pub use assets::process_rel_asset;
-pub use pages::collect_metadata;
-pub use pages::compile_pages;
-pub use watch::process_watched_files;
-
-// Legacy single-phase API (kept for potential future use)
-#[allow(unused_imports)]
-pub use pages::collect_pages;
 
 // ============================================================================
 // Shared utilities

@@ -118,8 +118,8 @@ impl HotReloadMessage {
         serde_json::from_str(s).ok()
     }
 
-    /// Create a patch message from StableIdPatches
-    pub fn from_stable_id_patches(path: &str, patches: &[crate::vdom::diff::Patch]) -> Self {
+    /// Create a patch message from VDOM Patches
+    pub fn from_patches(path: &str, patches: &[crate::vdom::diff::Patch]) -> Self {
         use crate::vdom::diff::Patch;
 
         let ops: Vec<PatchOp> = patches

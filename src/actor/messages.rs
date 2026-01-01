@@ -38,7 +38,7 @@ pub enum CompilerMsg {
 #[derive(Debug)]
 pub enum WsMsg {
     /// Send patch operations to all clients
-    Patch(Vec<crate::hotreload::StableIdPatch>),
+    Patch(Vec<crate::vdom::diff::Patch>),
     /// Trigger full page reload
     Reload { reason: String },
     /// A new client has connected

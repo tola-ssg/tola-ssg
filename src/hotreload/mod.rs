@@ -35,29 +35,14 @@
 //!
 //! # Diff Algorithm
 //!
-//! The diff algorithm has been moved to `crate::vdom::diff` for better modularity.
-//! This module re-exports the diff types for backward compatibility.
+//! The diff algorithm lives in `crate::vdom::diff`.
+//! This module handles WebSocket transport and message serialization.
 
 pub mod cache;
-pub mod diff;
-pub mod lcs;
 pub mod message;
-pub mod protocol;
 pub mod server;
 
-// Public API - these are used by serve.rs and watch.rs
+// Public API
 pub use cache::VDOM_CACHE;
-pub use server::{broadcast_patches, broadcast_reload, HotReloadServer};
-
-// Re-export diff types for backward compatibility
-// The actual algorithm is in crate::vdom::diff, re-exported via sub-modules
-pub use diff::{diff_indexed_documents, IndexedDiffResult, DiffStats, StableIdPatch};
-pub use lcs::{diff_sequences, Edit, LcsResult, LcsStats};
-
-// Legacy re-exports (allow unused for now)
-#[allow(unused_imports)]
 pub use message::{HotReloadMessage, PatchOp};
-#[allow(unused_imports)]
-pub use protocol::{PatchOp as BinaryPatchOp, ServerMessage, ARCH_FINGERPRINT};
-#[allow(unused_imports)]
-pub use server::broadcast;
+pub use server::{broadcast_patches, broadcast_reload, HotReloadServer};

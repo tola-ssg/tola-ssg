@@ -11,6 +11,7 @@ use tungstenite::WebSocket;
 
 use super::messages::WsMsg;
 use crate::hotreload::message::HotReloadMessage;
+use crate::vdom::diff::Patch;
 
 /// WebSocket Actor - manages client connections
 pub struct WsActor {
@@ -39,27 +40,42 @@ impl WsActor {
                         "type": "patch",
                         "ops": patches.iter().map(|p| {
                             match p {
-                                crate::hotreload::StableIdPatch::Replace { target, html } => {
+                                Patch::Replace { target, html } => {
                                     serde_json::json!({
                                         "type": "replace",
                                         "target": target.to_string(),
                                         "html": html,
                                     })
                                 }
-                                crate::hotreload::StableIdPatch::UpdateText { target, text } => {
+                                Patch::UpdateText { target, text } => {
                                     serde_json::json!({
                                         "type": "text",
                                         "target": target.to_string(),
                                         "text": text,
                                     })
                                 }
-                                crate::hotreload::StableIdPatch::Remove { target } => {
+                                Patch::UpdateTextAtPosition { parent, position, text } => {
+                                    serde_json::json!({
+                                        "type": "textAtPosition",
+                                        "parent": parent.to_string(),
+                                        "position": position,
+                                        "text": text,
+                                    })
+                                }
+                                Patch::Remove { target } => {
                                     serde_json::json!({
                                         "type": "remove",
                                         "target": target.to_string(),
                                     })
                                 }
-                                crate::hotreload::StableIdPatch::Insert { parent, position, html } => {
+                                Patch::RemoveAtPosition { parent, position } => {
+                                    serde_json::json!({
+                                        "type": "removeAtPosition",
+                                        "parent": parent.to_string(),
+                                        "position": position,
+                                    })
+                                }
+                                Patch::Insert { parent, position, html } => {
                                     serde_json::json!({
                                         "type": "insert",
                                         "parent": parent.to_string(),
@@ -67,7 +83,7 @@ impl WsActor {
                                         "html": html,
                                     })
                                 }
-                                crate::hotreload::StableIdPatch::Move { target, new_parent, position } => {
+                                Patch::Move { target, new_parent, position } => {
                                     serde_json::json!({
                                         "type": "move",
                                         "target": target.to_string(),
@@ -75,7 +91,7 @@ impl WsActor {
                                         "position": position,
                                     })
                                 }
-                                crate::hotreload::StableIdPatch::UpdateAttrs { target, attrs } => {
+                                Patch::UpdateAttrs { target, attrs } => {
                                     serde_json::json!({
                                         "type": "attrs",
                                         "target": target.to_string(),

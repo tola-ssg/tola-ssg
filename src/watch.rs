@@ -36,10 +36,11 @@ use crate::{
     compiler::pages::{process_page, write_page_html},
     config::{cfg, reload_config, SiteConfig},
     driver::Development,
-    hotreload::{broadcast_patches, broadcast_reload, diff_indexed_documents, VDOM_CACHE},
+    hotreload::{broadcast_patches, broadcast_reload, VDOM_CACHE},
     log,
     logger::WatchStatus,
     utils::category::{categorize_path, FileCategory},
+    vdom::diff::diff,
 };
 use anyhow::{Context, Result};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
@@ -395,7 +396,7 @@ fn process_with_vdom_diff(
                     // Determine if we need reload or can use patches
                     let needs_reload = if let Some(ref old) = old_vdom {
                         // Diff and check if we can patch
-                        let diff_result = diff_indexed_documents(old, new_vdom);
+                        let diff_result = diff(old, new_vdom);
 
                         // Debug: log diff stats
                         log!("hotreload"; "diff stats: elems={} text={} kept={} replaced={} text_updates={}",

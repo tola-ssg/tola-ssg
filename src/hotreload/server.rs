@@ -39,15 +39,14 @@ pub fn broadcast_reload_reason(reason: &str) {
 
 /// Broadcast VDOM patches to all clients
 ///
-/// Converts StableIdPatch operations to JSON-serializable PatchOp and sends them.
-/// Falls back to full reload if patch list is empty.
+/// Converts Patch operations to JSON-serializable PatchOp and sends them.
 pub fn broadcast_patches(path: &str, patches: &[crate::vdom::diff::Patch]) {
     if patches.is_empty() {
         // No patches - page unchanged (should rarely happen)
         return;
     }
 
-    let msg = HotReloadMessage::from_stable_id_patches(path, patches);
+    let msg = HotReloadMessage::from_patches(path, patches);
     broadcast(msg);
 }
 

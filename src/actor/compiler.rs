@@ -82,7 +82,7 @@ impl CompilerActor {
     }
 
     /// Perform compilation (runs in blocking thread pool)
-    fn do_compile(paths: &[PathBuf]) -> anyhow::Result<Vec<crate::hotreload::StableIdPatch>> {
+    fn do_compile(paths: &[PathBuf]) -> anyhow::Result<Vec<crate::vdom::diff::Patch>> {
         // TODO: Integrate with actual compilation pipeline
         // For now, this is a placeholder that returns empty patches
 
