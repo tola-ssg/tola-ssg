@@ -101,6 +101,82 @@ pub fn process_page(
 }
 
 // ============================================================================
+// process_page_for_dev: Development mode compilation with VDOM
+// ============================================================================
+
+/// Result of development mode page compilation
+pub struct DevPageResult {
+    /// Page metadata
+    pub page: PageMeta,
+    /// Indexed VDOM for diff comparison
+    pub indexed_vdom: crate::vdom::Document<crate::vdom::Indexed>,
+    /// URL path for the page (e.g., "/blog/post")
+    pub url_path: String,
+}
+
+/// Process a single .typ file for development mode.
+///
+/// Similar to `process_page` but also returns the Indexed VDOM for diffing.
+/// Used by watch mode when VDOM-based hot reload is enabled.
+///
+/// Note: This function does NOT write the HTML file to disk.
+/// The caller should decide whether to write based on diff results:
+/// - If diff succeeds with patches → don't write (browser gets patches via WebSocket)
+/// - If diff fails/needs reload → write first, then trigger reload
+pub fn process_page_for_dev(
+    path: &Path,
+    config: &SiteConfig,
+) -> Result<Option<DevPageResult>> {
+    let mut page = PageMeta::from_paths(path.to_path_buf(), config)?;
+
+    // Only works with lib mode and VDOM enabled
+    if !config.build.typst.use_lib || !config.build.typst.use_vdom {
+        anyhow::bail!("Dev mode requires use_lib and use_vdom to be enabled");
+    }
+
+    // Compile with VDOM output
+    let result = typst_lib::compile_for_dev_with_vdom(path, config.get_root(), TOLA_META_LABEL)?;
+
+    // Extract metadata
+    let content_meta: Option<ContentMeta> = result
+        .metadata
+        .and_then(|json| serde_json::from_value(json).ok());
+
+    // Skip drafts
+    if is_draft(content_meta.as_ref()) {
+        return Ok(None);
+    }
+
+    // Record dependencies
+    super::deps::DEPENDENCY_GRAPH
+        .write()
+        .record_dependencies(path, &result.accessed_files);
+
+    page.content_meta = content_meta;
+    page.compiled_html = Some(result.html);
+    let url_path = page.paths.url_path.clone();
+
+    // Update global site data
+    GLOBAL_SITE_DATA.insert_page(page_meta_to_data(&page));
+
+    // NOTE: Do NOT write HTML file here!
+    // The caller (watch.rs) will write only when reload is needed.
+
+    Ok(Some(DevPageResult {
+        page,
+        indexed_vdom: result.indexed_vdom,
+        url_path,
+    }))
+}
+
+/// Write a dev page's HTML to disk (for reload fallback).
+///
+/// Called by watch.rs when VDOM diff fails and a full reload is needed.
+pub fn write_page_for_dev(page: &PageMeta, config: &SiteConfig) -> Result<()> {
+    write_page(page, config, true, None, false)
+}
+
+// ============================================================================
 // Internal
 // ============================================================================
 
@@ -149,18 +225,55 @@ fn write_page(
 /// Compile a typst file and extract metadata (lib or CLI mode).
 ///
 /// Also records dependencies for incremental rebuild tracking.
+/// When `use_vdom` is enabled, uses the VDOM pipeline for HTML generation.
+///
+/// For development mode with hot reload support, use `compile_meta_for_dev()` instead.
 pub fn compile_meta(path: &Path, config: &SiteConfig) -> Result<(Vec<u8>, Option<ContentMeta>)> {
+    compile_meta_internal(path, config, false)
+}
+
+/// Compile a typst file for development mode with `data-tola-id` attributes.
+///
+/// Same as `compile_meta()` but emits stable IDs on all elements for VDOM
+/// diffing and hot reload. Use this when building for `tola serve`.
+pub fn compile_meta_for_dev(path: &Path, config: &SiteConfig) -> Result<(Vec<u8>, Option<ContentMeta>)> {
+    compile_meta_internal(path, config, true)
+}
+
+/// Internal: compile with configurable dev mode flag.
+fn compile_meta_internal(path: &Path, config: &SiteConfig, dev_mode: bool) -> Result<(Vec<u8>, Option<ContentMeta>)> {
     if config.build.typst.use_lib {
         let root = config.get_root();
-        let result = typst_lib::compile_meta(path, root, TOLA_META_LABEL)?;
-        let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
 
-        // Record dependencies for incremental rebuild
-        super::deps::DEPENDENCY_GRAPH
-            .write()
-            .record_dependencies(path, &result.accessed_files);
+        // Choose between VDOM and legacy pipeline
+        if config.build.typst.use_vdom {
+            if dev_mode {
+                let result = typst_lib::compile_vdom_for_dev(path, root, TOLA_META_LABEL)?;
+                let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
+                super::deps::DEPENDENCY_GRAPH
+                    .write()
+                    .record_dependencies(path, &result.accessed_files);
 
-        Ok((result.html, meta))
+                // Cache the indexed VDOM for hot reload
+                crate::hotreload::VDOM_CACHE.insert(path.to_path_buf(), result.indexed_vdom);
+
+                return Ok((result.html, meta));
+            } else {
+                let result = typst_lib::compile_vdom(path, root, TOLA_META_LABEL)?;
+                let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
+                super::deps::DEPENDENCY_GRAPH
+                    .write()
+                    .record_dependencies(path, &result.accessed_files);
+                return Ok((result.html, meta));
+            }
+        } else {
+            let result = typst_lib::compile_meta(path, root, TOLA_META_LABEL)?;
+            let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
+            super::deps::DEPENDENCY_GRAPH
+                .write()
+                .record_dependencies(path, &result.accessed_files);
+            return Ok((result.html, meta));
+        }
     } else {
         let meta = query_meta(path, config);
         let html = compile_cli(path, config)?;
@@ -324,11 +437,14 @@ pub fn collect_metadata(
 ///
 /// Compiles all pages again, this time with `GLOBAL_SITE_DATA` fully populated.
 /// Virtual JSON files now return complete data, so HTML output is correct.
+///
+/// When `dev_mode` is true, emits `data-tola-id` attributes for hot reload.
 pub fn compile_pages_with_data(
     paths: &[std::path::PathBuf],
     config: &SiteConfig,
     clean: bool,
     deps_mtime: Option<SystemTime>,
+    dev_mode: bool,
     on_progress: impl Fn() + Sync,
 ) -> Result<Pages> {
     let results: Vec<Result<PageMeta>> = paths
@@ -336,8 +452,12 @@ pub fn compile_pages_with_data(
         .map(|path| {
             let mut page = PageMeta::from_paths(path.clone(), config)?;
 
-            // Compile with complete data
-            let (html, content_meta) = compile_meta(path, config)?;
+            // Compile with complete data (dev_mode controls data-tola-id output)
+            let (html, content_meta) = if dev_mode {
+                compile_meta_for_dev(path, config)?
+            } else {
+                compile_meta(path, config)?
+            };
 
             page.content_meta = content_meta;
             page.compiled_html = Some(html);

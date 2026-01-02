@@ -7,6 +7,7 @@ pub mod exec;
 pub mod git;
 pub mod hash;
 pub mod minify;
+pub mod platform;
 pub mod slug;
 pub mod svg;
 pub mod xml;

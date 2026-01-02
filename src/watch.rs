@@ -33,8 +33,9 @@
 //! ```
 
 use crate::{
-    compiler::process_watched_files,
+    compiler::{pages::process_page_for_dev, process_watched_files},
     config::{cfg, reload_config, SiteConfig},
+    hotreload::{broadcast_patches, broadcast_reload, diff_indexed_documents, VDOM_CACHE},
     log,
     logger::WatchStatus,
     utils::category::{categorize_path, FileCategory},
@@ -295,23 +296,54 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
             }
         }
 
-        match process_watched_files(&incremental_targets, &cfg(), clean) {
-            Ok(count) => {
-                let msg = if count == 1 {
-                    format!("rebuilt: {}", rel(&incremental_targets[0]))
-                } else {
-                    format!("rebuilt {} files", count)
-                };
-                status.success(&msg);
+        // Check if we should use VDOM-based hot reload
+        let c = cfg();
+        let use_vdom_diff = c.build.typst.use_lib && c.build.typst.use_vdom;
+
+        if use_vdom_diff {
+            // VDOM diff path: compile with VDOM output and diff
+            match process_with_vdom_diff(&incremental_targets, &c, clean, status, &rel) {
+                Ok(count) => {
+                    let msg = if count == 1 {
+                        format!("rebuilt: {}", rel(&incremental_targets[0]))
+                    } else {
+                        format!("rebuilt {} files", count)
+                    };
+                    status.success(&msg);
+                }
+                Err(e) => {
+                    let context = if clean {
+                        dependency_triggers.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
+                    } else {
+                        incremental_targets.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
+                    };
+                    status.error(&format!("failed: {context}"), &e.to_string());
+                    return false;
+                }
             }
-            Err(e) => {
-                let context = if clean {
-                    dependency_triggers.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
-                } else {
-                    incremental_targets.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
-                };
-                status.error(&format!("failed: {context}"), &e.to_string());
-                return false;
+        } else {
+            // Legacy path: full reload
+            match process_watched_files(&incremental_targets, &cfg(), clean) {
+                Ok(count) => {
+                    let msg = if count == 1 {
+                        format!("rebuilt: {}", rel(&incremental_targets[0]))
+                    } else {
+                        format!("rebuilt {} files", count)
+                    };
+                    status.success(&msg);
+
+                    // Broadcast hot reload to connected browsers
+                    crate::hotreload::broadcast_reload();
+                }
+                Err(e) => {
+                    let context = if clean {
+                        dependency_triggers.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
+                    } else {
+                        incremental_targets.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
+                    };
+                    status.error(&format!("failed: {context}"), &e.to_string());
+                    return false;
+                }
             }
         }
     }
@@ -335,20 +367,156 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
     false
 }
 
+/// Process files with VDOM diff for incremental hot reload.
+///
+/// This function:
+/// 1. Compiles each content file using the VDOM pipeline
+/// 2. Compares with cached VDOM (if available)
+/// 3. Broadcasts patches instead of full reload
+///
+/// Falls back to full reload for non-content files (assets).
+fn process_with_vdom_diff(
+    targets: &[PathBuf],
+    config: &SiteConfig,
+    _clean: bool,
+    _status: &mut WatchStatus,
+    rel: &impl Fn(&Path) -> String,
+) -> Result<usize> {
+    use crate::compiler::assets::{process_asset, rebuild_tailwind};
+
+    let mut count = 0;
+    let mut any_content_changed = false;
+
+    for path in targets {
+        if !path.exists() {
+            continue;
+        }
+
+        let ext = path.extension().and_then(|e| e.to_str());
+
+        if ext == Some("typ") {
+            // Content file: use VDOM diff
+            match process_page_for_dev(path, config) {
+                Ok(Some(result)) => {
+                    count += 1;
+                    any_content_changed = true;
+
+                    // Get old VDOM from cache
+                    let old_vdom = VDOM_CACHE.get(path);
+
+                    // Determine if we need reload or can use patches
+                    let needs_reload = if let Some(old) = old_vdom {
+                        // Diff and check if we can patch
+                        let diff_result = diff_indexed_documents(&old, &result.indexed_vdom);
+
+                        // Debug: log diff stats
+                        log!("hotreload"; "diff stats: elems={} text={} kept={} replaced={} text_updates={}",
+                            diff_result.stats.elements_compared,
+                            diff_result.stats.text_nodes_compared,
+                            diff_result.stats.nodes_kept,
+                            diff_result.stats.nodes_replaced,
+                            diff_result.stats.text_updates);
+
+                        if diff_result.should_reload {
+                            log!("hotreload"; "diff exceeded limits: {}", diff_result.reload_reason.unwrap_or_default());
+                            true
+                        } else if diff_result.ops.is_empty() {
+                            // No ops means no changes - don't reload, just skip
+                            log!("hotreload"; "no changes detected for {}", rel(path));
+                            false
+                        } else {
+                            // Broadcast patches - no file write needed!
+                            log!("hotreload"; "patch {} ({} ops): {:?}", rel(path), diff_result.ops.len(), diff_result.ops);
+                            broadcast_patches(&result.url_path, &diff_result.ops);
+                            false
+                        }
+                    } else {
+                        // No cache - first compilation, needs reload
+                        log!("hotreload"; "first compile: {}", rel(path));
+                        true
+                    };
+
+                    // Only write file and reload if patches couldn't be applied
+                    if needs_reload {
+                        // Write HTML file to disk before reload
+                        crate::compiler::pages::write_page_for_dev(&result.page, config)?;
+                        broadcast_reload();
+                    }
+
+                    // Update cache
+                    VDOM_CACHE.insert(path.clone(), result.indexed_vdom);
+                }
+                Ok(None) => {
+                    // Skipped (draft or up-to-date)
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        } else {
+            // Asset file: process normally and reload
+            process_asset(path, config, true, false)?;
+            count += 1;
+            broadcast_reload();
+        }
+    }
+
+    // Rebuild tailwind if enabled
+    if config.build.css.tailwind.enable && any_content_changed {
+        rebuild_tailwind(config, true)?;
+    }
+
+    Ok(count)
+}
+
 /// Helper for full rebuild with status output.
 fn handle_full_rebuild(reason: &str, status: &mut WatchStatus) -> bool {
     use crate::compiler::deps::DEPENDENCY_GRAPH;
 
     DEPENDENCY_GRAPH.write().clear();
+    VDOM_CACHE.clear(); // Clear VDOM cache on full rebuild
 
-    match crate::build::build_site(&cfg(), true) {
+    // Use dev mode build to emit data-tola-id attributes for hot reload
+    match crate::build::build_site_for_dev(&cfg(), true) {
         Ok(_) => {
             status.success(&format!("full rebuild: {reason}"));
+            broadcast_reload();
             true
         }
         Err(e) => {
             status.error(&format!("full rebuild failed: {reason}"), &e.to_string());
             false
+        }
+    }
+}
+
+/// Pre-populate VDOM cache for all content files.
+///
+/// This enables immediate incremental patching on first edit
+/// instead of falling back to full reload.
+fn populate_vdom_cache(config: &SiteConfig) {
+    use crate::compiler::pages::process_page_for_dev;
+
+    // Only populate if VDOM pipeline is enabled
+    if !config.build.typst.use_lib || !config.build.typst.use_vdom {
+        return;
+    }
+
+    let content_files = crate::compiler::collect_all_files(&config.build.content);
+    let typ_files: Vec<_> = content_files
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "typ"))
+        .collect();
+
+    if typ_files.is_empty() {
+        return;
+    }
+
+    log!("vdom"; "populating cache for {} files", typ_files.len());
+
+    for path in typ_files {
+        if let Ok(Some(result)) = process_page_for_dev(&path, config) {
+            VDOM_CACHE.insert(path, result.indexed_vdom);
         }
     }
 }
@@ -483,6 +651,7 @@ pub fn watch_for_changes_blocking() -> Result<()> {
     let mut content_cache = ContentCache::new();
     let mut status = WatchStatus::new();
     content_cache.populate(&c);
+    populate_vdom_cache(&c);
 
     let root = c.get_root().to_path_buf();
 

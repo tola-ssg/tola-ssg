@@ -254,6 +254,13 @@ pub struct TypstConfig {
     #[educe(Default = true)]
     pub use_lib: bool,
 
+    /// Use VDOM pipeline for HTML generation (experimental, enables incremental updates).
+    /// Requires `use_lib = true`. When enabled, uses the TTG (Trees That Grow)
+    /// architecture for type-safe, multi-phase VDOM processing.
+    #[serde(default = "defaults::r#false")]
+    #[educe(Default = false)]
+    pub use_vdom: bool,
+
     /// Typst command and arguments (only used when `use_lib` = false)
     #[serde(default = "defaults::build::typst::command")]
     #[educe(Default = defaults::build::typst::command())]

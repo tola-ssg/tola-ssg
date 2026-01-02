@@ -1,5 +1,5 @@
 #import "/templates/base.typ": base
 #show: base
 
-= Hello World
-This is a test page.
+= Debug Test 2
+Modified content - should show diff stats!

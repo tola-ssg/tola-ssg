@@ -157,6 +157,146 @@ pub fn compile_meta(
 }
 
 // =============================================================================
+// VDOM-Ready API (for future vdom integration)
+// =============================================================================
+
+/// Result of document compilation (without HTML serialization).
+///
+/// Use this with `vdom::from_typst_html()` for the new VDOM pipeline.
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct DocumentResult {
+    /// The compiled HtmlDocument (tree structure, not serialized).
+    pub document: typst_html::HtmlDocument,
+    /// Optional metadata value (None if label not found).
+    pub metadata: Option<serde_json::Value>,
+    /// Files accessed during compilation (for dependency tracking).
+    pub accessed_files: Vec<PathBuf>,
+}
+
+/// Compile a Typst file without HTML serialization.
+///
+/// Returns the `HtmlDocument` tree structure for use with vdom pipeline.
+/// This avoids the overhead of HTML serialization when using VDOM.
+///
+/// # Usage with VDOM
+///
+/// ```ignore
+/// let result = typst_lib::compile_document(path, root, "tola-meta")?;
+/// let raw_doc = vdom::from_typst_html(&result.document);
+/// let html = raw_doc
+///     .pipe(Indexer::new())
+///     .pipe(LinkProcessor::new())
+///     .pipe(HtmlRenderer::new());
+/// ```
+#[allow(dead_code)]
+pub fn compile_document(
+    path: &Path,
+    root: &Path,
+    label_name: &str,
+) -> anyhow::Result<DocumentResult> {
+    let _guard = acquire_test_lock();
+    let (_world, document) = compile_base(path, root)?;
+
+    let accessed_files = collect_accessed_files(root);
+    let metadata = extract_meta(&document, label_name);
+
+    Ok(DocumentResult {
+        document,
+        metadata,
+        accessed_files,
+    })
+}
+
+// =============================================================================
+// VDOM Compilation API
+// =============================================================================
+
+/// Compile a Typst file using the VDOM pipeline.
+///
+/// This uses the new TTG VDOM architecture for HTML generation:
+/// 1. Compile Typst to HtmlDocument
+/// 2. Convert to Raw VDOM (including Frame → SVG conversion)
+/// 3. Transform through Indexer → ProcessFolder pipeline
+/// 4. Render to HTML bytes
+///
+/// Returns `CompileResult` compatible with the existing API.
+pub fn compile_vdom(
+    path: &Path,
+    root: &Path,
+    label_name: &str,
+) -> anyhow::Result<CompileResult> {
+    let _guard = acquire_test_lock();
+    let (_world, document) = compile_base(path, root)?;
+
+    let accessed_files = collect_accessed_files(root);
+
+    // Use VDOM pipeline for HTML generation
+    let (vdom_result, metadata) = crate::vdom::compile_to_html_with_meta(&document, label_name);
+
+    Ok(CompileResult {
+        html: vdom_result.html,
+        metadata,
+        accessed_files,
+    })
+}
+
+/// Compile a Typst file using the VDOM pipeline for development.
+///
+/// Same as `compile_vdom` but emits `data-tola-id` attributes on all elements
+/// for hot reload support. Use this when `tola serve` is running.
+///
+/// Returns `DevCompileResult` which includes the Indexed VDOM for caching.
+/// This allows the initial build to populate the VDOM cache directly,
+/// avoiding the need for a separate `populate_vdom_cache` pass which would
+/// cause StableId mismatch due to different Typst Span values.
+pub fn compile_vdom_for_dev(
+    path: &Path,
+    root: &Path,
+    label_name: &str,
+) -> anyhow::Result<DevCompileResult> {
+    // Delegate to compile_for_dev_with_vdom which already does what we need
+    compile_for_dev_with_vdom(path, root, label_name)
+}
+
+/// Result of dev compilation with VDOM for diffing
+pub struct DevCompileResult {
+    /// Generated HTML bytes
+    pub html: Vec<u8>,
+    /// Indexed VDOM for diff comparison
+    pub indexed_vdom: crate::vdom::Document<crate::vdom::Indexed>,
+    /// Extracted metadata
+    pub metadata: Option<serde_json::Value>,
+    /// Files accessed during compilation
+    pub accessed_files: Vec<std::path::PathBuf>,
+}
+
+/// Compile for development mode with VDOM output.
+///
+/// Returns both HTML and the Indexed VDOM tree for diffing.
+/// Used by watch mode to generate minimal patches instead of full reloads.
+pub fn compile_for_dev_with_vdom(
+    path: &Path,
+    root: &Path,
+    label_name: &str,
+) -> anyhow::Result<DevCompileResult> {
+    let _guard = acquire_test_lock();
+    let (_world, document) = compile_base(path, root)?;
+
+    let accessed_files = collect_accessed_files(root);
+
+    // Use VDOM pipeline that returns both HTML and Indexed tree
+    let vdom_result = crate::vdom::compile_for_dev(&document, label_name);
+
+    Ok(DevCompileResult {
+        html: vdom_result.html,
+        indexed_vdom: vdom_result.indexed,
+        metadata: vdom_result.metadata,
+        accessed_files,
+    })
+}
+
+// =============================================================================
 // Internal Helpers
 // =============================================================================
 

@@ -7,3 +7,8 @@
 /release
 /result
 /example-sites
+__test_site
+/other-projects
+!/other-projects/typst-preview
+!/other-projects/dioxus
+/docs

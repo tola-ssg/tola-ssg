@@ -1,0 +1,273 @@
+//! FamilyExt transformation and accessor macros
+//!
+//! These macros eliminate repetitive match code when working with FamilyExt.
+//! All macros use `paste` internally for identifier concatenation.
+
+// =============================================================================
+// FamilyExt accessor generation macros
+// =============================================================================
+
+/// Generate is_xxx, as_xxx, as_xxx_mut methods for FamilyExt
+///
+/// # Generated methods per variant:
+/// - `is_xxx(&self) -> bool` - type check
+/// - `as_xxx(&self) -> Option<&ElemExt>` - immutable accessor
+/// - `as_xxx_mut(&mut self) -> Option<&mut ElemExt>` - mutable accessor
+#[macro_export]
+macro_rules! impl_family_accessors {
+    ($($variant:ident),* $(,)?) => {
+        ::paste::paste! {
+            $(
+                #[doc = "Check if this is a " $variant " family extension"]
+                pub fn [<is_ $variant:lower>](&self) -> bool {
+                    matches!(self, Self::$variant(_))
+                }
+
+                #[doc = "Get reference to " $variant " extension data"]
+                pub fn [<as_ $variant:lower>](&self) -> Option<&P::ElemExt<[<$variant Family>]>> {
+                    match self { Self::$variant(e) => Some(e), _ => None }
+                }
+
+                #[doc = "Get mutable reference to " $variant " extension data"]
+                pub fn [<as_ $variant:lower _mut>](&mut self) -> Option<&mut P::ElemExt<[<$variant Family>]>> {
+                    match self { Self::$variant(e) => Some(e), _ => None }
+                }
+            )*
+        }
+    };
+}
+
+/// Generate methods that match on all variants and return a value from TagFamily
+///
+/// # Example
+/// ```ignore
+/// impl_family_match!(family_name, NAME, &'static str);
+/// // Expands to: pub fn family_name(&self) -> &'static str { match ... }
+/// ```
+#[macro_export]
+macro_rules! impl_family_match {
+    ($method:ident, $field:ident, $ret:ty, $($variant:ident),* $(,)?) => {
+        ::paste::paste! {
+            pub fn $method(&self) -> $ret {
+                match self {
+                    $(Self::$variant(_) => [<$variant Family>]::$field,)*
+                }
+            }
+        }
+    };
+}
+
+/// Generate method that reads a field from extension data across all variants
+///
+/// # Example
+/// ```ignore
+/// impl_family_field_get!(node_id, NodeId);
+/// // Expands to: pub fn node_id(&self) -> NodeId { match self { ... e.node_id ... } }
+/// ```
+#[macro_export]
+macro_rules! impl_family_field_get {
+    ($method:ident, $field:ident, $ret:ty, $($variant:ident),* $(,)?) => {
+        pub fn $method(&self) -> $ret {
+            match self {
+                $(Self::$variant(e) => e.$field,)*
+            }
+        }
+    };
+}
+
+/// Generate method that sets a field on extension data across all variants
+///
+/// # Example
+/// ```ignore
+/// impl_family_field_set!(set_modified, modified, bool);
+/// ```
+#[macro_export]
+macro_rules! impl_family_field_set {
+    ($method:ident, $field:ident, $ty:ty, $($variant:ident),* $(,)?) => {
+        pub fn $method(&mut self, value: $ty) {
+            match self {
+                $(Self::$variant(e) => e.$field = value,)*
+            }
+        }
+    };
+}
+
+/// Generate is_xxx, as_xxx, as_xxx_mut for enums with typed variants
+///
+/// Uses paste's `:camel` modifier to convert method name to variant name.
+/// # Generated methods per variant:
+/// - `is_xxx(&self) -> bool`
+/// - `as_xxx(&self) -> Option<&Type<P>>`
+/// - `as_xxx_mut(&mut self) -> Option<&mut Type<P>>`
+///
+/// # Example
+/// ```ignore
+/// impl<P> Node<P> {
+///     // element -> Element, text -> Text, frame -> Frame
+///     impl_enum_accessors!(P; element, text, frame);
+/// }
+/// ```
+#[macro_export]
+macro_rules! impl_enum_accessors {
+    ($phase:ty; $($variant:ident),* $(,)?) => {
+        ::paste::paste! {
+            $(
+                #[doc = "Check if this is a " [<$variant:camel>] " node"]
+                pub fn [<is_ $variant>](&self) -> bool {
+                    matches!(self, Self::[<$variant:camel>](_))
+                }
+
+                #[doc = "Try to get as " $variant " reference"]
+                pub fn [<as_ $variant>](&self) -> Option<&[<$variant:camel>]<$phase>> {
+                    match self { Self::[<$variant:camel>](v) => Some(v), _ => None }
+                }
+
+                #[doc = "Try to get as mutable " $variant " reference"]
+                pub fn [<as_ $variant _mut>](&mut self) -> Option<&mut [<$variant:camel>]<$phase>> {
+                    match self { Self::[<$variant:camel>](v) => Some(v), _ => None }
+                }
+            )*
+        }
+    };
+}
+
+/// Map FamilyExt to a new phase while preserving family information
+///
+/// Note: This macro works when all families use the same ElemExt transformation.
+/// For Indexed → Processed cross-phase transformation, use `process_family_ext!` instead.
+///
+/// # Example
+/// ```ignore
+/// // Transform ext within the same phase (e.g., updating node_id)
+/// let new_ext: FamilyExt<Indexed> = map_family_ext!(old_ext, |e| IndexedElemExt {
+///     node_id: new_id,
+///     family_data: e.family_data.clone(),
+/// });
+/// ```
+#[macro_export]
+macro_rules! map_family_ext {
+    ($ext:expr, |$e:pat_param| $new_ext:expr) => {
+        match $ext {
+            $crate::vdom::FamilyExt::Svg($e) => $crate::vdom::FamilyExt::Svg($new_ext),
+            $crate::vdom::FamilyExt::Link($e) => $crate::vdom::FamilyExt::Link($new_ext),
+            $crate::vdom::FamilyExt::Heading($e) => $crate::vdom::FamilyExt::Heading($new_ext),
+            $crate::vdom::FamilyExt::Media($e) => $crate::vdom::FamilyExt::Media($new_ext),
+            $crate::vdom::FamilyExt::Other($e) => $crate::vdom::FamilyExt::Other($new_ext),
+        }
+    };
+}
+
+/// Transform FamilyExt from Indexed → Processed phase
+///
+/// Automatically calls `TagFamily::process()` for each family's data.
+///
+/// # Example
+/// ```ignore
+/// let indexed_ext: FamilyExt<Indexed> = elem.ext;
+/// let processed_ext: FamilyExt<Processed> = process_family_ext!(indexed_ext);
+/// ```
+#[macro_export]
+macro_rules! process_family_ext {
+    ($ext:expr) => {
+        match $ext {
+            $crate::vdom::FamilyExt::Svg(indexed) => {
+                $crate::vdom::FamilyExt::Svg($crate::vdom::ProcessedElemExt {
+                    stable_id: indexed.stable_id,
+                    modified: false,
+                    family_data: <$crate::vdom::SvgFamily as $crate::vdom::TagFamily>::process(
+                        &indexed.family_data,
+                    ),
+                })
+            }
+            $crate::vdom::FamilyExt::Link(indexed) => {
+                $crate::vdom::FamilyExt::Link($crate::vdom::ProcessedElemExt {
+                    stable_id: indexed.stable_id,
+                    modified: false,
+                    family_data: <$crate::vdom::LinkFamily as $crate::vdom::TagFamily>::process(
+                        &indexed.family_data,
+                    ),
+                })
+            }
+            $crate::vdom::FamilyExt::Heading(indexed) => {
+                $crate::vdom::FamilyExt::Heading($crate::vdom::ProcessedElemExt {
+                    stable_id: indexed.stable_id,
+                    modified: false,
+                    family_data: <$crate::vdom::HeadingFamily as $crate::vdom::TagFamily>::process(
+                        &indexed.family_data,
+                    ),
+                })
+            }
+            $crate::vdom::FamilyExt::Media(indexed) => {
+                $crate::vdom::FamilyExt::Media($crate::vdom::ProcessedElemExt {
+                    stable_id: indexed.stable_id,
+                    modified: false,
+                    family_data: <$crate::vdom::MediaFamily as $crate::vdom::TagFamily>::process(
+                        &indexed.family_data,
+                    ),
+                })
+            }
+            $crate::vdom::FamilyExt::Other(indexed) => {
+                $crate::vdom::FamilyExt::Other($crate::vdom::ProcessedElemExt {
+                    stable_id: indexed.stable_id,
+                    modified: false,
+                    family_data: <$crate::vdom::OtherFamily as $crate::vdom::TagFamily>::process(
+                        &indexed.family_data,
+                    ),
+                })
+            }
+        }
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::vdom::id::StableId;
+    use crate::vdom::phase::{Indexed, IndexedElemExt, Processed};
+    use crate::vdom::node::{FamilyExt, NodeId};
+    use crate::vdom::family::{LinkIndexedData, LinkType};
+
+    #[test]
+    fn test_map_family_ext() {
+        let link_ext: FamilyExt<Indexed> = FamilyExt::Link(IndexedElemExt {
+            stable_id: StableId::from_raw(1001),
+            node_id: NodeId(1),
+            family_data: LinkIndexedData {
+                link_type: LinkType::External,
+                original_href: Some("https://example.com".into()),
+            },
+        });
+
+        // Map to update node_id
+        let updated: FamilyExt<Indexed> = map_family_ext!(link_ext, |e| IndexedElemExt {
+            stable_id: e.stable_id,
+            node_id: NodeId(e.node_id.0 + 100),
+            family_data: e.family_data.clone(),
+        });
+
+        assert!(updated.is_link());
+        if let FamilyExt::Link(ext) = updated {
+            assert_eq!(ext.node_id, NodeId(101));
+        }
+    }
+
+    #[test]
+    fn test_process_family_ext() {
+        let indexed_ext: FamilyExt<Indexed> = FamilyExt::Link(IndexedElemExt {
+            stable_id: StableId::from_raw(42),
+            node_id: NodeId(42),
+            family_data: LinkIndexedData {
+                link_type: LinkType::External,
+                original_href: Some("https://example.com".into()),
+            },
+        });
+
+        let processed_ext: FamilyExt<Processed> = process_family_ext!(indexed_ext);
+
+        assert!(processed_ext.is_link());
+        if let FamilyExt::Link(ext) = processed_ext {
+            assert!(!ext.modified);
+            assert!(ext.family_data.is_external);
+            assert_eq!(ext.family_data.resolved_url, Some("https://example.com".into()));
+        }
+    }
+}

@@ -7,5 +7,8 @@ content = "content"
 output = "public"
 assets = "assets"
 
+[build.typst]
+use_vdom = true
+
 [build.css]
 auto_enhance = true

@@ -27,7 +27,7 @@
 //!              (public/ dir)
 //! ```
 
-use crate::{config::{cfg, SiteConfig}, log, watch::watch_for_changes_blocking};
+use crate::{config::{cfg, SiteConfig}, hotreload, log, watch::watch_for_changes_blocking};
 use anyhow::{Context, Result};
 use std::{
     fs,
@@ -50,6 +50,10 @@ const WELCOME_TEMPLATE: &str = include_str!("embed/serve/welcome.html");
 
 /// Try binding to port, retry with incremented port if in use
 const MAX_PORT_RETRIES: u16 = 10;
+
+/// Default WebSocket port for hot reload
+const DEFAULT_WS_PORT: u16 = 35729;
+
 // ============================================================================
 // Server Entry Point
 // ============================================================================
@@ -58,9 +62,10 @@ const MAX_PORT_RETRIES: u16 = 10;
 ///
 /// This function:
 /// 1. Binds to the configured interface and port (with auto-retry on port conflict)
-/// 2. Sets up Ctrl+C handler for graceful shutdown
-/// 3. Spawns file watcher thread (if enabled)
-/// 4. Enters the main request handling loop
+/// 2. Starts WebSocket server for hot reload
+/// 3. Sets up Ctrl+C handler for graceful shutdown
+/// 4. Spawns file watcher thread (if enabled)
+/// 5. Enters the main request handling loop
 ///
 /// The server blocks until Ctrl+C is received.
 pub fn serve_site() -> Result<()> {
@@ -70,6 +75,23 @@ pub fn serve_site() -> Result<()> {
 
     let (server, addr) = try_bind_port(interface, base_port, MAX_PORT_RETRIES)?;
     let server = Arc::new(server);
+
+    // Start WebSocket server for hot reload
+    let ws_port = if c.serve.watch {
+        let ws_server = hotreload::HotReloadServer::new(DEFAULT_WS_PORT);
+        match ws_server.start() {
+            Ok(port) => {
+                log!("hotreload"; "ws://localhost:{}", port);
+                Some(port)
+            }
+            Err(e) => {
+                log!("hotreload"; "failed to start: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     // Set up Ctrl+C handler for graceful shutdown
     let server_for_signal = Arc::clone(&server);
@@ -93,7 +115,7 @@ pub fn serve_site() -> Result<()> {
     // Handle requests in main thread (blocks until Ctrl+C)
     for request in server.incoming_requests() {
         // Re-load config on each request to pick up hot-reloaded changes
-        if let Err(e) = handle_request(request, &cfg()) {
+        if let Err(e) = handle_request(request, &cfg(), ws_port) {
             log!("serve"; "request error: {e}");
         }
     }
@@ -148,7 +170,7 @@ fn try_bind_port(
 /// 2. Directory with index.html → serve index.html
 /// 3. Directory without index.html → generate listing
 /// 4. Nothing found → 404
-fn handle_request(request: Request, config: &SiteConfig) -> Result<()> {
+fn handle_request(request: Request, config: &SiteConfig, ws_port: Option<u16>) -> Result<()> {
     let serve_root = &config.build.output;
     let data_dir_name = config.build.data.to_string_lossy();
 
@@ -165,14 +187,14 @@ fn handle_request(request: Request, config: &SiteConfig) -> Result<()> {
 
     // Try to serve the file directly
     if local_path.is_file() {
-        return serve_file(request, &local_path);
+        return serve_file(request, &local_path, ws_port);
     }
 
     // If it's a directory, try index.html or generate listing
     if local_path.is_dir() {
         let index_path = local_path.join("index.html");
         if index_path.is_file() {
-            return serve_file(request, &index_path);
+            return serve_file(request, &index_path, ws_port);
         }
 
         if let Ok(listing) = generate_directory_listing(&local_path, request_path, &data_dir_name) {
@@ -189,9 +211,21 @@ fn handle_request(request: Request, config: &SiteConfig) -> Result<()> {
 // ============================================================================
 
 /// Serve a file with appropriate content type.
-fn serve_file(request: Request, path: &Path) -> Result<()> {
+/// For HTML files, inject hot reload script if WebSocket port is available.
+fn serve_file(request: Request, path: &Path, ws_port: Option<u16>) -> Result<()> {
     let content = fs::read(path).with_context(|| format!("Failed to read {}", path.display()))?;
     let content_type = guess_content_type(path);
+
+    // Inject hot reload script into HTML files
+    let content = if content_type.starts_with("text/html") {
+        if let Some(port) = ws_port {
+            inject_hot_reload_script(&content, port)
+        } else {
+            content
+        }
+    } else {
+        content
+    };
 
     let response = Response::from_data(content)
         .with_header(Header::from_bytes("Content-Type", content_type).unwrap());
@@ -219,6 +253,30 @@ fn serve_not_found(request: Request) -> Result<()> {
     );
     request.respond(response)?;
     Ok(())
+}
+
+/// Inject hot reload script into HTML content.
+///
+/// Inserts the WebSocket client script before the closing </body> tag,
+/// or at the end of the document if </body> is not found.
+fn inject_hot_reload_script(content: &[u8], ws_port: u16) -> Vec<u8> {
+    let script = hotreload::server::get_client_script(ws_port);
+
+    // Try to find </body> tag (case-insensitive)
+    let html = String::from_utf8_lossy(content);
+
+    // Try to inject before </body>
+    if let Some(pos) = html.to_lowercase().rfind("</body>") {
+        let mut result = html[..pos].to_string();
+        result.push_str(&script);
+        result.push_str(&html[pos..]);
+        result.into_bytes()
+    } else {
+        // No </body> found, append at end
+        let mut result = content.to_vec();
+        result.extend_from_slice(script.as_bytes());
+        result
+    }
 }
 
 // ============================================================================
