@@ -1,22 +1,39 @@
 //! TTG (Trees That Grow) VDOM Core Module
 //!
 //! Multi-phase type-safe architecture based on GATs:
-//! - `family`: TagFamily trait and family definitions
+//!
+//! ## Core Modules
+//! - `phase`: Phase/PhaseData trait and phase definitions (Raw → Indexed → Processed → Rendered)
+//! - `node`: Node/Element/Text/Document types + FamilyExt
+//! - `family`: TagFamily trait (SVG, Link, Heading, Media, Other)
 //! - `attr`: Attribute system (Attrs type alias)
-//! - `phase`: Phase/PhaseData trait and phase definitions
-//! - `node`: Node/Element/Text/Frame/Document types + FamilyExt
-//! - `folder`: Folder trait (low-level phase transformation)
-//! - `transform`: Transform trait + Pipeline (high-level pipeline API)
-//! - `macros`: FamilyExt transformation macros
-//! - `convert`: typst-html → Raw conversion
 //!
-//! # Status
+//! ## Transformation System
+//! - `transform`: `Transform` trait + `Pipeline` (unified API)
+//!   - `Processor`: Indexed → Processed transformation
+//! - `transforms/`: Concrete transform implementations
+//!   - `indexer`: Raw → Indexed (StableId generation, family identification)
+//!   - `render`: Processed → HTML (rendering)
 //!
-//! This module is a complete TTG architecture implementation but is not yet
-//! integrated into the main compilation pipeline. The `convert.rs` module
-//! (TODO) will bridge typst-html output to Raw VDOM.
+//! ## Algorithms
+//! - `diff`: VDOM diff algorithm (generates Patches)
+//! - `lcs`: Longest Common Subsequence (used by diff)
+//! - `id`: StableId (content-hash based identity)
 //!
-//! Until integration is complete, most code is marked `#[allow(dead_code)]`.
+//! ## Conversion
+//! - `convert`: typst-html → Raw VDOM conversion
+//!
+//! # Usage
+//!
+//! ```ignore
+//! use vdom::{Document, Raw, Indexed, Processed, Transform, Processor};
+//! use vdom::transforms::Indexer;
+//!
+//! // Pipeline: Raw → Indexed → Processed → HTML
+//! let indexed = raw_doc.pipe(Indexer::new());
+//! let processed = indexed.pipe(Processor::new());
+//! let html = HtmlRenderer::new().render(processed);
+//! ```
 
 // Allow dead code at module level - this is a standalone design that will be
 // integrated when convert.rs is implemented
@@ -26,7 +43,6 @@ pub mod attr;
 pub mod convert;
 pub mod diff;
 pub mod family;
-pub mod folder;
 pub mod id;
 pub mod lcs;
 #[macro_use]
@@ -36,7 +52,13 @@ pub mod phase;
 pub mod transform;
 pub mod transforms;
 
-// Re-exports for convenience (allow unused until module is integrated)
+// =============================================================================
+// Re-exports for public API
+// =============================================================================
+
+// These exports may appear unused within the crate but are part of the public API
+
+// Family system
 #[allow(unused_imports)]
 pub use family::{
     FamilyKind, HeadingFamily, HeadingIndexedData, HeadingProcessedData, LinkFamily,
@@ -44,23 +66,34 @@ pub use family::{
     MediaProcessedData, MediaType, OtherFamily, SvgFamily, SvgIndexedData, SvgProcessedData,
     TagFamily,
 };
+
+// Transform system (unified API)
 #[allow(unused_imports)]
-pub use folder::{fold, Folder, ProcessFolder, process_family_ext};
+pub use transform::{
+    process_family_ext, IdentityTransform, NodeIdGenerator, Pipeline, Processor, Transform,
+};
+
+// Node types
 #[allow(unused_imports)]
 pub use node::{Document, Element, FamilyExt, HasFamilyData, Node, NodeId, Stats, Text};
+
+// Phase types
 #[allow(unused_imports)]
 pub use phase::{
     Indexed, IndexedDocExt, IndexedElemExt, IndexedTextExt, Phase, PhaseData, Processed,
     ProcessedDocExt, ProcessedElemExt, Raw, RawDocExt, RawElemExt, RawTextExt,
     Rendered, RenderedDocExt,
 };
-#[allow(unused_imports)]
-pub use transform::{IdentityTransform, Pipeline, Transform};
+
+// Conversion
 #[allow(unused_imports)]
 pub use convert::{from_typst_html, from_typst_html_with_meta};
+
+// Identity
 #[allow(unused_imports)]
 pub use id::StableId;
-// Diff algorithm exports
+
+// Diff algorithm
 #[allow(unused_imports)]
 pub use diff::{diff, DiffResult, DiffStats, Patch};
 #[allow(unused_imports)]
@@ -89,7 +122,7 @@ pub struct VdomCompileResult {
 ///
 /// 1. `from_typst_html()` - Convert typst HtmlDocument to Raw VDOM
 /// 2. `Indexer` - Transform Raw → Indexed (assign NodeIds, identify families)
-/// 3. `ProcessFolder` - Transform Indexed → Processed (prepare for rendering)
+/// 3. `Processor` - Transform Indexed → Processed (prepare for rendering)
 /// 4. `HtmlRenderer` - Render Processed → HTML bytes
 ///
 /// # Usage
@@ -107,8 +140,7 @@ pub fn compile_to_html(document: &typst_html::HtmlDocument) -> VdomCompileResult
 
     // Transform through pipeline
     let indexed_doc = Indexer::new().transform(raw_doc);
-    let mut process_folder = ProcessFolder::new();
-    let processed_doc = fold(indexed_doc, &mut process_folder);
+    let processed_doc = Processor::new().transform(indexed_doc);
     let stats = processed_doc.ext.clone();
 
     // Render to HTML
@@ -232,8 +264,7 @@ pub fn compile<D: crate::driver::BuildDriver>(
     };
 
     // Continue pipeline to get HTML
-    let mut process_folder = ProcessFolder::new();
-    let processed_doc = fold(indexed_doc, &mut process_folder);
+    let processed_doc = Processor::new().transform(indexed_doc);
     let stats = processed_doc.ext.clone();
 
     // Render with appropriate config

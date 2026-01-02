@@ -37,4 +37,4 @@ pub use render::HtmlRenderer;
 #[allow(unused_imports)]
 pub use render::HtmlRendererConfig;
 #[allow(unused_imports)]
-pub use super::folder::ProcessFolder;
+pub use super::transform::Processor;

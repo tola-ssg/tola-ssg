@@ -870,7 +870,6 @@ mod tests {
 
         assert!(node.is_element());
         assert!(!node.is_text());
-        assert!(!node.is_frame());
         assert!(node.as_element().is_some());
     }
 

@@ -345,7 +345,7 @@ pub fn collect_metadata_smart<D: crate::driver::BuildDriver + Copy>(
             let uses_virtual_data = result.uses_virtual_data();
 
             // Store indexed_vdom for caller to cache (decouples compiler from hotreload)
-            let indexed_vdom = result.indexed_vdom;
+            let _indexed_vdom = result.indexed_vdom;
 
             // Record dependencies for incremental rebuild
             super::deps::DEPENDENCY_GRAPH
@@ -504,7 +504,7 @@ mod tests {
         let result = compile_meta(&Development, &file_path, &config);
         assert!(result.is_ok(), "compile_meta should succeed: {:?}", result);
 
-        let (html, meta) = result.unwrap();
+        let (html, meta, _indexed_vdom) = result.unwrap();
         assert!(!html.is_empty(), "HTML should not be empty");
         assert!(meta.is_none(), "Metadata should be None when no <tola-meta> label");
     }
@@ -534,7 +534,7 @@ mod tests {
         let result = compile_meta(&Development, &file_path, &config);
         assert!(result.is_ok(), "compile_meta should succeed: {:?}", result);
 
-        let (html, meta) = result.unwrap();
+        let (html, meta, _indexed_vdom) = result.unwrap();
         assert!(!html.is_empty());
         assert!(meta.is_some());
 
@@ -568,7 +568,7 @@ mod tests {
         let result = compile_meta(&Development, &file_path, &config);
         assert!(result.is_ok());
 
-        let (_, meta) = result.unwrap();
+        let (_, meta, _indexed_vdom) = result.unwrap();
         assert!(meta.is_some());
         assert!(is_draft(meta.as_ref()), "Should detect draft: true");
     }
