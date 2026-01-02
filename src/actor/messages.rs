@@ -45,6 +45,12 @@ pub enum CompilerMsg {
 /// Messages sent to the VDOM Actor (the Bridge)
 #[derive(Debug)]
 pub enum VdomMsg {
+    /// Populate cache with initial build results (called once at startup)
+    /// This ensures first file change can diff against cached state.
+    Populate {
+        /// Pre-built VDOM entries: (url_path, vdom)
+        entries: Vec<(String, Document<Indexed>)>,
+    },
     /// Process a compiled VDOM (diff against cache)
     Process {
         /// Source file path

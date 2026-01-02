@@ -53,6 +53,16 @@ impl VdomActor {
     pub async fn run(mut self) {
         while let Some(msg) = self.rx.recv().await {
             match msg {
+                VdomMsg::Populate { entries } => {
+                    // Pre-fill cache with initial build results
+                    let count = entries.len();
+                    let mut cache = self.cache.lock();
+                    for (url_path, vdom) in entries {
+                        cache.insert(url_path, vdom);
+                    }
+                    crate::log!("vdom"; "populated cache with {} entries", count);
+                }
+
                 VdomMsg::Process { path, url_path, vdom } => {
                     self.handle_process(path, url_path, vdom).await;
                 }
