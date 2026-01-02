@@ -108,10 +108,16 @@ impl VdomActor {
     /// Route a diff outcome to WsActor
     async fn route_outcome(&self, url_path: String, outcome: DiffOutcome) {
         match outcome {
-            DiffOutcome::Patches(patches) => {
+            DiffOutcome::Patches(patches, new_vdom) => {
                 let count = patches.len();
                 crate::log!("vdom"; "patch {} ({} ops)", url_path, count);
-                let _ = self.ws_tx.send(WsMsg::Patch { url_path, patches }).await;
+
+                // Send patches to WsActor
+                if self.ws_tx.send(WsMsg::Patch { url_path: url_path.clone(), patches }).await.is_ok() {
+                    // Update cache AFTER successful send
+                    // This keeps cache in sync with what browser should display
+                    self.cache.lock().insert(url_path, new_vdom);
+                }
             }
             DiffOutcome::Initial => {
                 // First compile after server start - cache was empty.

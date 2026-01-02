@@ -14,8 +14,8 @@ pub enum DiffOutcome {
     Initial,
     /// No changes detected
     Unchanged,
-    /// Patches to apply
-    Patches(Vec<Patch>),
+    /// Patches to apply (includes new VDOM for cache update after broadcast)
+    Patches(Vec<Patch>, Document<Indexed>),
     /// Structural change requires full reload
     NeedsReload { reason: String },
 }
@@ -25,35 +25,47 @@ pub enum DiffOutcome {
 /// This function:
 /// 1. Looks up the old VDOM from cache
 /// 2. Computes diff if old exists
-/// 3. Updates cache with new VDOM
-/// 4. Returns appropriate outcome
+/// 3. Returns appropriate outcome (caller updates cache after successful broadcast)
+///
+/// Note: Cache is NOT updated here. Caller must update cache after
+/// successfully sending patches to browser, to keep cache in sync with
+/// what the browser actually displays.
 pub fn compute_diff(
     cache: &mut VdomCache,
     url_path: &str,
     new_vdom: Document<Indexed>,
 ) -> DiffOutcome {
-    let outcome = if let Some(old_vdom) = cache.get(url_path) {
+    crate::log!("diff"; "computing diff for {} (cache size: {})", url_path, cache.len());
+
+    if let Some(old_vdom) = cache.get(url_path) {
+        crate::log!("diff"; "found cached vdom for {}", url_path);
         let diff_result: VdomDiffResult = diff(old_vdom, &new_vdom);
 
         if diff_result.should_reload {
+            // For reload, update cache immediately since browser will refresh
+            cache.insert(url_path.to_string(), new_vdom);
+            crate::log!("diff"; "needs reload: {:?}", diff_result.reload_reason);
             DiffOutcome::NeedsReload {
                 reason: diff_result
                     .reload_reason
                     .unwrap_or_else(|| "complex change".to_string()),
             }
         } else if diff_result.ops.is_empty() {
+            // No changes - update cache (content is same, safe to update)
+            cache.insert(url_path.to_string(), new_vdom);
+            crate::log!("diff"; "unchanged");
             DiffOutcome::Unchanged
         } else {
-            DiffOutcome::Patches(diff_result.ops)
+            // Return patches WITH new_vdom - caller updates cache after broadcast
+            crate::log!("diff"; "patches: {} ops", diff_result.ops.len());
+            DiffOutcome::Patches(diff_result.ops, new_vdom)
         }
     } else {
+        // Initial - update cache since browser will reload
+        crate::log!("diff"; "no cache for {}, inserting initial", url_path);
+        cache.insert(url_path.to_string(), new_vdom);
         DiffOutcome::Initial
-    };
-
-    // Always update cache with new VDOM
-    cache.insert(url_path.to_string(), new_vdom);
-
-    outcome
+    }
 }
 
 /// Compute diff without updating cache (for testing)
@@ -75,7 +87,7 @@ pub fn compute_diff_readonly(
         } else if diff_result.ops.is_empty() {
             DiffOutcome::Unchanged
         } else {
-            DiffOutcome::Patches(diff_result.ops)
+            DiffOutcome::Patches(diff_result.ops, new_vdom.clone())
         }
     } else {
         DiffOutcome::Initial
