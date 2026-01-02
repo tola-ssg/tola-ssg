@@ -59,7 +59,13 @@ impl WsActor {
                 WsMsg::AddClient(stream) => {
                     // Accept WebSocket handshake and add to clients
                     match tungstenite::accept(stream) {
-                        Ok(ws) => {
+                        Ok(mut ws) => {
+                            // Send connected message first
+                            let connected_msg = HotReloadMessage::connected();
+                            if let Err(e) = ws.send(Message::Text(connected_msg.to_json().into())) {
+                                crate::log!("ws"; "failed to send connected message: {}", e);
+                                continue;
+                            }
                             crate::log!("ws"; "client connected (total: {})", self.clients.len() + 1);
                             self.clients.push(ws);
                         }

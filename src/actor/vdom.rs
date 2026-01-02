@@ -114,8 +114,13 @@ impl VdomActor {
                 let _ = self.ws_tx.send(WsMsg::Patch { url_path, patches }).await;
             }
             DiffOutcome::Initial => {
-                crate::log!("vdom"; "initial {} (no diff)", url_path);
-                // First compile - could send full HTML or just skip
+                // First compile after server start - cache was empty.
+                // Browser already has HTML loaded, but we have no old VDOM to diff against.
+                // Trigger reload to ensure browser shows latest content.
+                crate::log!("vdom"; "initial {} (reload)", url_path);
+                let _ = self.ws_tx.send(WsMsg::Reload {
+                    reason: "initial compile".to_string(),
+                }).await;
             }
             DiffOutcome::Unchanged => {
                 crate::log!("vdom"; "unchanged {}", url_path);

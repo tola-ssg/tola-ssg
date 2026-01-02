@@ -63,6 +63,14 @@ fn compile_typst_file(path: &Path, config: &SiteConfig) -> CompileOutcome {
         Ok(Some(page_result)) => {
             let url_path = page_result.url_path;
 
+            // Write HTML to disk (process_page doesn't write)
+            if let Err(e) = crate::compiler::pages::write_page_html(&page_result.page, config) {
+                return CompileOutcome::Error {
+                    path: path.to_path_buf(),
+                    error: format!("failed to write HTML: {}", e),
+                };
+            }
+
             // indexed_vdom is only populated in development mode
             if let Some(vdom) = page_result.indexed_vdom {
                 CompileOutcome::Vdom {

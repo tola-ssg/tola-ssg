@@ -69,32 +69,31 @@ impl FsActor {
 
     /// Run the actor event loop
     pub async fn run(mut self) {
-        loop {
-            tokio::select! {
-                // Check for notify events (via spawn_blocking since it's sync)
-                result = tokio::task::spawn_blocking({
-                    let rx = self.notify_rx.try_recv();
-                    move || rx
-                }) => {
-                    match result {
-                        Ok(Ok(Ok(event))) => {
-                            // Add to debouncer
-                            self.debouncer.add_event(&event);
-                        }
-                        Ok(Ok(Err(e))) => {
-                            crate::log!("watch"; "notify error: {}", e);
-                        }
-                        Ok(Err(std::sync::mpsc::TryRecvError::Empty)) => {
-                            // No events, continue
-                        }
-                        Ok(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
-                            crate::log!("watch"; "watcher disconnected");
-                            break;
-                        }
-                        Err(e) => {
-                            crate::log!("watch"; "spawn_blocking error: {}", e);
+        // Bridge sync notify channel to async via a dedicated thread
+        let notify_rx = self.notify_rx;
+        let (async_tx, mut async_rx) = tokio::sync::mpsc::channel::<notify::Event>(64);
+
+        // Spawn a thread to poll notify events and send to async channel
+        std::thread::spawn(move || {
+            while let Ok(result) = notify_rx.recv() {
+                match result {
+                    Ok(event) => {
+                        if async_tx.blocking_send(event).is_err() {
+                            break; // Receiver dropped
                         }
                     }
+                    Err(e) => {
+                        crate::log!("watch"; "notify error: {}", e);
+                    }
+                }
+            }
+        });
+
+        loop {
+            tokio::select! {
+                // Receive events from async channel
+                Some(event) = async_rx.recv() => {
+                    self.debouncer.add_event(&event);
                 }
 
                 // Check debouncer timeout
