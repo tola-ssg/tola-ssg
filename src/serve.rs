@@ -6,28 +6,25 @@
 //! - Static file serving from the build output directory
 //! - Automatic `index.html` resolution for directories
 //! - Directory listing with a clean HTML interface
-//! - File watching and auto-rebuild (via `watch` module)
+//! - Actor-based file watching and hot reload
 //! - Graceful shutdown on Ctrl+C
 //!
 //! # Architecture
 //!
 //! ```text
-//! ┌─────────────────┐     ┌──────────────────┐
-//! │   Main Thread   │     │  Watcher Thread  │
-//! │  (HTTP Server)  │     │  (File Monitor)  │
-//! └────────┬────────┘     └────────┬─────────┘
-//!          │                       │
-//!          ▼                       ▼
-//!    Handle requests         Detect changes
-//!    Serve files             Trigger rebuild
-//! └─────────────────────────────────────────────┘
-//!                    │
-//!                    ▼
-//!            config.build.output
-//!              (public/ dir)
+//! ┌─────────────────┐     ┌───────────────────────────────────┐
+//! │   Main Thread   │     │         Actor System              │
+//! │  (HTTP Server)  │     │  ┌────────┐  ┌──────┐  ┌──────┐   │
+//! └────────┬────────┘     │  │FsActor │→│Compile│→│ Vdom │   │
+//!          │              │  └────────┘  └──────┘  └──┬───┘   │
+//!          ▼              │                          │       │
+//!    Handle requests      │                     ┌────▼────┐  │
+//!    Serve files          │                     │ WsActor │  │
+//!                         │                     └─────────┘  │
+//!                         └───────────────────────────────────┘
 //! ```
 
-use crate::{config::{cfg, SiteConfig}, hotreload, log, watch::watch_for_changes_blocking};
+use crate::{config::{cfg, SiteConfig}, hotreload, log};
 use anyhow::{Context, Result};
 use std::{
     fs,
@@ -51,79 +48,6 @@ const DEFAULT_WS_PORT: u16 = 35729;
 // ============================================================================
 // Server Entry Point
 // ============================================================================
-
-/// Start the development server with optional file watching.
-///
-/// This function:
-/// 1. Binds to the configured interface and port (with auto-retry on port conflict)
-/// 2. Starts WebSocket server for hot reload
-/// 3. Sets up Ctrl+C handler for graceful shutdown
-/// 4. Spawns file watcher thread (if enabled)
-/// 5. Enters the main request handling loop
-///
-/// The server blocks until Ctrl+C is received.
-pub fn serve_site() -> Result<()> {
-    let c = cfg();
-    let interface: std::net::IpAddr = c.serve.interface.parse()?;
-    let base_port = c.serve.port;
-
-    let (server, addr) = try_bind_port(interface, base_port, MAX_PORT_RETRIES)?;
-    let server = Arc::new(server);
-
-    // Start WebSocket server for hot reload
-    let ws_port = if c.serve.watch {
-        let ws_server = hotreload::HotReloadServer::new(DEFAULT_WS_PORT);
-        match ws_server.start() {
-            Ok(port) => {
-                log!("hotreload"; "ws://localhost:{}", port);
-
-                // Generate hotreload JS file in output directory
-                if let Err(e) = hotreload::server::generate_hotreload_js(&c.build.output, port) {
-                    log!("hotreload"; "failed to generate JS: {}", e);
-                }
-                // Clean up old versions
-                let _ = hotreload::server::cleanup_old_hotreload_js(&c.build.output, port);
-
-                Some(port)
-            }
-            Err(e) => {
-                log!("hotreload"; "failed to start: {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    // Set up Ctrl+C handler for graceful shutdown
-    let server_for_signal = Arc::clone(&server);
-    ctrlc::set_handler(move || {
-        log!("serve"; "shutting down...");
-        server_for_signal.unblock();
-    })
-    .context("Failed to set Ctrl+C handler")?;
-
-    log!("serve"; "http://{}", addr);
-
-    // Spawn file watcher thread
-    if c.serve.watch {
-        std::thread::spawn(move || {
-            if let Err(err) = watch_for_changes_blocking() {
-                log!("watch"; "{err}");
-            }
-        });
-    }
-
-    // Handle requests in main thread (blocks until Ctrl+C)
-    for request in server.incoming_requests() {
-        // Re-load config on each request to pick up hot-reloaded changes
-        if let Err(e) = handle_request(request, &cfg(), ws_port) {
-            log!("serve"; "request error: {e}");
-        }
-    }
-
-    Ok(())
-}
 
 /// Try to bind to a port, retrying with incremented port numbers if in use.
 fn try_bind_port(
@@ -402,20 +326,26 @@ fn generate_directory_listing(dir_path: &PathBuf, request_path: &str, data_dir_n
 }
 
 // ============================================================================
-// Actor-Based Server (Feature: actor)
+// Server Entry Point
 // ============================================================================
 
-/// Start the development server with actor-based hot reload.
+/// Start the development server with actor-based file watching.
 ///
-/// This is an alternative to `serve_site()` that uses the actor model
-/// for file watching and compilation. Enable with `--features actor`.
+/// This function:
+/// 1. Binds to the configured interface and port (with auto-retry on port conflict)
+/// 2. Configures WebSocket for hot reload
+/// 3. Sets up Ctrl+C handler for graceful shutdown
+/// 4. Spawns actor system for file watching and compilation
+/// 5. Enters the main request handling loop
 ///
-/// Benefits over blocking mode:
-/// - Non-blocking compilation (file events buffer while compiling)
-/// - Clean shutdown via message passing
-/// - Better separation of concerns
-#[cfg(feature = "actor")]
-pub fn serve_site_with_actors() -> Result<()> {
+/// Architecture:
+/// - FsActor: Watches file system for changes
+/// - CompilerActor: Rebuilds pages on changes
+/// - VdomActor: Generates hot reload patches
+/// - WsActor: Broadcasts patches to browsers
+///
+/// The server blocks until Ctrl+C is received.
+pub fn serve_site() -> Result<()> {
     use crate::actor::Coordinator;
 
     let c = cfg();
@@ -425,25 +355,16 @@ pub fn serve_site_with_actors() -> Result<()> {
     let (server, addr) = try_bind_port(interface, base_port, MAX_PORT_RETRIES)?;
     let server = Arc::new(server);
 
-    // Start WebSocket server for hot reload
+    // Determine WebSocket port
     let ws_port = if c.serve.watch {
-        let ws_server = hotreload::HotReloadServer::new(DEFAULT_WS_PORT);
-        match ws_server.start() {
-            Ok(port) => {
-                log!("hotreload"; "ws://localhost:{}", port);
-
-                // Generate hotreload JS file in output directory
-                if let Err(e) = hotreload::server::generate_hotreload_js(&c.build.output, port) {
-                    log!("hotreload"; "failed to generate JS: {}", e);
-                }
-                let _ = hotreload::server::cleanup_old_hotreload_js(&c.build.output, port);
-                Some(port)
-            }
-            Err(e) => {
-                log!("hotreload"; "failed to start: {}", e);
-                None
-            }
+        // Generate hotreload JS file in output directory
+        let port = DEFAULT_WS_PORT;
+        if let Err(e) = hotreload::server::generate_hotreload_js(&c.build.output, port) {
+            log!("hotreload"; "failed to generate JS: {}", e);
         }
+        let _ = hotreload::server::cleanup_old_hotreload_js(&c.build.output, port);
+        log!("hotreload"; "ws://localhost:{}", port);
+        Some(port)
     } else {
         None
     };
@@ -456,11 +377,12 @@ pub fn serve_site_with_actors() -> Result<()> {
     })
     .context("Failed to set Ctrl+C handler")?;
 
-    log!("serve"; "http://{} (actor mode)", addr);
+    log!("serve"; "http://{}", addr);
 
     // Spawn actor system in a separate thread with its own tokio runtime
     if c.serve.watch {
         let config = cfg(); // Already Arc<SiteConfig>
+        let actor_ws_port = ws_port; // Copy for move
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
@@ -469,7 +391,10 @@ pub fn serve_site_with_actors() -> Result<()> {
                 .expect("Failed to create tokio runtime");
 
             rt.block_on(async {
-                let coordinator = Coordinator::with_config(config);
+                let mut coordinator = Coordinator::with_config(config);
+                if let Some(port) = actor_ws_port {
+                    coordinator = coordinator.with_ws_port(port);
+                }
                 if let Err(e) = coordinator.run().await {
                     log!("actor"; "error: {}", e);
                 }

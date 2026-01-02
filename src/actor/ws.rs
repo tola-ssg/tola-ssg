@@ -56,8 +56,22 @@ impl WsActor {
                     self.broadcast(Message::Text(hr_msg.to_json().into()));
                 }
 
+                WsMsg::AddClient(stream) => {
+                    // Accept WebSocket handshake and add to clients
+                    match tungstenite::accept(stream) {
+                        Ok(ws) => {
+                            crate::log!("ws"; "client connected (total: {})", self.clients.len() + 1);
+                            self.clients.push(ws);
+                        }
+                        Err(e) => {
+                            crate::log!("ws"; "handshake failed: {}", e);
+                        }
+                    }
+                }
+
                 WsMsg::ClientConnected => {
-                    crate::log!("ws"; "client connected (total: {})", self.clients.len() + 1);
+                    // Legacy notification, just log
+                    crate::log!("ws"; "client notification received");
                 }
 
                 WsMsg::Shutdown => {

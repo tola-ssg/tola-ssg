@@ -45,6 +45,8 @@ const CHANNEL_BUFFER: usize = 32;
 pub struct Coordinator {
     /// Site configuration (shared across actors)
     config: Arc<SiteConfig>,
+    /// WebSocket port for hot reload (None = no WebSocket server)
+    ws_port: Option<u16>,
 }
 
 impl Coordinator {
@@ -52,12 +54,19 @@ impl Coordinator {
     pub fn new(config: SiteConfig) -> Self {
         Self {
             config: Arc::new(config),
+            ws_port: None,
         }
     }
 
     /// Create from an Arc<SiteConfig>
     pub fn with_config(config: Arc<SiteConfig>) -> Self {
-        Self { config }
+        Self { config, ws_port: None }
+    }
+
+    /// Set WebSocket port for hot reload
+    pub fn with_ws_port(mut self, port: u16) -> Self {
+        self.ws_port = Some(port);
+        self
     }
 
     /// Run the actor system
@@ -83,6 +92,20 @@ impl Coordinator {
 
         // VdomActor/CompilerActor → WsActor
         let (ws_tx, ws_rx) = mpsc::channel::<WsMsg>(CHANNEL_BUFFER);
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Step 1.5: Start WebSocket server (sends clients to WsActor)
+        // ═══════════════════════════════════════════════════════════════════
+        if let Some(port) = self.ws_port {
+            match crate::hotreload::server::start_ws_server_with_channel(port, ws_tx.clone()) {
+                Ok(actual_port) => {
+                    crate::log!("actor"; "websocket server on port {}", actual_port);
+                }
+                Err(e) => {
+                    crate::log!("actor"; "failed to start websocket server: {}", e);
+                }
+            }
+        }
 
         // ═══════════════════════════════════════════════════════════════════
         // Step 2: Create actors (each gets its input rx and output tx)
@@ -258,7 +281,7 @@ impl CoordinatorBuilder {
         let config = self.config
             .ok_or_else(|| anyhow::anyhow!("config is required"))?;
 
-        Ok(Coordinator { config })
+        Ok(Coordinator { config, ws_port: None })
     }
 }
 

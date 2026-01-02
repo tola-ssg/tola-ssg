@@ -273,6 +273,56 @@ pub fn cleanup_old_hotreload_js(output_dir: &std::path::Path, ws_port: u16) -> s
     HOTRELOAD_JS.cleanup_old(output_dir, &[TemplateVar::WsPort(ws_port)])
 }
 
+// =============================================================================
+// Actor Mode Support
+// =============================================================================
+
+/// Start WebSocket server that sends clients to an Actor via channel.
+///
+/// This is an alternative to `HotReloadServer::start()` for actor-based systems.
+/// Instead of using the global `BROADCAST`, clients are sent through the channel.
+#[cfg(feature = "actor")]
+pub fn start_ws_server_with_channel(
+    base_port: u16,
+    ws_tx: tokio::sync::mpsc::Sender<crate::actor::messages::WsMsg>,
+) -> anyhow::Result<u16> {
+    use crate::actor::messages::WsMsg;
+
+    let (listener, actual_port) = try_bind_port(base_port, MAX_PORT_RETRIES)?;
+    listener.set_nonblocking(true)?;
+
+    // Spawn acceptor thread
+    std::thread::spawn(move || {
+        loop {
+            match listener.accept() {
+                Ok((stream, addr)) => {
+                    crate::log!("hotreload"; "client connected: {}", addr);
+
+                    // Set blocking for WebSocket operations
+                    let _ = stream.set_nonblocking(false);
+
+                    // Send raw TcpStream to WsActor for handshake
+                    let tx = ws_tx.clone();
+                    if tx.blocking_send(WsMsg::AddClient(stream)).is_err() {
+                        crate::log!("hotreload"; "failed to send client to actor");
+                        break;
+                    }
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    continue;
+                }
+                Err(e) => {
+                    crate::log!("hotreload"; "accept error: {}", e);
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        }
+    });
+
+    Ok(actual_port)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

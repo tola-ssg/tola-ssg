@@ -22,7 +22,6 @@ mod serve;
 mod typst_lib;
 mod utils;
 mod vdom;
-mod watch;
 
 use anyhow::Result;
 use build::build_site;
@@ -34,7 +33,6 @@ use driver::{Development, Production};
 use generator::{rss::build_rss, sitemap::build_sitemap};
 use gix::ThreadSafeRepository;
 use init::new_site;
-use serve::serve_site;
 
 fn main() -> Result<()> {
     let cli: &'static Cli = Box::leak(Box::new(Cli::parse()));
@@ -52,7 +50,7 @@ fn main() -> Result<()> {
             build_all(Development)?;
             // Clear --clean flag so watch mode rebuilds don't clear output
             clear_clean_flag();
-            serve_site()
+            serve::serve_site()
         }
     }
 }

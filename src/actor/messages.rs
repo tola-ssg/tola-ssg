@@ -67,7 +67,6 @@ pub enum VdomMsg {
 // =============================================================================
 
 /// Messages sent to the WebSocket Actor
-#[derive(Debug)]
 pub enum WsMsg {
     /// Send patch operations to all clients for a specific page
     Patch {
@@ -76,7 +75,9 @@ pub enum WsMsg {
     },
     /// Trigger full page reload
     Reload { reason: String },
-    /// A new client has connected
+    /// Add a new WebSocket client connection
+    AddClient(std::net::TcpStream),
+    /// A new client has connected (notification only)
     ClientConnected,
     /// Shutdown the actor
     Shutdown,
