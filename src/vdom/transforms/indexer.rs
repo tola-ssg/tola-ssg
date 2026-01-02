@@ -356,8 +356,8 @@ impl Indexer {
 
     /// Parse width/height attributes
     fn parse_dimensions(&self, attrs: &[(String, String)]) -> Option<(f32, f32)> {
-        let width = get_attr(attrs, "width").and_then(|w| parse_dimension(w));
-        let height = get_attr(attrs, "height").and_then(|h| parse_dimension(h));
+        let width = get_attr(attrs, "width").and_then(parse_dimension);
+        let height = get_attr(attrs, "height").and_then(parse_dimension);
         width.zip(height)
     }
 }

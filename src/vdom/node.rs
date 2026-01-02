@@ -649,10 +649,10 @@ impl<P: PhaseData> Document<P> {
             return Some(elem);
         }
         for child in &elem.children {
-            if let Some(child_elem) = child.as_element() {
-                if let Some(found) = Self::find_in_element(child_elem, predicate) {
-                    return Some(found);
-                }
+            if let Some(child_elem) = child.as_element()
+                && let Some(found) = Self::find_in_element(child_elem, predicate)
+            {
+                return Some(found);
             }
         }
         None
@@ -750,10 +750,10 @@ impl<P: PhaseData> Document<P> {
             return Some(elem);
         }
         for child in &mut elem.children {
-            if let Some(child_elem) = child.as_element_mut() {
-                if let Some(found) = Self::find_in_element_mut(child_elem, predicate) {
-                    return Some(found);
-                }
+            if let Some(child_elem) = child.as_element_mut()
+                && let Some(found) = Self::find_in_element_mut(child_elem, predicate)
+            {
+                return Some(found);
             }
         }
         None

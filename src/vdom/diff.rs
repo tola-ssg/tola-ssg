@@ -668,10 +668,8 @@ impl DiffContext {
 /// Returns `Some(&str)` if children is exactly `[Text(content)]`, `None` otherwise.
 /// Used to optimize single-text-child elements like `<p>Hello</p>`.
 fn get_single_text_child(children: &[Node<Indexed>]) -> Option<&str> {
-    if children.len() == 1 {
-        if let Node::Text(text) = &children[0] {
-            return Some(&text.content);
-        }
+    if children.len() == 1 && let Node::Text(text) = &children[0] {
+        return Some(&text.content);
     }
     None
 }

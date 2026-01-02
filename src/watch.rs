@@ -354,10 +354,10 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
             // but the browser may show a different state (e.g., from page load or previous cascade).
             // Using patch here would cause inconsistency between browser DOM and expected state.
             for path in &virtual_dependents {
-                if let Ok(Some(result)) = process_page(&Development, path, &c) {
-                    if let Err(e) = write_page_html(&result.page, &c) {
-                        log!("error"; "failed to write {}: {}", path.display(), e);
-                    }
+                if let Ok(Some(result)) = process_page(&Development, path, &c)
+                    && let Err(e) = write_page_html(&result.page, &c)
+                {
+                    log!("error"; "failed to write {}: {}", path.display(), e);
                 }
             }
             broadcast_reload();

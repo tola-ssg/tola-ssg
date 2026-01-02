@@ -107,12 +107,14 @@ pub fn hash_bytes(data: &[u8]) -> u64 {
 
 /// Hash a string to u64
 #[inline]
+#[allow(dead_code)]
 pub fn hash_str(s: &str) -> u64 {
     hash_bytes(s.as_bytes())
 }
 
 /// Hash multiple strings together
 #[inline]
+#[allow(dead_code)]
 pub fn hash_strs(strs: &[&str]) -> u64 {
     let mut hasher = StableHasher::new();
     for s in strs {

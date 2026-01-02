@@ -296,12 +296,11 @@ impl SiteConfig {
         }
 
         // Extract path from base.url
-        if let Some(ref url) = self.base.url {
-            if let Some(path) = extract_url_path(url) {
-                if !path.is_empty() {
-                    self.build.path_prefix = PathBuf::from(path);
-                }
-            }
+        if let Some(ref url) = self.base.url
+            && let Some(path) = extract_url_path(url)
+            && !path.is_empty()
+        {
+            self.build.path_prefix = PathBuf::from(path);
         }
     }
 

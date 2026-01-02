@@ -50,6 +50,7 @@ impl FreshnessCache {
     /// Remove a specific path from cache.
     ///
     /// Used when a file is known to have changed (e.g., from file watcher).
+    #[allow(dead_code)]
     pub fn invalidate(&self, path: &Path) {
         if let Ok(canonical) = path.canonicalize() {
             self.hashes.write().remove(&canonical);

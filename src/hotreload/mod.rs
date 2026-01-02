@@ -44,5 +44,6 @@ pub mod server;
 
 // Public API
 pub use cache::VDOM_CACHE;
-pub use message::{HotReloadMessage, PatchOp};
+#[allow(unused_imports)]
+pub use message::HotReloadMessage;
 pub use server::{broadcast_patches, broadcast_reload, HotReloadServer};

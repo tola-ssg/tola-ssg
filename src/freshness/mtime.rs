@@ -47,6 +47,7 @@ pub fn get_mtime(path: &Path) -> Option<SystemTime> {
 ///
 /// Returns `true` if A exists and is newer than B.
 /// Returns `false` if either file doesn't exist or times can't be compared.
+#[allow(dead_code)]
 pub fn is_newer_than(a: &Path, b: &Path) -> bool {
     let (Some(a_time), Some(b_time)) = (get_mtime(a), get_mtime(b)) else {
         return false;

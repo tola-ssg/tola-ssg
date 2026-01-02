@@ -48,11 +48,9 @@ impl AttrsExt for Attrs {
     }
 
     fn remove_attr(&mut self, name: &str) -> Option<String> {
-        if let Some(pos) = self.iter().position(|(k, _)| k == name) {
-            Some(self.remove(pos).1)
-        } else {
-            None
-        }
+        self.iter()
+            .position(|(k, _)| k == name)
+            .map(|pos| self.remove(pos).1)
     }
 }
 

@@ -234,7 +234,7 @@ fn parse_attributes(s: &str) -> Vec<(String, String)> {
             let value = if chars.peek() == Some(&'"') || chars.peek() == Some(&'\'') {
                 let quote = chars.next().unwrap();
                 let mut val = String::new();
-                while let Some(c) = chars.next() {
+                for c in chars.by_ref() {
                     if c == quote {
                         break;
                     }

@@ -79,6 +79,7 @@ pub const ARCH_FINGERPRINT: &str = {
 /// // On Apple Silicon Mac: .cache/index_aarch64_macos.rkyv
 /// // On Linux x64: .cache/index_x86_64_linux.rkyv
 /// ```
+#[allow(dead_code)]
 pub fn cache_path(base: &str, name: &str) -> PathBuf {
     PathBuf::from(base).join(format!("{}_{}.rkyv", name, ARCH_FINGERPRINT))
 }
@@ -87,6 +88,7 @@ pub fn cache_path(base: &str, name: &str) -> PathBuf {
 ///
 /// Returns `true` if the filename contains the current architecture fingerprint.
 /// This is used to determine if a cache file can be safely loaded.
+#[allow(dead_code)]
 pub fn is_cache_valid_for_arch(path: &std::path::Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
@@ -97,6 +99,7 @@ pub fn is_cache_valid_for_arch(path: &std::path::Path) -> bool {
 /// Generate a hash-based cache key from a path
 ///
 /// Uses the path's string representation for consistent hashing.
+#[allow(dead_code)]
 pub fn path_to_cache_hash(path: &std::path::Path) -> u64 {
     // Use our deterministic hash module
     crate::utils::hash::compute(path.to_string_lossy().as_bytes())

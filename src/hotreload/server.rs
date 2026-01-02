@@ -54,9 +54,15 @@ pub fn broadcast_patches(path: &str, patches: &[crate::vdom::diff::Patch]) {
 // Broadcaster
 // =============================================================================
 
+/// Type alias for the WebSocket stream
+type WsStream = WebSocket<TcpStream>;
+
+/// Type alias for a shared client connection that can be optionally valid
+type SharedClient = Arc<Mutex<Option<WsStream>>>;
+
 /// Thread-safe message broadcaster
 struct Broadcaster {
-    clients: Mutex<Vec<Arc<Mutex<Option<WebSocket<TcpStream>>>>>>,
+    clients: Mutex<Vec<SharedClient>>,
 }
 
 impl Broadcaster {

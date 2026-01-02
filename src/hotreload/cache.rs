@@ -40,6 +40,7 @@ impl VdomCache {
     }
 
     /// Remove a VDOM from the cache
+    #[allow(dead_code)]
     pub fn remove(&self, path: &Path) -> Option<Document<Indexed>> {
         self.inner.write().remove(path)
     }

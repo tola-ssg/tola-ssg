@@ -62,9 +62,11 @@ mod world;
 
 use std::path::{Path, PathBuf};
 
+#[allow(unused_imports)]
 use typst::foundations::{Label, Selector, Value};
 use typst::introspection::MetadataElem;
 use typst::utils::PicoStr;
+#[allow(unused_imports)]
 use typst::Document;
 
 pub use file::clear_file_cache;
@@ -76,6 +78,7 @@ pub use world::SystemWorld;
 
 /// Compilation result containing HTML output and optional metadata.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct CompileResult {
     /// The compiled HTML content as bytes.
     pub html: Vec<u8>,
@@ -86,6 +89,7 @@ pub struct CompileResult {
     pub accessed_files: Vec<PathBuf>,
 }
 
+#[allow(dead_code)]
 impl CompileResult {
     /// Check if this compilation accessed any virtual data files.
     ///
@@ -166,6 +170,7 @@ pub fn warmup_with_font_dirs(font_dirs: &[&Path]) {
 /// * `path` - Path to the `.typ` file to compile
 /// * `root` - Project root directory for resolving imports
 /// * `label_name` - The label to query for metadata (e.g., "tola-meta")
+#[allow(dead_code)]
 pub fn compile_meta(
     path: &Path,
     root: &Path,
@@ -328,6 +333,7 @@ pub fn compile_vdom<D: crate::driver::BuildDriver>(
 /// Result of dev compilation with VDOM for diffing
 ///
 /// Deprecated: Use `VdomResult` instead.
+#[allow(dead_code)]
 pub struct DevCompileResult {
     /// Generated HTML bytes
     pub html: Vec<u8>,
@@ -342,6 +348,7 @@ pub struct DevCompileResult {
 /// Deprecated: Use `compile_vdom(&Development, ...)` instead.
 #[deprecated(since = "0.7.0", note = "Use `compile_vdom(&Development, ...)` instead")]
 #[allow(deprecated)]
+#[allow(dead_code)]
 pub fn compile_vdom_for_dev(
     path: &Path,
     root: &Path,
@@ -358,6 +365,7 @@ pub fn compile_vdom_for_dev(
 
 /// Deprecated: Use `compile_vdom(&Development, ...)` instead.
 #[deprecated(since = "0.7.0", note = "Use `compile_vdom(&Development, ...)` instead")]
+#[allow(dead_code)]
 pub fn compile_vdom_with_cache(
     path: &Path,
     root: &Path,
@@ -369,6 +377,7 @@ pub fn compile_vdom_with_cache(
 
 /// Deprecated: Use `compile_vdom(&Development, ...)` instead.
 #[deprecated(since = "0.7.0", note = "Use `compile_vdom(&Development, ...)` instead")]
+#[allow(dead_code)]
 pub fn compile_for_dev_with_vdom(
     path: &Path,
     root: &Path,

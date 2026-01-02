@@ -25,7 +25,7 @@
 //! - Occurrence-based: IDs unchanged → Move × 3 (preserves CSS transitions!)
 
 use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 // =============================================================================
 // StableId
@@ -70,7 +70,7 @@ impl StableId {
     /// Returns lowercase hex representation (no leading `#`) for
     /// compactness and CSS attribute selector compatibility.
     #[inline]
-    pub fn to_attr_value(&self) -> String {
+    pub fn to_attr_value(self) -> String {
         format!("{:x}", self.as_raw())
     }
 

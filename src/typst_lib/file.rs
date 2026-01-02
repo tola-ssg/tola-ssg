@@ -22,7 +22,7 @@
 use std::fs;
 use std::io::{self, Read};
 use std::mem;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::LazyLock;
 use std::cell::RefCell;
 

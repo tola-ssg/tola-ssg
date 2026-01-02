@@ -112,7 +112,7 @@ impl HtmlRenderer {
                 tag: String::from("__rendered__"),
                 attrs: vec![],
                 children: smallvec::smallvec![],
-                ext: crate::vdom::node::FamilyExt::Other(Default::default()),
+                ext: crate::vdom::node::FamilyExt::Other(()),
             },
             ext: crate::vdom::phase::RenderedDocExt {
                 html,
