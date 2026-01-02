@@ -13,11 +13,12 @@
 
 ---
 
-# Part I: System Architecture (The Actor Model) 📋 **PLANNED**
+# Part I: System Architecture (The Actor Model) � **WIP**
 
 > [!NOTE]
-> Actor 模块代码位于 `src/actor/`，但需要 `actor` feature flag 启用。
-> 当前主流程 (`watch.rs`) 仍使用直接函数调用，未采用消息传递。
+> Actor 模块代码位于 `src/actor/`，需要 `actor` feature flag 启用。
+> 业务逻辑已提取到 `src/pipeline/` 模块，Actor 只是薄包装。
+> 当前主流程 (`watch.rs`) 仍使用直接函数调用，可复用 pipeline 逻辑。
 
 ## 1. 核心理念 (Core Philosophy)
 *   **No Shared State**: 模块之间不共享 Mutex/Arc，只通过 Channel 通信。
@@ -102,30 +103,34 @@ graph TD
 > - `ProcessFolder` 保留实现，但移入 `transform.rs`
 > - 对外只暴露 `Transform` trait 和 `doc.pipe()` API
 
-### 3.2 `crate::actor::compiler` 📋 **PLANNED**
-*   **职责**: 封装 Typst Universe。
-*   **Input**: `PathBuf` (Changed file)
-*   **Output**: `Vec<u8>` (PDF), `PagedDocument` (Typst DOM)
-*   **State**: 持有 `typst::World` 实例，负责增量编译缓存。
+### 3.2 `crate::pipeline` (Business Logic) ✅ **DONE**
+**热重载业务逻辑**。与 Actor 并发层分离，可被 `watch.rs` 和 `actor/` 共享。
+*   **`cache.rs`**: `VdomCache` - VDOM 缓存管理 ✅
+*   **`compile.rs`**: `compile_page()` → `CompileOutcome` ✅
+*   **`diff.rs`**: `compute_diff()` → `DiffOutcome` ✅
 
-> **Current Reality**: 编译逻辑在 `src/typst_lib/` 和 `src/compiler/`，直接调用。
+> [!TIP]
+> **设计原则**: `actor/` = "何时/如何运行", `pipeline/` = "做什么"
 
-### 3.3 `crate::actor::vdom` (The Bridge) 📋 **PLANNED**
-*   **职责**: 将 Typst DOM 转换为 Tola VDOM，并在 Actor 内部封装 **TTG/GATs** 的类型复杂度。
+### 3.3 `crate::actor::compiler` ✅ **DONE**
+*   **职责**: 薄包装，调用 `pipeline::compile_page()`。
+*   **Input**: `CompilerMsg::Compile(Vec<PathBuf>)`
+*   **Output**: `CompileOutcome` → 路由到 VdomActor 或 WsActor
+*   **实现**: ~130 行，纯并发逻辑
+
+### 3.4 `crate::actor::vdom` (The Bridge) ✅ **DONE**
+*   **职责**: 薄包装，调用 `pipeline::compute_diff()`，管理 `VdomCache`。
 *   **Action**:
-    1. Konvertieren (Typst -> Raw VDOM)
-    2. Pipeline (Index -> **Slugify IDs** -> Process -> Render)
-    3. **Diff**: 维护上一帧状态，计算 Patch。
-    4. **Generate**: 调用 XML Generators 生成 RSS/Sitemap VDOM (当 Meta 变动时)。
-*   **Output**: `DiffResult` (包含 Patches)
+    1. 接收 `VdomMsg::Process` 消息
+    2. 调用 `pipeline::compute_diff()` 计算 Patch
+    3. 发送 `DiffOutcome` 给 WsActor
+*   **Output**: `DiffOutcome` (Initial, Unchanged, Patches, NeedsReload)
+*   **实现**: ~130 行，`VdomCache` 作为 Actor 内部状态
 
-> **Current Reality**: VDOM 转换集成在 `src/vdom/mod.rs` (`compile_for_dev`)，缓存在全局 `VDOM_CACHE`。
-
-### 3.4 `crate::actor::hotreload` 📋 **PLANNED**
+### 3.5 `crate::actor::ws` (Broadcaster) ✅ **DONE**
 *   **职责**: 纯粹的 WebSocket 广播器。
-*   **Action**: 接收 `Broadcast(PatchOps)` -> 序列化 -> 发送。
-
-> **Current Reality**: WebSocket 逻辑在 `src/hotreload/server.rs`，通过静态函数调用。
+*   **Action**: 接收 `WsMsg::Patch/Reload` → 广播给所有客户端。
+*   **实现**: 在 `src/actor/ws.rs`，接收消息并广播
 
 
 ### 3.5 Actor Type Safety (Typestates) ❌ **RECONSIDERING**

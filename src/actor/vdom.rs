@@ -108,7 +108,7 @@ impl VdomActor {
     /// Route a diff outcome to WsActor
     async fn route_outcome(&self, url_path: String, outcome: DiffOutcome) {
         match outcome {
-            DiffOutcome::Patches { patches } => {
+            DiffOutcome::Patches(patches) => {
                 let count = patches.len();
                 crate::log!("vdom"; "patch {} ({} ops)", url_path, count);
                 let _ = self.ws_tx.send(WsMsg::Patch { url_path, patches }).await;

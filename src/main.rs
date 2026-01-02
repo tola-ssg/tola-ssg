@@ -16,6 +16,8 @@ mod generator;
 mod hotreload;
 mod init;
 mod logger;
+#[cfg(feature = "actor")]
+mod pipeline;
 mod serve;
 mod typst_lib;
 mod utils;
