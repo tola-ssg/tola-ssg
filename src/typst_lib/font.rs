@@ -36,7 +36,7 @@
 //! }
 //! ```
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use typst::text::FontBook;
@@ -50,6 +50,17 @@ use typst_kit::fonts::Fonts;
 /// subsequent compilations.
 static GLOBAL_FONTS: OnceLock<(Fonts, LazyHash<FontBook>)> = OnceLock::new();
 
+/// Sorting key for deterministic font ordering.
+///
+/// `fontdb` uses `std::fs::read_dir()` which does not guarantee order,
+/// causing non-deterministic font indices across process runs.
+/// This key ensures fonts are always ordered the same way.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct FontSortKey {
+    path: Option<PathBuf>,
+    index: u32,
+}
+
 /// Initialize fonts with custom font paths.
 ///
 /// # Arguments
@@ -61,15 +72,80 @@ static GLOBAL_FONTS: OnceLock<(Fonts, LazyHash<FontBook>)> = OnceLock::new();
 /// A tuple of:
 /// - `Fonts`: The font collection with lazy-loaded font data
 /// - `LazyHash<FontBook>`: The font book index wrapped for comemo caching
+///
+/// # Determinism
+///
+/// Fonts are sorted by (path, index) to ensure deterministic ordering
+/// across different process runs. This is necessary because `fontdb`
+/// uses `read_dir()` which has filesystem-dependent ordering.
 fn init_fonts(font_paths: &[&Path]) -> (Fonts, LazyHash<FontBook>) {
     let mut searcher = Fonts::searcher();
     // Include system fonts (platform-specific locations)
     searcher.include_system_fonts(true);
     // Search custom paths and system fonts
-    let fonts = searcher.search_with(font_paths);
+    let mut fonts = searcher.search_with(font_paths);
+
+    // Sort fonts for deterministic ordering
+    let sorted_fonts = sort_fonts_deterministically(fonts);
+    fonts = sorted_fonts;
+
     // Wrap font book in LazyHash for comemo caching
     let book = LazyHash::new(fonts.book.clone());
     (fonts, book)
+}
+
+/// Sort fonts by (path, index) to ensure deterministic ordering.
+///
+/// This fixes non-determinism caused by `fontdb` using `read_dir()`.
+fn sort_fonts_deterministically(fonts: Fonts) -> Fonts {
+    let n = fonts.fonts.len();
+    if n == 0 {
+        return fonts;
+    }
+
+    // Create (original_index, sort_key) pairs
+    let mut indices: Vec<(usize, FontSortKey)> = fonts
+        .fonts
+        .iter()
+        .enumerate()
+        .map(|(i, slot)| {
+            (
+                i,
+                FontSortKey {
+                    path: slot.path().map(|p| p.to_path_buf()),
+                    index: slot.index(),
+                },
+            )
+        })
+        .collect();
+
+    // Sort by (path, index)
+    indices.sort_by(|a, b| a.1.cmp(&b.1));
+
+    // Collect FontInfo in sorted order
+    let sorted_infos: Vec<_> = indices
+        .iter()
+        .filter_map(|(old_idx, _)| fonts.book.info(*old_idx).cloned())
+        .collect();
+
+    // Rebuild FontBook from sorted infos
+    let new_book = FontBook::from_infos(sorted_infos);
+
+    // Reorder fonts Vec to match
+    // We need to move FontSlots, but they're not Clone.
+    // Use a permutation approach with Option<FontSlot>
+    let mut old_fonts: Vec<Option<_>> = fonts.fonts.into_iter().map(Some).collect();
+    let mut new_fonts = Vec::with_capacity(n);
+    for (old_idx, _) in indices {
+        if let Some(slot) = old_fonts[old_idx].take() {
+            new_fonts.push(slot);
+        }
+    }
+
+    Fonts {
+        book: new_book,
+        fonts: new_fonts,
+    }
 }
 
 /// Get or initialize global fonts.
