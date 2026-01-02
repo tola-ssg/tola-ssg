@@ -77,7 +77,9 @@ pub fn build_site<D: BuildDriver + Copy>(
     // Ensure output directory has git repo (for deploy)
     let repo = ensure_output_repo(output, config.build.clean)?;
 
-    // Clear freshness cache at start of build for accurate detection
+    // Clear all caches at start of build for accurate detection
+    // This ensures template/show-rule changes are picked up even without --clean
+    typst_lib::clear_file_cache();
     freshness::clear_cache();
 
     // Calculate deps hash once for all content files (blake3-based)
