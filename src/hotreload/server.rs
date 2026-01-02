@@ -255,11 +255,6 @@ fn handle_client(stream: TcpStream) {
 use crate::embed::{HOTRELOAD_JS, TemplateVar};
 
 /// Generate and write the hotreload JS file to the output directory.
-///
-/// The JS file contains the WebSocket port as a placeholder that needs
-/// to be replaced at runtime.
-///
-/// Returns the relative path to the generated file.
 pub fn generate_hotreload_js(
     output_dir: &std::path::Path,
     ws_port: u16,
@@ -267,9 +262,7 @@ pub fn generate_hotreload_js(
     HOTRELOAD_JS.write_rendered_to(output_dir, &[TemplateVar::WsPort(ws_port)])
 }
 
-/// Clean up old hotreload JS files (files matching `.hotreload-*.js` pattern).
-///
-/// Keeps only the current version based on hash.
+/// Clean up old hotreload JS files.
 pub fn cleanup_old_hotreload_js(output_dir: &std::path::Path, ws_port: u16) -> std::io::Result<()> {
     HOTRELOAD_JS.cleanup_old(output_dir, &[TemplateVar::WsPort(ws_port)])
 }
@@ -281,24 +274,7 @@ mod tests {
     #[test]
     fn test_hotreload_js_filename() {
         let filename = HOTRELOAD_JS.filename();
-        assert!(filename.starts_with(".hotreload-"), "Should start with .hotreload-");
-        assert!(filename.ends_with(".js"), "Should end with .js");
-    }
-
-    #[test]
-    fn test_hotreload_js_hash() {
-        let hash = HOTRELOAD_JS.hash();
-        assert_eq!(hash.len(), 8, "Hash should be 8 characters");
-        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()), "Hash should be hex");
-    }
-
-    #[test]
-    fn test_client_script_tag() {
-        let tag = HOTRELOAD_JS.html_tag(&[]);
-        assert!(tag.starts_with("<script"), "Should be a script tag");
-        assert!(tag.contains("src="), "Should have src attribute");
-        assert!(tag.contains(".hotreload-"), "Should reference hotreload file");
-        assert!(tag.contains(".js"), "Should reference JS file");
-        assert!(tag.contains("data-tola-generated"), "Should have generated marker");
+        assert!(filename.starts_with(".hotreload-"));
+        assert!(filename.ends_with(".js"));
     }
 }

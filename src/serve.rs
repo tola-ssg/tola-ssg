@@ -81,7 +81,7 @@ pub fn serve_site() -> Result<()> {
                 if let Err(e) = hotreload::server::generate_hotreload_js(&c.build.output, port) {
                     log!("hotreload"; "failed to generate JS: {}", e);
                 }
-                // Clean up old versions (pass port for correct filename matching)
+                // Clean up old versions
                 let _ = hotreload::server::cleanup_old_hotreload_js(&c.build.output, port);
 
                 Some(port)
@@ -263,7 +263,7 @@ fn serve_not_found(request: Request) -> Result<()> {
 /// or at the end of the document if </body> is not found.
 fn inject_hot_reload_script(content: &[u8], ws_port: u16) -> Vec<u8> {
     use crate::embed::{HOTRELOAD_JS, TemplateVar};
-    let script = HOTRELOAD_JS.html_tag(&[TemplateVar::WsPort(ws_port)]);
+    let script = HOTRELOAD_JS.external(&[TemplateVar::WsPort(ws_port)]);
 
     // Try to find </body> tag (case-insensitive)
     let html = String::from_utf8_lossy(content);

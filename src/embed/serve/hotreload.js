@@ -66,6 +66,9 @@
           location.reload();
           break;
         case 'patch':
+          // StableIds are globally unique (include page path hash), so we can
+          // safely apply all patches - only matching elements will be affected.
+          // This naturally supports htmx/dynamic content loading.
           this.applyPatches(msg.ops);
           break;
         case 'connected':

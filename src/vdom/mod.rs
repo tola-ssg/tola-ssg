@@ -124,7 +124,7 @@ pub fn compile_to_html_with_meta(
     document: &typst_html::HtmlDocument,
     label_name: &str,
 ) -> (VdomCompileResult, Option<serde_json::Value>) {
-    let result = compile(document, label_name, &crate::driver::Production);
+    let result = compile(document, label_name, &crate::driver::Production, None);
     (VdomCompileResult { html: result.html, stats: result.stats }, result.metadata)
 }
 
@@ -132,11 +132,12 @@ pub fn compile_to_html_with_meta(
 ///
 /// Emits `data-tola-id` attributes on all elements for VDOM diffing.
 #[deprecated(since = "0.7.0", note = "Use `compile` with Development driver")]
+#[allow(deprecated)]
 pub fn compile_to_html_for_dev(
     document: &typst_html::HtmlDocument,
     label_name: &str,
 ) -> (VdomCompileResult, Option<serde_json::Value>) {
-    let result = compile(document, label_name, &crate::driver::Development);
+    let result = compile(document, label_name, &crate::driver::Development, None);
     (VdomCompileResult { html: result.html, stats: result.stats }, result.metadata)
 }
 
@@ -144,12 +145,13 @@ pub fn compile_to_html_for_dev(
 ///
 /// Deprecated: Use `compile` instead.
 #[deprecated(since = "0.7.0", note = "Use `compile` instead")]
+#[allow(deprecated)]
 pub fn compile_to_html_with_driver<D: crate::driver::BuildDriver>(
     document: &typst_html::HtmlDocument,
     label_name: &str,
     driver: &D,
 ) -> (VdomCompileResult, Option<serde_json::Value>) {
-    let result = compile(document, label_name, driver);
+    let result = compile(document, label_name, driver, None);
     (VdomCompileResult { html: result.html, stats: result.stats }, result.metadata)
 }
 
@@ -183,17 +185,18 @@ pub struct CompileOutput {
 ///
 /// ```ignore
 /// // Production build
-/// let result = vdom::compile(&document, "tola-meta", &Production);
+/// let result = vdom::compile(&document, "tola-meta", &Production, None);
 /// assert!(result.indexed.is_none()); // No VDOM cache needed
 ///
 /// // Development build (hot reload)
-/// let result = vdom::compile(&document, "tola-meta", &Development);
+/// let result = vdom::compile(&document, "tola-meta", &Development, Some("/blog/post.html"));
 /// cache.insert(path, result.indexed.unwrap()); // Cache for diffing
 /// ```
 pub fn compile<D: crate::driver::BuildDriver>(
     document: &typst_html::HtmlDocument,
     label_name: &str,
     driver: &D,
+    page_path: Option<&str>,
 ) -> CompileOutput {
     use transform::Transform;
     use typst::foundations::{Label, Selector};
@@ -213,7 +216,13 @@ pub fn compile<D: crate::driver::BuildDriver>(
     let raw_doc = from_typst_html(document);
 
     // Transform to Indexed
-    let indexed_doc = Indexer::new().transform(raw_doc);
+    // When page_path is provided, StableIds become globally unique across pages
+    let indexer = if let Some(path) = page_path {
+        Indexer::new().with_page_seed(path)
+    } else {
+        Indexer::new()
+    };
+    let indexed_doc = indexer.transform(raw_doc);
 
     // Optionally cache for hot reload
     let indexed_for_cache = if driver.cache_vdom() {
@@ -266,11 +275,12 @@ pub struct VdomDevResult {
 ///
 /// Deprecated: Use `compile` with Development driver instead.
 #[deprecated(since = "0.7.0", note = "Use `compile` with Development driver instead")]
+#[allow(deprecated)]
 pub fn compile_with_vdom_cache(
     document: &typst_html::HtmlDocument,
     label_name: &str,
 ) -> VdomDevResult {
-    let result = compile(document, label_name, &crate::driver::Development);
+    let result = compile(document, label_name, &crate::driver::Development, None);
     VdomDevResult {
         html: result.html,
         indexed: result.indexed.expect("Development driver should cache VDOM"),

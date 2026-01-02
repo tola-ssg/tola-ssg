@@ -633,7 +633,7 @@ mod tests {
         assert_eq!(highlighted, "test");
         assert_eq!(after, "");
 
-        // Test with Unicode: "你好世界", cols 0-2 -> "" + "你好" + "世界"
+        // Test with Unicode: "你好世界" (Hello World), cols 0-2 -> "" + "你好" + "世界"
         let (before, highlighted, after) = split_line("你好世界", 0, 2);
         assert_eq!(before, "");
         assert_eq!(highlighted, "你好");

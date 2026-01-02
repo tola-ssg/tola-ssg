@@ -47,6 +47,10 @@ use crate::vdom::transform::Transform;
 pub struct Indexer {
     /// Next available node ID
     next_id: u32,
+    /// Page-specific seed for globally unique StableIds
+    /// When set, all StableIds will include this seed, making them
+    /// unique across different pages.
+    page_seed: u64,
     /// Collected SVG node IDs
     svg_nodes: Vec<NodeId>,
     /// Collected link node IDs
@@ -70,6 +74,7 @@ impl Indexer {
     pub fn new() -> Self {
         Self {
             next_id: 0,
+            page_seed: 0,
             svg_nodes: Vec::new(),
             link_nodes: Vec::new(),
             heading_nodes: Vec::new(),
@@ -81,6 +86,27 @@ impl Indexer {
         }
     }
 
+    /// Set page-specific seed for globally unique StableIds.
+    ///
+    /// When building for hot reload, pass the page's URL path to ensure
+    /// StableIds are unique across different pages. This allows the browser
+    /// to safely ignore patches for elements that don't exist in current DOM.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let indexed = Indexer::new()
+    ///     .with_page_seed("/blog/post.html")
+    ///     .transform(raw_doc);
+    /// ```
+    pub fn with_page_seed(mut self, page_path: &str) -> Self {
+        use crate::utils::hash::StableHasher;
+        self.page_seed = StableHasher::new()
+            .update_str("__page__")
+            .update_str(page_path)
+            .finish();
+        self
+    }
+
     /// Generate next NodeId
     fn next_node_id(&mut self) -> NodeId {
         let id = NodeId::new(self.next_id);
@@ -90,7 +116,8 @@ impl Indexer {
 
     /// Index a document
     fn index_document(&mut self, doc: Document<Raw>) -> Document<Indexed> {
-        let root = self.index_element(doc.root, 0, 0); // Root is at position 0, seed 0
+        // Use page_seed as root seed - makes all StableIds globally unique
+        let root = self.index_element(doc.root, 0, self.page_seed);
         let node_count = self.next_id;
 
         Document {

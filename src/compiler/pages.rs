@@ -100,8 +100,17 @@ pub fn process_page<D: crate::driver::BuildDriver>(
 ) -> Result<Option<PageResult>> {
     let mut page = PageMeta::from_paths(path.to_path_buf(), config)?;
 
-    // Compile with driver
-    let result = typst_lib::compile_vdom(driver, path, config.get_root(), TOLA_META_LABEL)?;
+    // Get url_path first for globally unique StableIds
+    let url_path = page.paths.url_path.clone();
+
+    // Compile with driver, passing url_path for unique StableIds
+    let result = typst_lib::compile_vdom(
+        driver,
+        path,
+        config.get_root(),
+        TOLA_META_LABEL,
+        Some(&url_path),
+    )?;
 
     // Extract metadata
     let content_meta: Option<ContentMeta> = result
@@ -120,7 +129,6 @@ pub fn process_page<D: crate::driver::BuildDriver>(
 
     page.content_meta = content_meta;
     page.compiled_html = Some(result.html);
-    let url_path = page.paths.url_path.clone();
 
     // Collect warnings after all other uses of result (to avoid partial move)
     if let Some(warnings) = result.warnings {
@@ -221,7 +229,9 @@ pub fn compile_meta<D: crate::driver::BuildDriver>(
     let root = config.get_root();
 
     // Use unified compile_vdom with driver
-    let result = typst_lib::compile_vdom(driver, path, root, TOLA_META_LABEL)?;
+    // Pass None for url_path - compile_meta is typically used for production
+    // where globally unique StableIds aren't needed
+    let result = typst_lib::compile_vdom(driver, path, root, TOLA_META_LABEL, None)?;
 
     let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
 
@@ -308,9 +318,18 @@ pub fn collect_metadata_smart<D: crate::driver::BuildDriver + Copy>(
         .map(|path| {
             let page = PageMeta::from_paths(path.clone(), config)?;
 
+            // Get url_path for globally unique StableIds
+            let url_path = page.paths.url_path.clone();
+
             // Compile to extract metadata
             let root = config.get_root();
-            let result = typst_lib::compile_vdom(&driver, path, root, TOLA_META_LABEL)?;
+            let result = typst_lib::compile_vdom(
+                &driver,
+                path,
+                root,
+                TOLA_META_LABEL,
+                Some(&url_path),
+            )?;
 
             // Cache indexed VDOM for hot reload (Development mode only)
             // This ensures the cache matches the HTML written to disk

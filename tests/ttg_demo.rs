@@ -2345,7 +2345,7 @@ mod tests {
             family_data: old.family_data.clone(),
         });
 
-        // 验证族信息被保留
+        // Verify family info is preserved
         assert!(cloned_ext.is_link(), "Family should be preserved as Link");
         assert!(!cloned_ext.is_svg(), "Should not become Svg");
         assert_eq!(cloned_ext.family_name(), "link");

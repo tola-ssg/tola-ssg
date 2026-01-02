@@ -289,11 +289,11 @@ impl VdomResult {
 ///
 /// ```ignore
 /// // Production build
-/// let result = compile_vdom(&Production, path, root, "tola-meta")?;
+/// let result = compile_vdom(&Production, path, root, "tola-meta", None)?;
 /// assert!(result.indexed_vdom.is_none());
 ///
-/// // Development build
-/// let result = compile_vdom(&Development, path, root, "tola-meta")?;
+/// // Development build (hot reload)
+/// let result = compile_vdom(&Development, path, root, "tola-meta", Some("/blog/post.html"))?;
 /// cache.insert(path, result.indexed_vdom.unwrap());
 /// ```
 pub fn compile_vdom<D: crate::driver::BuildDriver>(
@@ -301,6 +301,7 @@ pub fn compile_vdom<D: crate::driver::BuildDriver>(
     path: &Path,
     root: &Path,
     label_name: &str,
+    url_path: Option<&str>,
 ) -> anyhow::Result<VdomResult> {
     let _guard = acquire_test_lock();
     let (_world, document, warnings) = compile_base(path, root)?;
@@ -308,7 +309,8 @@ pub fn compile_vdom<D: crate::driver::BuildDriver>(
     let accessed_files = collect_accessed_files(root);
 
     // Use unified VDOM compile function
-    let output = crate::vdom::compile(&document, label_name, driver);
+    // Pass url_path for globally unique StableIds (enables correct hot reload)
+    let output = crate::vdom::compile(&document, label_name, driver, url_path);
 
     Ok(VdomResult {
         html: output.html,
@@ -339,12 +341,13 @@ pub struct DevCompileResult {
 
 /// Deprecated: Use `compile_vdom(&Development, ...)` instead.
 #[deprecated(since = "0.7.0", note = "Use `compile_vdom(&Development, ...)` instead")]
+#[allow(deprecated)]
 pub fn compile_vdom_for_dev(
     path: &Path,
     root: &Path,
     label_name: &str,
 ) -> anyhow::Result<DevCompileResult> {
-    let result = compile_vdom(&crate::driver::Development, path, root, label_name)?;
+    let result = compile_vdom(&crate::driver::Development, path, root, label_name, None)?;
     Ok(DevCompileResult {
         html: result.html,
         indexed_vdom: result.indexed_vdom.expect("Development driver should cache VDOM"),
