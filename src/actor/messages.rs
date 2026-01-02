@@ -60,6 +60,11 @@ pub enum VdomMsg {
         /// New VDOM document
         vdom: Document<Indexed>,
     },
+    /// Trigger reload (for non-VDOM changes or errors)
+    /// Forwarded from CompilerActor to ensure linear message flow.
+    Reload { reason: String },
+    /// File was skipped (draft, etc.) - no action needed
+    Skip,
     /// Invalidate cache for a specific URL path
     Invalidate { url_path: String },
     /// Clear all cached VDOM

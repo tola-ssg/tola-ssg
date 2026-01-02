@@ -136,8 +136,10 @@ impl Debouncer {
         self.last_event = Some(std::time::Instant::now());
 
         for path in &event.paths {
-            if !self.changed.contains(path) {
-                self.changed.push(path.clone());
+            // Canonicalize path to ensure consistency with SiteConfig paths
+            let canonical = crate::compiler::canonicalize(path);
+            if !self.changed.contains(&canonical) {
+                self.changed.push(canonical);
             }
         }
     }

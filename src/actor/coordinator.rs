@@ -118,10 +118,12 @@ impl Coordinator {
         let fs_actor = FsActor::new(watch_paths, compiler_tx.clone())
             .map_err(|e| anyhow::anyhow!("failed to create file watcher: {}", e))?;
 
+        // Clone vdom_tx for initial build (before it's moved to CompilerActor)
+        let vdom_tx_for_init = vdom_tx.clone();
+
         let compiler_actor = CompilerActor::new(
             compiler_rx,        // receives from FsActor
-            vdom_tx,            // sends to VdomActor
-            ws_tx.clone(),      // can send reload directly to WsActor
+            vdom_tx,            // sends ALL results to VdomActor (linear flow)
             self.config.clone(),
         );
 
@@ -131,6 +133,11 @@ impl Coordinator {
         );
 
         let ws_actor = WsActor::new(ws_rx);
+
+        // ═══════════════════════════════════════════════════════════════════
+        // Step 2.5: Initial Build (populate VDOM cache before starting actors)
+        // ═══════════════════════════════════════════════════════════════════
+        self.initial_build(&vdom_tx_for_init).await;
 
         // ═══════════════════════════════════════════════════════════════════
         // Step 3: Spawn actors as concurrent tasks
@@ -176,6 +183,59 @@ impl Coordinator {
         }
 
         paths
+    }
+
+    /// Perform initial build to populate VDOM cache
+    ///
+    /// This ensures the first file change can diff against cached state
+    /// instead of triggering a full reload.
+    async fn initial_build(&self, vdom_tx: &mpsc::Sender<VdomMsg>) {
+        use crate::compiler::collect_all_files;
+        use crate::pipeline::compile::{compile_page, CompileOutcome};
+
+        let config = &self.config;
+        let content_dir = &config.build.content;
+
+        // Collect all .typ files
+        let typ_files: Vec<_> = collect_all_files(content_dir)
+            .into_iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "typ"))
+            .collect();
+
+        if typ_files.is_empty() {
+            crate::log!("init"; "no .typ files found for initial build");
+            return;
+        }
+
+        crate::log!("init"; "initial build: {} files", typ_files.len());
+
+        // Compile all files and collect VDOM results
+        // Use rayon for parallel compilation
+        let results: Vec<_> = typ_files
+            .iter()
+            .filter_map(|path| {
+                match compile_page(path, config) {
+                    CompileOutcome::Vdom { url_path, vdom, .. } => Some((url_path, vdom)),
+                    CompileOutcome::Reload { .. } => None,
+                    CompileOutcome::Skipped => None,
+                    CompileOutcome::Error { path, error } => {
+                        crate::log!("init"; "error compiling {}: {}", path.display(), error);
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        if results.is_empty() {
+            crate::log!("init"; "no VDOM results from initial build");
+            return;
+        }
+
+        // Send to VdomActor to populate cache
+        let count = results.len();
+        if vdom_tx.send(VdomMsg::Populate { entries: results }).await.is_ok() {
+            crate::log!("init"; "sent {} entries to VDOM cache", count);
+        }
     }
 
     /// Wait for shutdown signal (platform-agnostic)

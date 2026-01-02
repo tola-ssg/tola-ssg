@@ -67,6 +67,16 @@ impl VdomActor {
                     self.handle_process(path, url_path, vdom).await;
                 }
 
+                VdomMsg::Reload { reason } => {
+                    // Forward reload from CompilerActor to WsActor
+                    crate::log!("vdom"; "reload: {}", reason);
+                    let _ = self.ws_tx.send(WsMsg::Reload { reason }).await;
+                }
+
+                VdomMsg::Skip => {
+                    // Skipped files (drafts, etc.) don't require any action
+                }
+
                 VdomMsg::Invalidate { url_path } => {
                     self.cache.lock().remove(&url_path);
                     crate::log!("vdom"; "invalidated cache for {}", url_path);

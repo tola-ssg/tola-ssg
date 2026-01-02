@@ -3,14 +3,14 @@
 //! This actor is responsible for:
 //! 1. Receiving file change notifications
 //! 2. Dispatching to `pipeline::compile` for actual compilation
-//! 3. Forwarding results to VdomActor for diffing
+//! 3. Forwarding ALL results to VdomActor (linear message flow)
 //!
 //! # Design
 //!
 //! This is a **thin wrapper** around `pipeline::compile`. The actor only handles:
 //! - Async message loop
 //! - spawn_blocking for CPU work
-//! - Routing results to other actors
+//! - Routing results to VdomActor (NEVER directly to WsActor)
 //!
 //! All business logic lives in `pipeline::compile`.
 
@@ -20,7 +20,7 @@ use std::time::Instant;
 
 use tokio::sync::mpsc;
 
-use super::messages::{CompilerMsg, VdomMsg, WsMsg};
+use super::messages::{CompilerMsg, VdomMsg};
 use crate::config::SiteConfig;
 use crate::pipeline::compile::{compile_page, CompileOutcome};
 
@@ -28,10 +28,8 @@ use crate::pipeline::compile::{compile_page, CompileOutcome};
 pub struct CompilerActor {
     /// Channel to receive messages
     rx: mpsc::Receiver<CompilerMsg>,
-    /// Channel to send VDOM to VdomActor
+    /// Channel to send ALL results to VdomActor (linear message flow)
     vdom_tx: mpsc::Sender<VdomMsg>,
-    /// Channel to send reload messages directly to WsActor (for non-content changes)
-    ws_tx: mpsc::Sender<WsMsg>,
     /// Site configuration
     config: Arc<SiteConfig>,
 }
@@ -41,13 +39,11 @@ impl CompilerActor {
     pub fn new(
         rx: mpsc::Receiver<CompilerMsg>,
         vdom_tx: mpsc::Sender<VdomMsg>,
-        ws_tx: mpsc::Sender<WsMsg>,
         config: Arc<SiteConfig>,
     ) -> Self {
         Self {
             rx,
             vdom_tx,
-            ws_tx,
             config,
         }
     }
@@ -84,22 +80,28 @@ impl CompilerActor {
                 let count = outcomes.len();
                 crate::log!("compile"; "compiled {} files in {:?}", count, duration);
 
-                // Route results to appropriate actors
+                // Route ALL results to VdomActor (linear message flow)
                 for outcome in outcomes {
                     self.route_outcome(outcome).await;
                 }
             }
             Err(e) => {
                 crate::log!("compile"; "spawn_blocking error: {}", e);
+                // Forward error to VdomActor
+                let _ = self.vdom_tx.send(VdomMsg::Reload {
+                    reason: format!("internal error: {}", e),
+                }).await;
             }
         }
     }
 
-    /// Route a compile outcome to the appropriate actor
+    /// Route a compile outcome to VdomActor
+    ///
+    /// All outcomes go through VdomActor to ensure linear message flow.
+    /// VdomActor is the sole decision maker for what to send to WsActor.
     async fn route_outcome(&self, outcome: CompileOutcome) {
         match outcome {
             CompileOutcome::Vdom { path, url_path, vdom } => {
-                // Send to VdomActor for diffing
                 let _ = self.vdom_tx.send(VdomMsg::Process {
                     path,
                     url_path,
@@ -107,16 +109,15 @@ impl CompilerActor {
                 }).await;
             }
             CompileOutcome::Reload { reason } => {
-                // Directly notify WsActor
-                let _ = self.ws_tx.send(WsMsg::Reload { reason }).await;
+                let _ = self.vdom_tx.send(VdomMsg::Reload { reason }).await;
             }
             CompileOutcome::Skipped => {
-                // Nothing to do
+                let _ = self.vdom_tx.send(VdomMsg::Skip).await;
             }
             CompileOutcome::Error { path, error } => {
                 crate::log!("compile"; "error in {}: {}", path.display(), error);
-                let _ = self.ws_tx.send(WsMsg::Reload {
-                    reason: format!("compile error: {}", error),
+                let _ = self.vdom_tx.send(VdomMsg::Reload {
+                    reason: format!("compile error in {}: {}", path.display(), error),
                 }).await;
             }
         }
