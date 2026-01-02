@@ -13,7 +13,7 @@
 //! - `Folder<From, To>` for the traversal mechanics
 //! - `Transform<From>` for the public API
 
-use super::node::{Document, Element, Frame, Node, NodeId, Text};
+use super::node::{Document, Element, Node, NodeId, Text};
 use super::phase::PhaseData;
 use super::transform::Transform;
 
@@ -25,9 +25,6 @@ use super::transform::Transform;
 ///
 /// Unlike Visitor (read-only), Folder produces a new tree
 /// potentially in a different phase.
-///
-/// Key design: `fold_frame` returns `Node<To>`, not `Frame<To>`.
-/// This allows Frame → Element conversion (e.g., typst frame → SVG element).
 pub trait Folder<From: PhaseData, To: PhaseData> {
     /// Transform document extension data
     fn fold_doc_ext(&mut self, ext: From::DocExt) -> To::DocExt;
@@ -38,15 +35,11 @@ pub trait Folder<From: PhaseData, To: PhaseData> {
     /// Transform a text node
     fn fold_text(&mut self, text: Text<From>) -> Text<To>;
 
-    /// Transform a frame - returns Node to allow Frame → Element conversion
-    fn fold_frame(&mut self, frame: Frame<From>) -> Node<To>;
-
     /// Transform a node (dispatches to specific fold methods)
     fn fold_node(&mut self, node: Node<From>) -> Node<To> {
         match node {
             Node::Element(elem) => Node::Element(Box::new(self.fold_element(*elem))),
             Node::Text(text) => Node::Text(self.fold_text(text)),
-            Node::Frame(frame) => self.fold_frame(*frame),
         }
     }
 
@@ -216,21 +209,6 @@ impl Folder<Indexed, Processed> for ProcessFolder {
             content: text.content,
             ext: (), // TextExt is () for both phases
         }
-    }
-
-    fn fold_frame(&mut self, _frame: Frame<Indexed>) -> Node<Processed> {
-        // Frame → Element conversion
-        // In real implementation, this would convert typst frame to SVG element
-        self.stats.frames_expanded += 1;
-
-        // Create a placeholder SVG element for the frame
-        // Real implementation would generate actual SVG from frame content
-        Node::Element(Box::new(Element {
-            tag: "svg".to_string(),
-            attrs: vec![("class".to_string(), "typst-frame".to_string())],
-            children: SmallVec::new(),
-            ext: FamilyExt::Svg(ProcessedElemExt::default()),
-        }))
     }
 }
 

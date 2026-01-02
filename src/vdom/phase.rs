@@ -40,6 +40,9 @@ pub trait Phase: 'static + Send + Sync + Debug + Clone {
 /// - `Indexed::ElemExt<LinkFamily>` = `IndexedElemExt<LinkIndexedData>`
 /// - `Indexed::ElemExt<SvgFamily>` = `IndexedElemExt<SvgIndexedData>`
 /// - `Processed::ElemExt<LinkFamily>` = `ProcessedElemExt<LinkProcessedData>`
+///
+/// Note: FrameExt has been removed. Frames are now eagerly converted to
+/// SVG Elements during the Raw phase conversion.
 pub trait PhaseData: Phase {
     /// Document-level extension data (metadata, stats)
     type DocExt: Debug + Clone + Default + Send + Sync;
@@ -50,10 +53,6 @@ pub trait PhaseData: Phase {
 
     /// Text node extension data
     type TextExt: Debug + Clone + Default + Send + Sync;
-
-    /// Frame extension data (for embedded documents)
-    /// Note: No Default bound - allows Infallible for phases where frames don't exist
-    type FrameExt: Debug + Clone + Send + Sync;
 }
 
 // =============================================================================
@@ -81,7 +80,6 @@ impl PhaseData for Raw {
     type ElemExt<F: TagFamily> = RawElemExt;
     /// Raw phase text extension - stores Span for StableId generation.
     type TextExt = RawTextExt;
-    type FrameExt = RawFrameExt;
 }
 
 /// Document extension for Raw phase - source file metadata
@@ -174,16 +172,8 @@ impl RawDocExt {
     }
 }
 
-/// Frame extension for Raw phase
-///
-/// **Note**: In the current design, Frames are converted to SVG Elements
-/// during the `from_typst_html()` conversion. This type exists for type
-/// system completeness but should never be instantiated in practice.
-#[derive(Debug, Clone, Default)]
-pub struct RawFrameExt {
-    /// Placeholder - frames are converted to SVG during conversion
-    _private: (),
-}
+// Note: RawFrameExt has been removed.
+// Frames are now eagerly converted to SVG Elements in convert.rs.
 
 /// Indexed phase: Elements tagged with family data
 ///
@@ -247,7 +237,6 @@ impl PhaseData for Indexed {
     type DocExt = IndexedDocExt;
     type ElemExt<F: TagFamily> = IndexedElemExt<F>;
     type TextExt = IndexedTextExt;
-    type FrameExt = IndexedFrameExt;
 }
 
 /// Text node extension for Indexed phase
@@ -282,8 +271,6 @@ pub struct IndexedDocExt {
     pub element_count: usize,
     /// Text node count
     pub text_count: usize,
-    /// Frame count
-    pub frame_count: usize,
     /// SVG element node IDs
     pub svg_nodes: Vec<NodeId>,
     /// Link element node IDs
@@ -292,15 +279,13 @@ pub struct IndexedDocExt {
     pub heading_nodes: Vec<NodeId>,
     /// Media element node IDs
     pub media_nodes: Vec<NodeId>,
-    /// Frame node IDs
-    pub frame_nodes: Vec<NodeId>,
 }
 
 impl IndexedDocExt {
     /// Total indexed nodes count
     pub fn total_indexed_nodes(&self) -> usize {
         self.svg_nodes.len() + self.link_nodes.len() +
-        self.heading_nodes.len() + self.media_nodes.len() + self.frame_nodes.len()
+        self.heading_nodes.len() + self.media_nodes.len()
     }
 
     /// Check if has SVG nodes
@@ -311,27 +296,10 @@ impl IndexedDocExt {
 
     /// Check if has heading nodes
     pub fn has_headings(&self) -> bool { !self.heading_nodes.is_empty() }
-
-    /// Check if has frame nodes
-    pub fn has_frames(&self) -> bool { !self.frame_nodes.is_empty() }
 }
 
-/// Frame extension for Indexed phase
-#[derive(Debug, Clone, Default)]
-pub struct IndexedFrameExt {
-    /// Stable node identifier for cross-compilation identity
-    pub stable_id: super::id::StableId,
-    pub node_id: NodeId,
-    pub frame_id: u32,
-    pub estimated_svg_size: usize,
-}
-
-impl IndexedFrameExt {
-    /// Get the StableId for this frame
-    pub fn stable_id(&self) -> super::id::StableId {
-        self.stable_id
-    }
-}
+// Note: IndexedFrameExt has been removed.
+// Frames are now eagerly converted to SVG Elements in convert.rs.
 
 /// Processed phase: All transformations applied
 ///
@@ -393,8 +361,6 @@ impl PhaseData for Processed {
     type DocExt = ProcessedDocExt;
     type ElemExt<F: TagFamily> = ProcessedElemExt<F>;
     type TextExt = ();
-    /// Frame nodes have all been expanded to Elements at Processed phase
-    type FrameExt = std::convert::Infallible;
 }
 
 /// Document extension for Processed phase
@@ -404,7 +370,6 @@ pub struct ProcessedDocExt {
     pub total_svg_bytes: usize,
     pub links_resolved: usize,
     pub headings_anchored: usize,
-    pub frames_expanded: usize,
 }
 
 impl ProcessedDocExt {
@@ -419,7 +384,7 @@ impl ProcessedDocExt {
 
     /// Total processing count
     pub fn total_processed(&self) -> usize {
-        self.svg_count + self.links_resolved + self.frames_expanded
+        self.svg_count + self.links_resolved + self.headings_anchored
     }
 }
 
@@ -458,8 +423,6 @@ impl PhaseData for Rendered {
     /// The tree is retained for debugging, but element data is no longer needed.
     type ElemExt<F: TagFamily> = ();
     type TextExt = ();
-    /// Frame nodes fully expanded before Rendered phase
-    type FrameExt = std::convert::Infallible;
 }
 
 /// Document extension for Rendered phase - final output data

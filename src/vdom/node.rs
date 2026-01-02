@@ -256,29 +256,15 @@ impl_has_family_data!(Processed, Other, ()); // -> Other uses ()
 
 /// VDOM node sum type parameterized by phase
 ///
-/// # Frame Variant Semantics by Phase
+/// # Design Note
 ///
-/// The `Frame` variant has different meanings at each phase:
-///
-/// - **Raw**: Frames exist and represent typst embedded content
-/// - **Indexed**: Frames are indexed but not yet expanded
-/// - **Processed**: Frames have been converted to Elements (SVG)
-///   - `FrameExt = Infallible` means Frame<Processed> cannot be constructed
-///   - The Frame variant technically exists but is unreachable
-/// - **Rendered**: Same as Processed
-///
-/// This is a deliberate design choice: using `Infallible` as `FrameExt`
-/// prevents construction of `Frame<Processed>` at compile time, while
-/// `Folder::fold_frame` returns `Node<To>` to allow Frame → Element conversion.
+/// Frames (typst embedded content) are eagerly converted to SVG Elements
+/// during the Raw phase conversion (in `convert.rs`). This simplifies the
+/// pipeline - all nodes are either Elements or Text at every phase.
 #[derive(Debug, Clone)]
 pub enum Node<P: PhaseData> {
     Element(Box<Element<P>>),
     Text(Text<P>),
-    /// Frame variant - only constructable in phases where FrameExt: Default
-    ///
-    /// At Processed/Rendered phases, this variant exists in the type but
-    /// cannot be instantiated because `FrameExt = Infallible`.
-    Frame(Box<Frame<P>>),
 }
 
 impl<P: PhaseData> Node<P> {
@@ -286,7 +272,7 @@ impl<P: PhaseData> Node<P> {
     //   - is_xxx(&self) -> bool
     //   - as_xxx(&self) -> Option<&Type<P>>
     //   - as_xxx_mut(&mut self) -> Option<&mut Type<P>>
-    impl_enum_accessors!(P; element, text, frame);
+    impl_enum_accessors!(P; element, text);
 }
 
 // =============================================================================
@@ -520,7 +506,6 @@ impl<P: PhaseData> Element<P> {
             match child {
                 Node::Text(t) => buf.push_str(&t.content),
                 Node::Element(e) => e.collect_text(buf),
-                Node::Frame(_) => {}
             }
         }
     }
@@ -569,38 +554,8 @@ impl<P: PhaseData> Text<P> {
     }
 }
 
-// =============================================================================
-// Frame<P>
-// =============================================================================
-
-/// Embedded typst frame (rendered as inline SVG)
-///
-/// Represents content from typst's `html.frame()` that needs special handling.
-/// Unlike Element, Frame is an atomic unit - it has no children in the VDOM sense.
-/// The frame content is stored in `FrameExt` and rendered to SVG during processing.
-///
-/// # Phase behavior
-///
-/// - **Raw/Indexed**: `FrameExt` contains typst frame data (layout, points, etc.)
-/// - **Processed/Rendered**: Cannot be constructed (`FrameExt = Infallible`)
-///   - Frame is transformed to an SVG Element during Indexed → Processed
-#[derive(Debug, Clone)]
-pub struct Frame<P: PhaseData> {
-    /// Phase-specific extension data (contains all frame content)
-    pub ext: P::FrameExt,
-}
-
-impl<P: PhaseData> Frame<P> {
-    /// Create a new frame with extension data
-    pub fn new(ext: P::FrameExt) -> Self {
-        Self { ext }
-    }
-}
-
-// Note: Frame does NOT implement Default because:
-// 1. An empty frame is meaningless
-// 2. At Processed phase, FrameExt = Infallible (cannot default)
-// Use Frame::new(ext) to construct frames explicitly.
+// Note: Frame<P> has been removed.
+// Typst frames are now eagerly converted to SVG Elements in convert.rs.
 
 // =============================================================================
 // Document<P>
@@ -688,26 +643,6 @@ impl<P: PhaseData> Document<P> {
         F: Fn(&Element<P>) -> bool,
     {
         self.find_element(predicate).is_some()
-    }
-
-    /// Check if document contains any Frame nodes
-    pub fn has_frames(&self) -> bool {
-        Self::check_frames(&self.root)
-    }
-
-    fn check_frames(elem: &Element<P>) -> bool {
-        for child in &elem.children {
-            match child {
-                Node::Frame(_) => return true,
-                Node::Element(e) => {
-                    if Self::check_frames(e) {
-                        return true;
-                    }
-                }
-                Node::Text(_) => {}
-            }
-        }
-        false
     }
 
     /// Count total elements in document
@@ -845,7 +780,6 @@ pub struct Stats {
     pub link_count: usize,
     pub heading_count: usize,
     pub media_count: usize,
-    pub frame_count: usize,
     pub text_count: usize,
     pub element_count: usize,
 }
@@ -864,11 +798,6 @@ impl Stats {
     /// Check if document has any headings
     pub fn has_headings(&self) -> bool {
         self.heading_count > 0
-    }
-
-    /// Check if document has any frames
-    pub fn has_frames(&self) -> bool {
-        self.frame_count > 0
     }
 
     /// Total family-specific elements (svg + link + heading + media)
@@ -902,7 +831,6 @@ impl<P: PhaseData> Document<P> {
             match child {
                 Node::Element(e) => Self::collect_stats_recursive(e, stats),
                 Node::Text(_) => stats.text_count += 1,
-                Node::Frame(_) => stats.frame_count += 1,
             }
         }
     }

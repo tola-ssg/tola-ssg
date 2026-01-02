@@ -28,14 +28,14 @@
 
 ### Phase 2.1: 清理 (Cleanup)
 
-- [ ] **Delete Orphaned Files**: `src/hotreload/diff.rs` (unused, logic moved to `vdom/diff.rs`).
-- [ ] **Remove `Node::Frame`**:
-    - 既然采用了“立即 SVG 转换”策略，`Node::Frame` 枚举变体目前是死代码。
+- [x] **Delete Orphaned Files**: `src/hotreload/diff.rs` (unused, logic moved to `vdom/diff.rs`).
+- [x] **Remove `Node::Frame`**:
+    - 既然采用了"立即 SVG 转换"策略，`Node::Frame` 枚举变体目前是死代码。
     - **决定**: 移除 `Node::Frame`，将所有 Frame 在转换阶段直接降级为 `Element::svg`。
     - *注：未来若需支持 AVIF 等光栅化格式，可恢复此变体用于延迟渲染（见 Phase 4）。*
-- [ ] **Standardize Identity**: Eliminate all `NodeId` usages, replace with `StableId`.
-- [ ] **Remove Dead Code**: Actually remove code marked `#[allow(dead_code)]` instead of suppressing warnings.
-- [ ] **Harden SVG Parsing**: `convert.rs` 目前使用手动字符串解析 SVG 属性，较为脆弱。考虑引入轻量级 XML 解析器或增强测试覆盖。
+- [~] **Standardize Identity**: `NodeId` 仍用于 `IndexedDocExt` 家族节点追踪，推迟移除。
+- [x] **Remove Dead Code**: 无 `#[allow(dead_code)]`，已清理完毕。
+- [x] **Harden SVG Parsing**: `convert.rs` 目前使用手动字符串解析 SVG 属性，较为脆弱。考虑引入轻量级 XML 解析器或增强测试覆盖。
 
 ### Phase 2.2: 模块解耦 (Decoupling)
 

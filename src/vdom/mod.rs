@@ -47,11 +47,11 @@ pub use family::{
 #[allow(unused_imports)]
 pub use folder::{fold, Folder, ProcessFolder, process_family_ext};
 #[allow(unused_imports)]
-pub use node::{Document, Element, FamilyExt, Frame, HasFamilyData, Node, NodeId, Stats, Text};
+pub use node::{Document, Element, FamilyExt, HasFamilyData, Node, NodeId, Stats, Text};
 #[allow(unused_imports)]
 pub use phase::{
-    Indexed, IndexedDocExt, IndexedElemExt, IndexedFrameExt, IndexedTextExt, Phase, PhaseData, Processed,
-    ProcessedDocExt, ProcessedElemExt, Raw, RawDocExt, RawElemExt, RawFrameExt, RawTextExt,
+    Indexed, IndexedDocExt, IndexedElemExt, IndexedTextExt, Phase, PhaseData, Processed,
+    ProcessedDocExt, ProcessedElemExt, Raw, RawDocExt, RawElemExt, RawTextExt,
     Rendered, RenderedDocExt,
 };
 #[allow(unused_imports)]

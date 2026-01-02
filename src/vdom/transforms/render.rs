@@ -186,11 +186,6 @@ impl HtmlRenderer {
                     self.write_text_escaped(&text.content);
                 }
             }
-            Node::Frame(_) => {
-                // Frame<Processed> cannot exist (FrameExt = Infallible)
-                // This branch is unreachable
-                unreachable!("Frame nodes should not exist at Processed phase")
-            }
         }
     }
 

@@ -617,7 +617,6 @@ impl DiffContext {
                 (o, n),
                 (Node::Element(_), Node::Element(_))
                     | (Node::Text(_), Node::Text(_))
-                    | (Node::Frame(_), Node::Frame(_))
             )
         })
     }
@@ -640,15 +639,6 @@ impl DiffContext {
                     // This shouldn't happen if `diff_mixed_children` works correctly
                     crate::log!("hotreload"; "WARNING: diff_nodes found text mismatch that wasn't handled by parent!");
                     self.stats.text_updates += 1;
-                }
-            }
-            (Node::Frame(old_frame), Node::Frame(new_frame)) => {
-                if old_frame.ext.stable_id != new_frame.ext.stable_id {
-                    self.ops.push(Patch::Replace {
-                        target: old_frame.ext.stable_id,
-                        html: render_node_html(&Node::Frame(new_frame.clone())),
-                    });
-                    self.stats.nodes_replaced += 1;
                 }
             }
             // Different node types - shouldn't happen if structure_matches is correct
@@ -679,7 +669,6 @@ fn get_node_stable_id(node: &Node<Indexed>) -> StableId {
     match node {
         Node::Element(elem) => elem.ext.stable_id(),
         Node::Text(text) => text.ext.stable_id,
-        Node::Frame(frame) => frame.ext.stable_id,
     }
 }
 
@@ -743,14 +732,6 @@ fn render_node_html_ctx(node: &Node<Indexed>, in_svg: bool) -> String {
             } else {
                 html_escape(&text.content)
             }
-        }
-        Node::Frame(frame) => {
-            // Frame at Indexed phase is a placeholder
-            // In practice, frames are converted to SVG Elements before this point
-            format!(
-                "<span data-tola-id=\"{}\"><!-- frame --></span>",
-                frame.ext.stable_id
-            )
         }
     }
 }

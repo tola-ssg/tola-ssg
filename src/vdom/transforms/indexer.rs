@@ -22,8 +22,8 @@ use crate::vdom::family::{
     MediaIndexedData, SvgIndexedData, identify_family_kind,
 };
 use crate::vdom::id::StableId;
-use crate::vdom::node::{Document, Element, FamilyExt, Frame, Node, NodeId, Text};
-use crate::vdom::phase::{Indexed, IndexedDocExt, IndexedElemExt, IndexedFrameExt, Raw};
+use crate::vdom::node::{Document, Element, FamilyExt, Node, NodeId, Text};
+use crate::vdom::phase::{Indexed, IndexedDocExt, IndexedElemExt, Raw};
 use crate::vdom::transform::Transform;
 
 // =============================================================================
@@ -59,14 +59,10 @@ pub struct Indexer {
     heading_nodes: Vec<NodeId>,
     /// Collected media node IDs
     media_nodes: Vec<NodeId>,
-    /// Collected frame node IDs
-    frame_nodes: Vec<NodeId>,
     /// Total element count
     element_count: usize,
     /// Total text count
     text_count: usize,
-    /// Total frame count
-    frame_count: usize,
 }
 
 impl Indexer {
@@ -79,10 +75,8 @@ impl Indexer {
             link_nodes: Vec::new(),
             heading_nodes: Vec::new(),
             media_nodes: Vec::new(),
-            frame_nodes: Vec::new(),
             element_count: 0,
             text_count: 0,
-            frame_count: 0,
         }
     }
 
@@ -127,12 +121,10 @@ impl Indexer {
                 node_count,
                 element_count: self.element_count,
                 text_count: self.text_count,
-                frame_count: self.frame_count,
                 svg_nodes: std::mem::take(&mut self.svg_nodes),
                 link_nodes: std::mem::take(&mut self.link_nodes),
                 heading_nodes: std::mem::take(&mut self.heading_nodes),
                 media_nodes: std::mem::take(&mut self.media_nodes),
-                frame_nodes: std::mem::take(&mut self.frame_nodes),
             },
         }
     }
@@ -225,7 +217,6 @@ impl Indexer {
                 let stable_id = match &indexed_child {
                     Node::Element(e) => e.ext.stable_id(),
                     Node::Text(t) => t.ext.stable_id,
-                    Node::Frame(f) => f.ext.stable_id(),
                 };
                 (indexed_child, stable_id)
             })
@@ -248,18 +239,6 @@ impl Indexer {
                     content: text.content,
                     ext: crate::vdom::phase::IndexedTextExt::new(stable_id),
                 })
-            }
-            Node::Frame(_frame) => {
-                self.frame_count += 1;
-                let node_id = self.next_node_id();
-                self.frame_nodes.push(node_id);
-                let stable_id = StableId::for_frame(node_id.0 as usize, occurrence, parent_seed);
-                Node::Frame(Box::new(Frame::new(IndexedFrameExt {
-                    stable_id,
-                    node_id,
-                    frame_id: 0,
-                    estimated_svg_size: 0,
-                })))
             }
         }
     }
@@ -401,8 +380,6 @@ enum ContentKey {
     /// as "Same Node, New Content" (Keep + UpdateText/ReplaceChildren)
     /// rather than "Different Node" (Delete + Insert).
     Text,
-    /// Frame: frame_id (always unique, so occurrence is always 0)
-    Frame,
 }
 
 impl ContentKey {
@@ -427,7 +404,6 @@ impl ContentKey {
             // Text nodes all share the same key type
             // The occurrence index will differentiate them
             Node::Text(_) => ContentKey::Text,
-            Node::Frame(_) => ContentKey::Frame,
         }
     }
 }
