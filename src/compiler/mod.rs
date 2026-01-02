@@ -33,6 +33,7 @@ use crate::freshness::{self, ContentHash};
 
 pub use assets::process_asset;
 pub use assets::process_rel_asset;
+pub use pages::drain_warnings;
 
 // ============================================================================
 // Shared utilities

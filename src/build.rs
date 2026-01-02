@@ -23,6 +23,7 @@
 use crate::{
     compiler::{
         collect_all_files,
+        drain_warnings,
         process_asset, process_rel_asset,
     },
     compiler::meta::Pages,
@@ -259,6 +260,12 @@ pub fn build_site<D: BuildDriver + Copy>(
         let enhance_output_dir = config.paths().output_dir();
         css::cleanup_old_enhance_css(&enhance_output_dir)?;
         css::generate_enhance_css(&enhance_output_dir)?;
+    }
+
+    // Print collected warnings after build completes
+    // This ensures warnings are visible and not overwritten by progress bars
+    for warning in drain_warnings() {
+        eprintln!("{warning}");
     }
 
     if !quiet {

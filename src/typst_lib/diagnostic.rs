@@ -317,8 +317,13 @@ pub fn format_diagnostics<W: World>(world: &W, diagnostics: &[SourceDiagnostic])
         .iter()
         .partition(|d| d.severity == Severity::Error);
 
-    for diag in errors.iter().chain(warnings.iter()) {
+    let all_diags: Vec<_> = errors.iter().chain(warnings.iter()).collect();
+    for (i, diag) in all_diags.iter().enumerate() {
         format_diagnostic(&mut output, world, diag);
+        // Add blank line between diagnostics (but not after the last one)
+        if i < all_diags.len() - 1 {
+            output.push('\n');
+        }
     }
 
     output
@@ -411,6 +416,7 @@ fn write_snippet(output: &mut String, location: &SpanLocation, theme: Diagnostic
 /// Write a single-line source snippet.
 fn write_singleline_snippet(writer: &mut SnippetWriter, location: &SpanLocation) {
     let line_text = location.lines.first().map_or("", String::as_str);
+
     let span_len = location
         .highlight_end_col
         .saturating_sub(location.highlight_start_col)

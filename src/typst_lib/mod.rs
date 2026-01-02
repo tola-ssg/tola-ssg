@@ -172,7 +172,7 @@ pub fn compile_meta(
     label_name: &str,
 ) -> anyhow::Result<CompileResult> {
     let _guard = acquire_test_lock();
-    let (_world, document) = compile_base(path, root)?;
+    let (_world, document, _warnings) = compile_base(path, root)?;
 
     // Collect accessed files for dependency tracking
     let accessed_files = collect_accessed_files(root);
@@ -230,7 +230,7 @@ pub fn compile_document(
     label_name: &str,
 ) -> anyhow::Result<DocumentResult> {
     let _guard = acquire_test_lock();
-    let (_world, document) = compile_base(path, root)?;
+    let (_world, document, _warnings) = compile_base(path, root)?;
 
     let accessed_files = collect_accessed_files(root);
     let metadata = extract_meta(&document, label_name);
@@ -258,6 +258,9 @@ pub struct VdomResult {
     pub metadata: Option<serde_json::Value>,
     /// Files accessed during compilation
     pub accessed_files: Vec<std::path::PathBuf>,
+    /// Formatted warnings (e.g., unknown font family)
+    /// Caller is responsible for displaying these at appropriate time.
+    pub warnings: Option<String>,
 }
 
 impl VdomResult {
@@ -300,7 +303,7 @@ pub fn compile_vdom<D: crate::driver::BuildDriver>(
     label_name: &str,
 ) -> anyhow::Result<VdomResult> {
     let _guard = acquire_test_lock();
-    let (_world, document) = compile_base(path, root)?;
+    let (_world, document, warnings) = compile_base(path, root)?;
 
     let accessed_files = collect_accessed_files(root);
 
@@ -312,6 +315,7 @@ pub fn compile_vdom<D: crate::driver::BuildDriver>(
         indexed_vdom: output.indexed,
         metadata: output.metadata,
         accessed_files,
+        warnings,
     })
 }
 
@@ -376,10 +380,13 @@ pub fn compile_for_dev_with_vdom(
 // =============================================================================
 
 /// Core compilation logic shared by all entry points.
+///
+/// Returns the compiled document and any warnings as a formatted string.
+/// The caller is responsible for displaying warnings at the appropriate time.
 fn compile_base(
     path: &Path,
     root: &Path,
-) -> anyhow::Result<(SystemWorld, typst_html::HtmlDocument)> {
+) -> anyhow::Result<(SystemWorld, typst_html::HtmlDocument, Option<String>)> {
     file::reset_access_flags();
 
     let world = SystemWorld::new(path, root);
@@ -399,7 +406,15 @@ fn compile_base(
         anyhow::anyhow!("Typst compilation failed:\n{formatted}")
     })?;
 
-    Ok((world, document))
+    // Format warnings (e.g., unknown font family) for caller to display
+    let filtered_warnings = diagnostic::filter_html_warnings(&result.warnings);
+    let warnings = if filtered_warnings.is_empty() {
+        None
+    } else {
+        Some(diagnostic::format_diagnostics(&world, &filtered_warnings))
+    };
+
+    Ok((world, document, warnings))
 }
 
 /// Extract metadata from a compiled document by label name.
@@ -442,7 +457,7 @@ fn collect_accessed_files(root: &Path) -> Vec<std::path::PathBuf> {
 #[allow(dead_code)]
 pub fn query_meta(path: &Path, root: &Path, label_name: &str) -> anyhow::Result<Value> {
     let _guard = acquire_test_lock();
-    let (_world, document) = compile_base(path, root)?;
+    let (_world, document, _warnings) = compile_base(path, root)?;
 
     let label = Label::new(PicoStr::intern(label_name))
         .ok_or_else(|| anyhow::anyhow!("Invalid label name: {label_name}"))?;

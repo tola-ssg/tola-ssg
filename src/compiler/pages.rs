@@ -8,9 +8,35 @@ use crate::{config::SiteConfig, log, typst_lib};
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
+use std::sync::Mutex;
 use rayon::prelude::*;
 
 // TOLA_META_LABEL is imported from crate::compiler::meta
+
+// ============================================================================
+// Warnings Collection
+// ============================================================================
+
+/// Global warnings collector for compilation warnings.
+///
+/// Collects warnings (e.g., unknown font family) during compilation.
+/// Call `drain_warnings()` after build to get and clear all warnings.
+static WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Add a warning to the global collector.
+fn collect_warning(warning: String) {
+    if let Ok(mut warnings) = WARNINGS.lock() {
+        warnings.push(warning);
+    }
+}
+
+/// Drain all collected warnings.
+///
+/// Returns all warnings and clears the collector.
+/// Should be called after build completes to display warnings.
+pub fn drain_warnings() -> Vec<String> {
+    WARNINGS.lock().map(|mut w| std::mem::take(&mut *w)).unwrap_or_default()
+}
 
 // ============================================================================
 // Public API
@@ -95,6 +121,11 @@ pub fn process_page<D: crate::driver::BuildDriver>(
     page.content_meta = content_meta;
     page.compiled_html = Some(result.html);
     let url_path = page.paths.url_path.clone();
+
+    // Collect warnings after all other uses of result (to avoid partial move)
+    if let Some(warnings) = result.warnings {
+        collect_warning(warnings);
+    }
 
     // Update global site data
     GLOBAL_SITE_DATA.insert_page(page_meta_to_data(&page));
@@ -191,6 +222,7 @@ pub fn compile_meta<D: crate::driver::BuildDriver>(
 
     // Use unified compile_vdom with driver
     let result = typst_lib::compile_vdom(driver, path, root, TOLA_META_LABEL)?;
+
     let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
 
     super::deps::DEPENDENCY_GRAPH
@@ -204,7 +236,14 @@ pub fn compile_meta<D: crate::driver::BuildDriver>(
         crate::hotreload::VDOM_CACHE.insert(cache_key, indexed);
     }
 
-    Ok((result.html, meta))
+    let html = result.html;
+
+    // Collect warnings after all other uses of result (to avoid partial move)
+    if let Some(warnings) = result.warnings {
+        collect_warning(warnings);
+    }
+
+    Ok((html, meta))
 }
 
 /// Check if content metadata indicates a draft.
@@ -290,6 +329,11 @@ pub fn collect_metadata_smart<D: crate::driver::BuildDriver + Copy>(
                 .record_dependencies(path, &result.accessed_files);
 
             let content_meta: Option<ContentMeta> = result.metadata.and_then(|json| serde_json::from_value(json).ok());
+
+            // Collect warnings after all other uses of result (to avoid partial move)
+            if let Some(warnings) = result.warnings {
+                collect_warning(warnings);
+            }
 
             // Skip drafts
             if is_draft(content_meta.as_ref()) {
