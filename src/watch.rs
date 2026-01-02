@@ -36,11 +36,11 @@ use crate::{
     compiler::pages::{process_page, write_page_html},
     config::{cfg, reload_config, SiteConfig},
     driver::Development,
-    hotreload::{broadcast_patches, broadcast_reload, VDOM_CACHE},
+    hotreload::{broadcast_patches, broadcast_reload},
     log,
     logger::WatchStatus,
     utils::category::{categorize_path, FileCategory},
-    vdom::diff::diff,
+    vdom::{diff::diff, VdomCache},
 };
 use anyhow::{Context, Result};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
@@ -247,7 +247,12 @@ impl Debouncer {
 
 
 /// Process file changes. Returns true if full rebuild succeeded (for cooldown).
-fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> bool {
+fn handle_changes(
+    paths: &[PathBuf],
+    status: &mut WatchStatus,
+    root: &Path,
+    vdom_cache: &mut VdomCache,
+) -> bool {
     if paths.is_empty() {
         return false;
     }
@@ -281,7 +286,7 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
             status.error("config reload failed", &e.to_string());
             return false;
         }
-        return handle_full_rebuild("config changed", status);
+        return handle_full_rebuild("config changed", status, vdom_cache);
     }
 
     // Template/utils changes: query dependency graph for precise rebuild
@@ -299,7 +304,7 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
 
         if affected.is_empty() {
             let trigger = rel(dependency_triggers[0]);
-            return handle_full_rebuild(&format!("{trigger} (no deps cached)"), status);
+            return handle_full_rebuild(&format!("{trigger} (no deps cached)"), status, vdom_cache);
         }
 
         incremental_targets.extend(affected);
@@ -317,7 +322,7 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
         }
 
         // Use VDOM diff for incremental hot reload
-        match process_with_vdom_diff(&incremental_targets, &c, clean, status, &rel) {
+        match process_with_vdom_diff(&incremental_targets, &c, clean, status, &rel, vdom_cache) {
             Ok(count) => {
                 let msg = if count == 1 {
                     format!("rebuilt: {}", rel(&incremental_targets[0]))
@@ -350,7 +355,7 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
             log!("hotreload"; "cascading to {} virtual data dependents", virtual_dependents.len());
 
             // For cascade updates, use full reload instead of patch.
-            // Reason: VDOM_CACHE stores the state from when the page was last *directly* edited,
+            // Reason: vdom_cache stores the state from when the page was last *directly* edited,
             // but the browser may show a different state (e.g., from page load or previous cascade).
             // Using patch here would cause inconsistency between browser DOM and expected state.
             for path in &virtual_dependents {
@@ -384,6 +389,7 @@ fn process_with_vdom_diff(
     _clean: bool,
     _status: &mut WatchStatus,
     rel: &impl Fn(&Path) -> String,
+    vdom_cache: &mut VdomCache,
 ) -> Result<usize> {
     use crate::compiler::assets::{process_asset, rebuild_tailwind};
 
@@ -400,12 +406,12 @@ fn process_with_vdom_diff(
         if ext == Some("typ") {
             // path is already canonical from Debouncer
 
-            // Get old VDOM from cache BEFORE compilation
-            let old_vdom = VDOM_CACHE.get(path);
-
             // Content file: use VDOM diff
             match process_page(&Development, path, config) {
                 Ok(Some(result)) => {
+                    // Get old VDOM from cache BEFORE diff (keyed by url_path)
+                    let old_vdom = vdom_cache.get(&result.url_path);
+
                     count += 1;
                     any_content_changed = true;
 
@@ -455,7 +461,7 @@ fn process_with_vdom_diff(
 
                     // Update VDOM cache AFTER successful write/broadcast
                     // This keeps cache in sync with what browser should display
-                    VDOM_CACHE.insert(path.clone(), new_vdom.clone());
+                    vdom_cache.insert(result.url_path, new_vdom.clone());
                 }
                 Ok(None) => {
                     // Skipped (draft or up-to-date)
@@ -481,11 +487,11 @@ fn process_with_vdom_diff(
 }
 
 /// Helper for full rebuild with status output.
-fn handle_full_rebuild(reason: &str, status: &mut WatchStatus) -> bool {
+fn handle_full_rebuild(reason: &str, status: &mut WatchStatus, vdom_cache: &mut VdomCache) -> bool {
     use crate::compiler::deps::DEPENDENCY_GRAPH;
 
     DEPENDENCY_GRAPH.write().clear();
-    VDOM_CACHE.clear(); // Clear VDOM cache on full rebuild
+    vdom_cache.clear(); // Clear VDOM cache on full rebuild
 
     // Use dev mode build to emit data-tola-id attributes for hot reload
     match crate::build::build_site(Development, &cfg(), true) {
@@ -636,6 +642,7 @@ pub fn watch_for_changes_blocking() -> Result<()> {
     let mut debouncer = Debouncer::new();
     let mut content_cache = ContentCache::new();
     let mut status = WatchStatus::new();
+    let mut vdom_cache = VdomCache::new(); // Local VDOM cache (keyed by url_path)
     content_cache.populate(&c);
     // Note: VDOM cache is populated during build_all(Development) in main.rs
     // No need to populate again here - that would create StableId mismatch!
@@ -660,7 +667,7 @@ pub fn watch_for_changes_blocking() -> Result<()> {
 
                 // Process changed files
                 if !result.changed.is_empty()
-                    && handle_changes(&result.changed, &mut status, &root) {
+                    && handle_changes(&result.changed, &mut status, &root, &mut vdom_cache) {
                         debouncer.mark_rebuild();
                     }
             }

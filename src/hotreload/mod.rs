@@ -37,13 +37,18 @@
 //!
 //! The diff algorithm lives in `crate::vdom::diff`.
 //! This module handles WebSocket transport and message serialization.
+//!
+//! # VDOM Cache
+//!
+//! VDOM caching is handled by `VdomCache` in this module.
+//! Each consumer (watch.rs, actor) owns its own cache instance.
 
 pub mod cache;
 pub mod message;
 pub mod server;
 
 // Public API
-pub use cache::VDOM_CACHE;
 #[allow(unused_imports)]
+pub use cache::VdomCache;
 pub use message::HotReloadMessage;
 pub use server::{broadcast_patches, broadcast_reload, HotReloadServer};

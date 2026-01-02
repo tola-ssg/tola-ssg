@@ -170,7 +170,7 @@ graph TD
 > **Note**: 当前实现工作正常，此迁移为架构一致性优化，非必需。
 ### 4.6 Data Store Refactoring (`src/data`) � **PARTIAL**
 *   **现状**: `src/data` 依赖全局可变状态 `GLOBAL_SITE_DATA` (`LazyLock<RwLock>`)。
-*   **进展**: 
+*   **进展**:
     *   ✅ `VdomCache` 已移动到 `pipeline::cache::VdomCache`，作为 Actor 内部状态
     *   📋 `GLOBAL_SITE_DATA` 尚未迁移
 *   **待完成**:

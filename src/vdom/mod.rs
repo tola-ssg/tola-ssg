@@ -40,6 +40,7 @@
 #![allow(dead_code)]
 
 pub mod attr;
+pub mod cache;
 pub mod convert;
 pub mod diff;
 pub mod family;
@@ -98,6 +99,9 @@ pub use id::{PageSeed, StableId};
 pub use diff::{diff, DiffResult, DiffStats, Patch};
 #[allow(unused_imports)]
 pub use lcs::{diff_sequences, Edit, LcsResult, LcsStats};
+
+// Cache
+pub use cache::VdomCache;
 
 // =============================================================================
 // High-level API for compilation pipeline integration

@@ -88,10 +88,10 @@ rkyv = { version = "0.8", optional = true }
 redb = { version = "2", optional = true }
 
 [features]
-default = []
+default = ["actor"]
 # Enable rkyv serialization for VDOM (Phase 2 of PLAN.md)
 rkyv = ["dep:rkyv"]
-# Enable Actor concurrency model (Phase 5 of PLAN.md)
+# Enable Actor concurrency model - now default, will be mandatory in future
 actor = ["dep:tokio"]
 # Enable persistent VDOM cache with redb (Phase 6 of PLAN.md)
 cache = ["dep:redb"]
