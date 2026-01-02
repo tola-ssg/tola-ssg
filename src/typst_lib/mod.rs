@@ -39,7 +39,11 @@
 //! use tola::typst_lib;
 //!
 //! // Pre-warm at startup (optional but recommended)
-//! typst_lib::warmup_with_root(Path::new("/project/root"));
+//! // Only scan assets/ and content/ to avoid loading fonts from output/
+//! typst_lib::warmup_with_font_dirs(&[
+//!     Path::new("/project/assets"),
+//!     Path::new("/project/content"),
+//! ]);
 //!
 //! // Compile files - template.typ is cached after first use!
 //! let result = typst_lib::compile_meta(
@@ -140,9 +144,13 @@ const fn acquire_test_lock() -> DummyGuard {
 /// Pre-warm global resources (fonts, library, package storage).
 ///
 /// Call once at startup to avoid lazy initialization during compilation.
-/// Pass the project root to include custom fonts from the project directory.
-pub fn warmup_with_root(root: &Path) {
-    let _ = font::get_fonts(Some(root));
+///
+/// # Arguments
+///
+/// * `font_dirs` - Directories to search for fonts (e.g., `[assets/, content/]`).
+///   Should NOT include output directory to avoid loading duplicate fonts.
+pub fn warmup_with_font_dirs(font_dirs: &[&Path]) {
+    let _ = font::get_fonts(font_dirs);
     let _ = &*library::GLOBAL_LIBRARY;
     let _ = &*package::GLOBAL_PACKAGE_STORAGE;
     let _ = &*file::GLOBAL_FILE_CACHE;
@@ -478,7 +486,7 @@ mod tests {
     fn test_warmup_does_not_panic() {
         let dir = TempDir::new().unwrap();
         // Should not panic even with empty directory
-        warmup_with_root(dir.path());
+        warmup_with_font_dirs(&[dir.path()]);
     }
 
     #[test]

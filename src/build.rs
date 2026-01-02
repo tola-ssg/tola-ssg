@@ -70,9 +70,11 @@ pub fn build_site<D: BuildDriver + Copy>(
 ) -> Result<(ThreadSafeRepository, Pages)> {
     let output = &config.build.output;
     let assets = &config.build.assets;
+    let content = &config.build.content;
 
     // Pre-warm typst library resources
-    typst_lib::warmup_with_root(config.get_root());
+    // Only scan assets/ and content/ for fonts to avoid loading duplicates from output/
+    typst_lib::warmup_with_font_dirs(&[assets.as_path(), content.as_path()]);
 
     // Ensure output directory has git repo (for deploy)
     let repo = ensure_output_repo(output, config.build.clean)?;

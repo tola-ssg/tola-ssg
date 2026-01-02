@@ -137,9 +137,9 @@ impl SystemWorld {
             .unwrap_or_else(|| VirtualPath::new(entry_file.file_name().unwrap()));
         let main = FileId::new(None, virtual_path);
 
-        // Get or initialize fonts with the project root as font path.
-        // This allows projects to include custom fonts in their directory.
-        let fonts = get_fonts(Some(&root));
+        // Get global fonts. Fonts are already initialized via warmup_with_font_dirs().
+        // If not yet initialized, this returns an empty font set.
+        let fonts = get_fonts(&[]);
 
         Self {
             root,

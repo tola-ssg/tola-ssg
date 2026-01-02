@@ -85,30 +85,8 @@ fn init_fonts(font_paths: &[&Path]) -> (Fonts, LazyHash<FontBook>) {
     // Search custom paths and system fonts
     let fonts = searcher.search_with(font_paths);
 
-    // DEBUG: 输出字体列表到 /tmp/tola_fonts_debug.txt
-    {
-        use std::io::Write;
-        let debug_path = std::path::Path::new("/tmp/tola_fonts_debug.txt");
-        if let Ok(mut file) = std::fs::File::create(debug_path) {
-            let _ = writeln!(file, "=== Font Debug Output (PID: {}) ===", std::process::id());
-            let _ = writeln!(file, "Total fonts: {}", fonts.fonts.len());
-            let _ = writeln!(file, "");
-            for (i, slot) in fonts.fonts.iter().enumerate() {
-                let path = slot.path().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "embedded".to_string());
-                let info = fonts.book.info(i);
-                let family = info.map(|i| i.family.as_str()).unwrap_or("?");
-                let variant = info.map(|i| format!("{:?}", i.variant)).unwrap_or_else(|| "?".to_string());
-                let _ = writeln!(file, "{:4}: {} | {} | idx={} | {}", i, family, path, slot.index(), variant);
-            }
-            let _ = writeln!(file, "");
-            let _ = writeln!(file, "=== End of Debug Output ===");
-            eprintln!("[FONT DEBUG] Wrote {} fonts to {:?}", fonts.fonts.len(), debug_path);
-        }
-    }
-
-    // DISABLED: Sort fonts for deterministic ordering
-    // let sorted_fonts = sort_fonts_deterministically(fonts);
-    // fonts = sorted_fonts;
+    // Sort fonts for deterministic ordering
+    // let fonts = sort_fonts_deterministically(fonts);
 
     // Wrap font book in LazyHash for comemo caching
     let book = LazyHash::new(fonts.book.clone());
@@ -177,8 +155,9 @@ fn sort_fonts_deterministically(fonts: Fonts) -> Fonts {
 ///
 /// # Arguments
 ///
-/// * `font_path` - Optional project root to include project-specific fonts.
-///   Pass `Some(root)` on the first call to include fonts from `{root}/fonts/`.
+/// * `font_dirs` - Directories to search for fonts (e.g., `[assets/, content/]`).
+///   Pass on the first call to include fonts from these directories.
+///   Should NOT include output directory (e.g., `public/`) to avoid duplicates.
 ///
 /// # Returns
 ///
@@ -188,10 +167,8 @@ fn sort_fonts_deterministically(fonts: Fonts) -> Fonts {
 ///
 /// This function is thread-safe. If called concurrently, only one thread
 /// performs initialization; others wait and receive the shared result.
-pub fn get_fonts(font_path: Option<&Path>) -> &'static (Fonts, LazyHash<FontBook>) {
-    GLOBAL_FONTS.get_or_init(|| {
-        font_path.map_or_else(|| init_fonts(&[]), |path| init_fonts(&[path]))
-    })
+pub fn get_fonts(font_dirs: &[&Path]) -> &'static (Fonts, LazyHash<FontBook>) {
+    GLOBAL_FONTS.get_or_init(|| init_fonts(font_dirs))
 }
 
 #[cfg(test)]
@@ -200,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_global_fonts_initialized() {
-        let fonts = get_fonts(None);
+        let fonts = get_fonts(&[]);
         // Should find at least some system fonts on most systems
         // Note: This test may fail in minimal container environments
         assert!(!fonts.0.fonts.is_empty(), "Should find system fonts");
@@ -208,15 +185,15 @@ mod tests {
 
     #[test]
     fn test_font_book_not_empty() {
-        let fonts = get_fonts(None);
+        let fonts = get_fonts(&[]);
         // FontBook should have indexed the fonts
         assert!(fonts.1.families().count() > 0, "Font book should have families");
     }
 
     #[test]
     fn test_fonts_are_shared() {
-        let fonts1 = get_fonts(None);
-        let fonts2 = get_fonts(None);
+        let fonts1 = get_fonts(&[]);
+        let fonts2 = get_fonts(&[]);
         // Should return the same static reference
         assert!(std::ptr::eq(fonts1, fonts2), "Fonts should be shared");
     }
@@ -224,9 +201,9 @@ mod tests {
     #[test]
     fn test_subsequent_calls_ignore_path() {
         // First call initializes (may have been done by other tests)
-        let fonts1 = get_fonts(None);
+        let fonts1 = get_fonts(&[]);
         // Second call with different path should return same fonts
-        let fonts2 = get_fonts(Some(Path::new("/nonexistent")));
+        let fonts2 = get_fonts(&[Path::new("/nonexistent")]);
         assert!(std::ptr::eq(fonts1, fonts2), "Path ignored after initialization");
     }
 }
