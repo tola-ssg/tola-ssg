@@ -83,11 +83,32 @@ fn init_fonts(font_paths: &[&Path]) -> (Fonts, LazyHash<FontBook>) {
     // Include system fonts (platform-specific locations)
     searcher.include_system_fonts(true);
     // Search custom paths and system fonts
-    let mut fonts = searcher.search_with(font_paths);
+    let fonts = searcher.search_with(font_paths);
 
-    // Sort fonts for deterministic ordering
-    let sorted_fonts = sort_fonts_deterministically(fonts);
-    fonts = sorted_fonts;
+    // DEBUG: 输出字体列表到 /tmp/tola_fonts_debug.txt
+    {
+        use std::io::Write;
+        let debug_path = std::path::Path::new("/tmp/tola_fonts_debug.txt");
+        if let Ok(mut file) = std::fs::File::create(debug_path) {
+            let _ = writeln!(file, "=== Font Debug Output (PID: {}) ===", std::process::id());
+            let _ = writeln!(file, "Total fonts: {}", fonts.fonts.len());
+            let _ = writeln!(file, "");
+            for (i, slot) in fonts.fonts.iter().enumerate() {
+                let path = slot.path().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| "embedded".to_string());
+                let info = fonts.book.info(i);
+                let family = info.map(|i| i.family.as_str()).unwrap_or("?");
+                let variant = info.map(|i| format!("{:?}", i.variant)).unwrap_or_else(|| "?".to_string());
+                let _ = writeln!(file, "{:4}: {} | {} | idx={} | {}", i, family, path, slot.index(), variant);
+            }
+            let _ = writeln!(file, "");
+            let _ = writeln!(file, "=== End of Debug Output ===");
+            eprintln!("[FONT DEBUG] Wrote {} fonts to {:?}", fonts.fonts.len(), debug_path);
+        }
+    }
+
+    // DISABLED: Sort fonts for deterministic ordering
+    // let sorted_fonts = sort_fonts_deterministically(fonts);
+    // fonts = sorted_fonts;
 
     // Wrap font book in LazyHash for comemo caching
     let book = LazyHash::new(fonts.book.clone());
