@@ -40,15 +40,12 @@
 //!
 //! # VDOM Cache
 //!
-//! VDOM caching is handled by `VdomCache` in this module.
+//! VDOM caching is handled by `crate::vdom::VdomCache`.
 //! Each consumer (watch.rs, actor) owns its own cache instance.
 
-pub mod cache;
 pub mod message;
 pub mod server;
 
 // Public API
-#[allow(unused_imports)]
-pub use cache::VdomCache;
 pub use message::HotReloadMessage;
 pub use server::{broadcast_patches, broadcast_reload, HotReloadServer};

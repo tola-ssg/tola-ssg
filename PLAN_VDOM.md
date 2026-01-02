@@ -171,7 +171,7 @@ graph TD
 ### 4.6 Data Store Refactoring (`src/data`) � **PARTIAL**
 *   **现状**: `src/data` 依赖全局可变状态 `GLOBAL_SITE_DATA` (`LazyLock<RwLock>`)。
 *   **进展**:
-    *   ✅ `VdomCache` 已移动到 `pipeline::cache::VdomCache`，作为 Actor 内部状态
+    *   ✅ `VdomCache` 已移动到 `vdom::VdomCache`，作为 Actor 内部状态
     *   📋 `GLOBAL_SITE_DATA` 尚未迁移
 *   **待完成**:
     *   废弃 `GLOBAL_SITE_DATA` 静态变量

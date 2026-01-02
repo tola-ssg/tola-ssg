@@ -3,7 +3,7 @@
 //! Pure functions for computing diffs between VDOM documents.
 //! No Actor machinery, no global state.
 
-use crate::pipeline::cache::VdomCache;
+use crate::vdom::VdomCache;
 use crate::vdom::diff::{diff, DiffResult as VdomDiffResult, Patch};
 use crate::vdom::{Document, Indexed};
 
