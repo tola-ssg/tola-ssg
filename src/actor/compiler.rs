@@ -2,22 +2,17 @@
 //!
 //! This actor is responsible for:
 //! 1. Receiving file change notifications
-//! 2. Compiling Typst files to VDOM
+//! 2. Dispatching to `pipeline::compile` for actual compilation
 //! 3. Forwarding results to VdomActor for diffing
 //!
-//! # Architecture
+//! # Design
 //!
-//! ```text
-//! FsActor ──[Compile(paths)]──► CompilerActor ──[Process]──► VdomActor
-//!                                    │
-//!                              typst::World
-//!                           (compilation state)
-//! ```
+//! This is a **thin wrapper** around `pipeline::compile`. The actor only handles:
+//! - Async message loop
+//! - spawn_blocking for CPU work
+//! - Routing results to other actors
 //!
-//! # Responsibility Boundary
-//!
-//! - **This Actor**: Typst compilation only (AST → VDOM)
-//! - **NOT This Actor**: Diffing, caching, broadcasting (handled by VdomActor/WsActor)
+//! All business logic lives in `pipeline::compile`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,10 +21,8 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 
 use super::messages::{CompilerMsg, VdomMsg, WsMsg};
-use crate::compiler::pages::process_page;
 use crate::config::SiteConfig;
-use crate::driver::Development;
-use crate::vdom::Indexed;
+use crate::pipeline::compile::{compile_page, CompileOutcome};
 
 /// Compiler Actor - handles Typst compilation
 pub struct CompilerActor {
@@ -41,23 +34,6 @@ pub struct CompilerActor {
     ws_tx: mpsc::Sender<WsMsg>,
     /// Site configuration
     config: Arc<SiteConfig>,
-}
-
-/// Result from compiling a single file
-#[derive(Debug)]
-enum CompileOutcome {
-    /// Successfully compiled to VDOM
-    Vdom {
-        path: PathBuf,
-        url_path: String,
-        vdom: crate::vdom::Document<Indexed>,
-    },
-    /// Non-content file changed, needs reload
-    Reload { reason: String },
-    /// File skipped (draft, not found, etc.)
-    Skipped,
-    /// Compilation error
-    Error { path: PathBuf, error: String },
 }
 
 impl CompilerActor {
@@ -110,29 +86,7 @@ impl CompilerActor {
 
                 // Route results to appropriate actors
                 for outcome in outcomes {
-                    match outcome {
-                        CompileOutcome::Vdom { path, url_path, vdom } => {
-                            // Send to VdomActor for diffing
-                            let _ = self.vdom_tx.send(VdomMsg::Process {
-                                path,
-                                url_path,
-                                vdom,
-                            }).await;
-                        }
-                        CompileOutcome::Reload { reason } => {
-                            // Directly notify WsActor
-                            let _ = self.ws_tx.send(WsMsg::Reload { reason }).await;
-                        }
-                        CompileOutcome::Skipped => {
-                            // Nothing to do
-                        }
-                        CompileOutcome::Error { path, error } => {
-                            crate::log!("compile"; "error in {}: {}", path.display(), error);
-                            let _ = self.ws_tx.send(WsMsg::Reload {
-                                reason: format!("compile error: {}", error),
-                            }).await;
-                        }
-                    }
+                    self.route_outcome(outcome).await;
                 }
             }
             Err(e) => {
@@ -141,87 +95,40 @@ impl CompilerActor {
         }
     }
 
-    /// Perform Typst compilation (runs in blocking thread pool)
-    ///
-    /// This function:
-    /// 1. Filters files by type
-    /// 2. Compiles .typ files to VDOM
-    /// 3. Returns outcomes for routing
-    ///
-    /// Note: No diffing or caching here - that's VdomActor's job
-    fn do_compile(paths: &[PathBuf], config: &SiteConfig) -> Vec<CompileOutcome> {
-        let mut outcomes = Vec::with_capacity(paths.len());
-
-        for path in paths {
-            let ext = path.extension().and_then(|e| e.to_str());
-
-            match ext {
-                Some("typ") => {
-                    // Compile Typst file
-                    match Self::compile_typst_file(path, config) {
-                        Ok(Some((url_path, vdom))) => {
-                            outcomes.push(CompileOutcome::Vdom {
-                                path: path.clone(),
-                                url_path,
-                                vdom,
-                            });
-                        }
-                        Ok(None) => {
-                            outcomes.push(CompileOutcome::Skipped);
-                        }
-                        Err(e) => {
-                            outcomes.push(CompileOutcome::Error {
-                                path: path.clone(),
-                                error: e.to_string(),
-                            });
-                        }
-                    }
-                }
-                Some("css" | "js" | "html") => {
-                    // Asset file - needs reload
-                    outcomes.push(CompileOutcome::Reload {
-                        reason: format!("asset changed: {}", path.display()),
-                    });
-                }
-                _ => {
-                    // Unknown file type - trigger reload to be safe
-                    outcomes.push(CompileOutcome::Reload {
-                        reason: format!("file changed: {}", path.display()),
-                    });
-                }
+    /// Route a compile outcome to the appropriate actor
+    async fn route_outcome(&self, outcome: CompileOutcome) {
+        match outcome {
+            CompileOutcome::Vdom { path, url_path, vdom } => {
+                // Send to VdomActor for diffing
+                let _ = self.vdom_tx.send(VdomMsg::Process {
+                    path,
+                    url_path,
+                    vdom,
+                }).await;
+            }
+            CompileOutcome::Reload { reason } => {
+                // Directly notify WsActor
+                let _ = self.ws_tx.send(WsMsg::Reload { reason }).await;
+            }
+            CompileOutcome::Skipped => {
+                // Nothing to do
+            }
+            CompileOutcome::Error { path, error } => {
+                crate::log!("compile"; "error in {}: {}", path.display(), error);
+                let _ = self.ws_tx.send(WsMsg::Reload {
+                    reason: format!("compile error: {}", error),
+                }).await;
             }
         }
-
-        outcomes
     }
 
-    /// Compile a single Typst file to VDOM
-    fn compile_typst_file(
-        path: &PathBuf,
-        config: &SiteConfig,
-    ) -> anyhow::Result<Option<(String, crate::vdom::Document<Indexed>)>> {
-        // Use existing process_page with Development driver instance
-        let driver = Development;
-        let result = process_page(&driver, path, config)?;
-
-        match result {
-            Some(page_result) => {
-                // Extract URL path and VDOM
-                let url_path = page_result.url_path;
-
-                // indexed_vdom is only populated in development mode
-                if let Some(vdom) = page_result.indexed_vdom {
-                    Ok(Some((url_path, vdom)))
-                } else {
-                    // No VDOM available (shouldn't happen in dev mode)
-                    Ok(None)
-                }
-            }
-            None => {
-                // Page was skipped (draft, etc.)
-                Ok(None)
-            }
-        }
+    /// Perform compilation (runs in blocking thread pool)
+    ///
+    /// Delegates to `pipeline::compile::compile_page` for each file.
+    fn do_compile(paths: &[PathBuf], config: &SiteConfig) -> Vec<CompileOutcome> {
+        paths.iter()
+            .map(|path| compile_page(path, config))
+            .collect()
     }
 }
 

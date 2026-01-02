@@ -83,5 +83,14 @@ pub mod vdom;
 pub mod ws;
 
 #[cfg(feature = "actor")]
+#[allow(dead_code)]
+pub mod coordinator;
+
+// Re-exports for convenience
+#[cfg(feature = "actor")]
+#[allow(unused_imports)]
+pub use coordinator::Coordinator;
+
+#[cfg(feature = "actor")]
 #[allow(unused_imports)]
 pub use messages::*;

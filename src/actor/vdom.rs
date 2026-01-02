@@ -1,105 +1,30 @@
 //! VDOM Actor - The Bridge between Typst and Hot Reload
 //!
 //! This actor is responsible for:
-//! 1. Converting Typst AST to Tola VDOM (TTG conversion)
-//! 2. Running the VDOM Pipeline (Index → Process → Render)
-//! 3. Computing diffs against cached previous state
-//! 4. Managing VDOM cache (internal state, no global)
+//! 1. Receiving compiled VDOM from CompilerActor
+//! 2. Computing diffs via `pipeline::diff`
+//! 3. Managing VDOM cache via `pipeline::cache`
+//! 4. Sending patch/reload messages to WsActor
 //!
-//! # Architecture
+//! # Design
 //!
-//! ```text
-//! CompilerActor ──[Artifacts]──► VdomActor ──[Patch/Reload]──► WsActor
-//!                                    │
-//!                              VdomCache
-//!                           (internal state)
-//! ```
+//! This is a **thin wrapper** around `pipeline::diff`. The actor only handles:
+//! - Async message loop
+//! - spawn_blocking for CPU work (diffing)
+//! - Routing results to WsActor
 //!
-//! # Message Flow
-//!
-//! 1. Receives `VdomMsg::Process { path, html }` from CompilerActor
-//! 2. Converts HTML to VDOM, runs pipeline
-//! 3. Diffs against cached VDOM
-//! 4. Sends `WsMsg::Patch` or `WsMsg::Reload` to WsActor
+//! All business logic lives in `pipeline::diff` and `pipeline::cache`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use rustc_hash::FxHashMap;
 use tokio::sync::mpsc;
 
 use super::messages::{VdomMsg, WsMsg};
-use crate::vdom::diff::{diff, DiffResult as VdomDiffResult, Patch};
+use crate::pipeline::cache::VdomCache;
+use crate::pipeline::diff::{compute_diff, DiffOutcome};
 use crate::vdom::{Document, Indexed};
-
-// =============================================================================
-// Types
-// =============================================================================
-
-/// VDOM cache - stores previous VDOM state for diffing
-///
-/// This replaces the global `VDOM_CACHE` static. Each VdomActor owns
-/// its cache, eliminating shared mutable state.
-#[derive(Debug, Default)]
-pub struct VdomCache {
-    /// Maps URL path to cached VDOM document
-    pages: FxHashMap<String, Document<Indexed>>,
-}
-
-impl VdomCache {
-    /// Create a new empty cache
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Get cached VDOM for a URL path
-    pub fn get(&self, url_path: &str) -> Option<&Document<Indexed>> {
-        self.pages.get(url_path)
-    }
-
-    /// Insert or update cached VDOM, returns the old value if any
-    pub fn insert(&mut self, url_path: String, doc: Document<Indexed>) -> Option<Document<Indexed>> {
-        self.pages.insert(url_path, doc)
-    }
-
-    /// Remove a page from cache
-    pub fn remove(&mut self, url_path: &str) -> Option<Document<Indexed>> {
-        self.pages.remove(url_path)
-    }
-
-    /// Clear all cached pages
-    pub fn clear(&mut self) {
-        self.pages.clear();
-    }
-
-    /// Number of cached pages
-    pub fn len(&self) -> usize {
-        self.pages.len()
-    }
-
-    /// Check if cache is empty
-    pub fn is_empty(&self) -> bool {
-        self.pages.is_empty()
-    }
-}
-
-/// Internal outcome of diff computation
-#[derive(Debug)]
-enum DiffOutcome {
-    /// First time seeing this page, no diff possible
-    Initial,
-    /// No changes detected
-    Unchanged,
-    /// Patches to apply
-    Patches(Vec<Patch>),
-    /// Structural change requires full reload
-    NeedsReload { reason: String },
-}
-
-// =============================================================================
-// VdomActor
-// =============================================================================
 
 /// VDOM Actor - converts AST to VDOM and computes diffs
 pub struct VdomActor {
@@ -151,6 +76,8 @@ impl VdomActor {
     }
 
     /// Handle VDOM processing request
+    ///
+    /// Delegates to `pipeline::diff::compute_diff` for the actual work.
     async fn handle_process(
         &self,
         _path: PathBuf,
@@ -163,46 +90,12 @@ impl VdomActor {
         // Compute diff in blocking thread (diff can be CPU intensive)
         let result = tokio::task::spawn_blocking(move || {
             let mut cache = cache.lock();
-
-            let outcome = if let Some(old_vdom) = cache.get(&url_path_clone) {
-                let diff_result: VdomDiffResult = diff(old_vdom, &new_vdom);
-
-                if diff_result.should_reload {
-                    DiffOutcome::NeedsReload {
-                        reason: diff_result.reload_reason.unwrap_or_else(|| "complex change".to_string()),
-                    }
-                } else if diff_result.ops.is_empty() {
-                    DiffOutcome::Unchanged
-                } else {
-                    DiffOutcome::Patches(diff_result.ops)
-                }
-            } else {
-                DiffOutcome::Initial
-            };
-
-            // Update cache with new VDOM
-            cache.insert(url_path_clone, new_vdom);
-
-            outcome
+            compute_diff(&mut cache, &url_path_clone, new_vdom)
         }).await;
 
+        // Route outcome to WsActor
         match result {
-            Ok(DiffOutcome::Patches(patches)) => {
-                let count = patches.len();
-                crate::log!("vdom"; "patch {} ({} ops)", url_path, count);
-                let _ = self.ws_tx.send(WsMsg::Patch { url_path, patches }).await;
-            }
-            Ok(DiffOutcome::Initial) => {
-                crate::log!("vdom"; "initial {} (no diff)", url_path);
-                // First compile - could send full HTML or just skip
-            }
-            Ok(DiffOutcome::Unchanged) => {
-                crate::log!("vdom"; "unchanged {}", url_path);
-            }
-            Ok(DiffOutcome::NeedsReload { reason }) => {
-                crate::log!("vdom"; "reload {}: {}", url_path, reason);
-                let _ = self.ws_tx.send(WsMsg::Reload { reason }).await;
-            }
+            Ok(outcome) => self.route_outcome(url_path, outcome).await,
             Err(e) => {
                 crate::log!("vdom"; "spawn_blocking error: {}", e);
                 let _ = self.ws_tx.send(WsMsg::Reload {
@@ -211,18 +104,36 @@ impl VdomActor {
             }
         }
     }
-}
 
-// =============================================================================
-// Tests
-// =============================================================================
+    /// Route a diff outcome to WsActor
+    async fn route_outcome(&self, url_path: String, outcome: DiffOutcome) {
+        match outcome {
+            DiffOutcome::Patches { patches } => {
+                let count = patches.len();
+                crate::log!("vdom"; "patch {} ({} ops)", url_path, count);
+                let _ = self.ws_tx.send(WsMsg::Patch { url_path, patches }).await;
+            }
+            DiffOutcome::Initial => {
+                crate::log!("vdom"; "initial {} (no diff)", url_path);
+                // First compile - could send full HTML or just skip
+            }
+            DiffOutcome::Unchanged => {
+                crate::log!("vdom"; "unchanged {}", url_path);
+            }
+            DiffOutcome::NeedsReload { reason } => {
+                crate::log!("vdom"; "reload {}: {}", url_path, reason);
+                let _ = self.ws_tx.send(WsMsg::Reload { reason }).await;
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_vdom_cache_empty() {
+    fn test_vdom_cache_via_pipeline() {
         let cache = VdomCache::new();
         assert!(cache.is_empty());
         assert_eq!(cache.len(), 0);
