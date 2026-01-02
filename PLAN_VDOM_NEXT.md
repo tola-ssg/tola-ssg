@@ -33,7 +33,11 @@
     - 既然采用了"立即 SVG 转换"策略，`Node::Frame` 枚举变体目前是死代码。
     - **决定**: 移除 `Node::Frame`，将所有 Frame 在转换阶段直接降级为 `Element::svg`。
     - *注：未来若需支持 AVIF 等光栅化格式，可恢复此变体用于延迟渲染（见 Phase 4）。*
-- [~] **Standardize Identity**: `NodeId` 仍用于 `IndexedDocExt` 家族节点追踪，推迟移除。
+- [x] **Standardize Identity**: `NodeId` 已从 vdom 核心模块移除，全部使用 `StableId`。
+    - 移除了 `IndexedElemExt.node_id` 字段
+    - 简化了 `IndexedDocExt.xxx_nodes: Vec<NodeId>` 为 `xxx_count: usize`
+    - 创建了 `PageSeed` newtype 用于页面种子
+    - 拆分了 `node.rs` 为 `node/` 子模块（element, text, document, family_ext, types）
 - [x] **Remove Dead Code**: 无 `#[allow(dead_code)]`，已清理完毕。
 - [x] **Harden SVG Parsing**: `convert.rs` 目前使用手动字符串解析 SVG 属性，较为脆弱。考虑引入轻量级 XML 解析器或增强测试覆盖。
 
