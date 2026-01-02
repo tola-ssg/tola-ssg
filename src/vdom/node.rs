@@ -19,34 +19,6 @@ use super::family::{
 use super::phase::PhaseData;
 
 // =============================================================================
-// NodeId
-// =============================================================================
-
-/// Unique identifier for nodes within a document
-///
-/// Used for efficient node lookup and tree operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct NodeId(pub u32);
-
-impl NodeId {
-    /// Create a new NodeId
-    pub const fn new(id: u32) -> Self {
-        Self(id)
-    }
-
-    /// Get the raw id value
-    pub const fn as_u32(&self) -> u32 {
-        self.0
-    }
-}
-
-impl std::fmt::Display for NodeId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "#{}", self.0)
-    }
-}
-
-// =============================================================================
 // FamilyExt - Zero-cost family extension enum
 // =============================================================================
 
@@ -131,9 +103,6 @@ impl FamilyExt<Raw> {
 
 /// Indexed phase: access common fields across all families
 impl FamilyExt<Indexed> {
-    // Generates: node_id(&self) -> NodeId (reads e.node_id from each variant)
-    impl_family_field_get!(node_id, node_id, NodeId, Svg, Link, Heading, Media, Other);
-
     /// Get the StableId from any family variant
     pub fn stable_id(&self) -> super::id::StableId {
         match self {
@@ -840,12 +809,6 @@ impl<P: PhaseData> Document<P> {
 mod tests {
     use super::*;
     use crate::vdom::phase::Raw;
-
-    #[test]
-    fn test_node_id_display() {
-        let id = NodeId::new(42);
-        assert_eq!(format!("{}", id), "#42");
-    }
 
     #[test]
     fn test_element_basics() {

@@ -1,9 +1,9 @@
 //! Indexer Transform: Raw → Indexed
 //!
 //! Traverses the Raw VDOM tree and:
-//! 1. Assigns unique NodeId and StableId to each element/frame
+//! 1. Assigns StableId to each element and text node
 //! 2. Extracts family-specific data from attributes
-//! 3. Collects node references by family type
+//! 3. Counts nodes by family type
 //!
 //! # Occurrence-based StableId
 //!
@@ -22,7 +22,7 @@ use crate::vdom::family::{
     MediaIndexedData, SvgIndexedData, identify_family_kind,
 };
 use crate::vdom::id::StableId;
-use crate::vdom::node::{Document, Element, FamilyExt, Node, NodeId, Text};
+use crate::vdom::node::{Document, Element, FamilyExt, Node, Text};
 use crate::vdom::phase::{Indexed, IndexedDocExt, IndexedElemExt, Raw};
 use crate::vdom::transform::Transform;
 
@@ -34,7 +34,7 @@ use crate::vdom::transform::Transform;
 ///
 /// # Responsibilities
 ///
-/// - Assign unique NodeId to each element and frame
+/// - Assign unique StableId to each element and frame
 /// - Extract family-specific data from element attributes
 /// - Track node counts and family references in document extension
 ///
@@ -45,20 +45,18 @@ use crate::vdom::transform::Transform;
 /// let indexed_doc: Document<Indexed> = Indexer::new().transform(raw_doc);
 /// ```
 pub struct Indexer {
-    /// Next available node ID
-    next_id: u32,
     /// Page-specific seed for globally unique StableIds
     /// When set, all StableIds will include this seed, making them
     /// unique across different pages.
     page_seed: u64,
-    /// Collected SVG node IDs
-    svg_nodes: Vec<NodeId>,
-    /// Collected link node IDs
-    link_nodes: Vec<NodeId>,
-    /// Collected heading node IDs
-    heading_nodes: Vec<NodeId>,
-    /// Collected media node IDs
-    media_nodes: Vec<NodeId>,
+    /// SVG element count
+    svg_count: usize,
+    /// Link element count
+    link_count: usize,
+    /// Heading element count
+    heading_count: usize,
+    /// Media element count
+    media_count: usize,
     /// Total element count
     element_count: usize,
     /// Total text count
@@ -69,12 +67,11 @@ impl Indexer {
     /// Create a new Indexer
     pub fn new() -> Self {
         Self {
-            next_id: 0,
             page_seed: 0,
-            svg_nodes: Vec::new(),
-            link_nodes: Vec::new(),
-            heading_nodes: Vec::new(),
-            media_nodes: Vec::new(),
+            svg_count: 0,
+            link_count: 0,
+            heading_count: 0,
+            media_count: 0,
             element_count: 0,
             text_count: 0,
         }
@@ -88,43 +85,32 @@ impl Indexer {
     ///
     /// # Example
     /// ```ignore
+    /// use crate::vdom::id::PageSeed;
     /// let indexed = Indexer::new()
-    ///     .with_page_seed("/blog/post.html")
+    ///     .with_page_seed(PageSeed::from_path("/blog/post.html"))
     ///     .transform(raw_doc);
     /// ```
-    pub fn with_page_seed(mut self, page_path: &str) -> Self {
-        use crate::utils::hash::StableHasher;
-        self.page_seed = StableHasher::new()
-            .update_str("__page__")
-            .update_str(page_path)
-            .finish();
+    pub fn with_page_seed(mut self, seed: crate::vdom::id::PageSeed) -> Self {
+        self.page_seed = seed.as_u64();
         self
-    }
-
-    /// Generate next NodeId
-    fn next_node_id(&mut self) -> NodeId {
-        let id = NodeId::new(self.next_id);
-        self.next_id += 1;
-        id
     }
 
     /// Index a document
     fn index_document(&mut self, doc: Document<Raw>) -> Document<Indexed> {
         // Use page_seed as root seed - makes all StableIds globally unique
         let root = self.index_element(doc.root, 0, self.page_seed);
-        let node_count = self.next_id;
 
         Document {
             root,
             ext: IndexedDocExt {
                 base: doc.ext,
-                node_count,
+                node_count: self.element_count + self.text_count,
                 element_count: self.element_count,
                 text_count: self.text_count,
-                svg_nodes: std::mem::take(&mut self.svg_nodes),
-                link_nodes: std::mem::take(&mut self.link_nodes),
-                heading_nodes: std::mem::take(&mut self.heading_nodes),
-                media_nodes: std::mem::take(&mut self.media_nodes),
+                svg_count: self.svg_count,
+                link_count: self.link_count,
+                heading_count: self.heading_count,
+                media_count: self.media_count,
             },
         }
     }
@@ -140,7 +126,6 @@ impl Indexer {
     /// same content key appeared before this element. This enables Move detection.
     fn index_element(&mut self, elem: Element<Raw>, occurrence: usize, parent_seed: u64) -> Element<Indexed> {
         self.element_count += 1;
-        let node_id = self.next_node_id();
 
         // Extract data we need before moving children
         let tag = elem.tag;
@@ -166,14 +151,14 @@ impl Indexer {
         // Index children with occurrence-based IDs + parent seed
         let (children, _) = self.index_children(elem.children, my_seed);
 
-        let ext = self.create_indexed_ext(node_id, stable_id, kind, &tag, &attrs);
+        let ext = self.create_indexed_ext(stable_id, kind, &tag, &attrs);
 
-        // Track node by family
+        // Track node count by family
         match kind {
-            FamilyKind::Svg => self.svg_nodes.push(node_id),
-            FamilyKind::Link => self.link_nodes.push(node_id),
-            FamilyKind::Heading => self.heading_nodes.push(node_id),
-            FamilyKind::Media => self.media_nodes.push(node_id),
+            FamilyKind::Svg => self.svg_count += 1,
+            FamilyKind::Link => self.link_count += 1,
+            FamilyKind::Heading => self.heading_count += 1,
+            FamilyKind::Media => self.media_count += 1,
             FamilyKind::Other => {}
         }
 
@@ -246,7 +231,6 @@ impl Indexer {
     /// Create FamilyExt<Indexed> with extracted data and StableId
     fn create_indexed_ext(
         &self,
-        node_id: NodeId,
         stable_id: StableId,
         kind: FamilyKind,
         tag: &str,
@@ -256,35 +240,30 @@ impl Indexer {
             FamilyKind::Svg => {
                 FamilyExt::Svg(IndexedElemExt {
                     stable_id,
-                    node_id,
                     family_data: self.extract_svg_data(tag, attrs),
                 })
             }
             FamilyKind::Link => {
                 FamilyExt::Link(IndexedElemExt {
                     stable_id,
-                    node_id,
                     family_data: self.extract_link_data(attrs),
                 })
             }
             FamilyKind::Heading => {
                 FamilyExt::Heading(IndexedElemExt {
                     stable_id,
-                    node_id,
                     family_data: self.extract_heading_data(tag, attrs),
                 })
             }
             FamilyKind::Media => {
                 FamilyExt::Media(IndexedElemExt {
                     stable_id,
-                    node_id,
                     family_data: self.extract_media_data(attrs),
                 })
             }
             FamilyKind::Other => {
                 FamilyExt::Other(IndexedElemExt {
                     stable_id,
-                    node_id,
                     family_data: (),
                 })
             }

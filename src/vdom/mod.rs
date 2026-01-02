@@ -70,12 +70,12 @@ pub use family::{
 // Transform system (unified API)
 #[allow(unused_imports)]
 pub use transform::{
-    process_family_ext, IdentityTransform, NodeIdGenerator, Pipeline, Processor, Transform,
+    process_family_ext, IdentityTransform, Pipeline, Processor, Transform,
 };
 
 // Node types
 #[allow(unused_imports)]
-pub use node::{Document, Element, FamilyExt, HasFamilyData, Node, NodeId, Stats, Text};
+pub use node::{Document, Element, FamilyExt, HasFamilyData, Node, Stats, Text};
 
 // Phase types
 #[allow(unused_imports)]
@@ -91,7 +91,7 @@ pub use convert::{from_typst_html, from_typst_html_with_meta};
 
 // Identity
 #[allow(unused_imports)]
-pub use id::StableId;
+pub use id::{PageSeed, StableId};
 
 // Diff algorithm
 #[allow(unused_imports)]
@@ -121,7 +121,7 @@ pub struct VdomCompileResult {
 /// # Pipeline
 ///
 /// 1. `from_typst_html()` - Convert typst HtmlDocument to Raw VDOM
-/// 2. `Indexer` - Transform Raw → Indexed (assign NodeIds, identify families)
+/// 2. `Indexer` - Transform Raw → Indexed (assign StableIds, identify families)
 /// 3. `Processor` - Transform Indexed → Processed (prepare for rendering)
 /// 4. `HtmlRenderer` - Render Processed → HTML bytes
 ///
@@ -250,7 +250,7 @@ pub fn compile<D: crate::driver::BuildDriver>(
     // Transform to Indexed
     // When page_path is provided, StableIds become globally unique across pages
     let indexer = if let Some(path) = page_path {
-        Indexer::new().with_page_seed(path)
+        Indexer::new().with_page_seed(PageSeed::from_path(path))
     } else {
         Indexer::new()
     };

@@ -777,7 +777,7 @@ mod tests {
     use super::*;
     use crate::vdom::family::OtherFamily;
     use crate::vdom::phase::IndexedElemExt;
-    use crate::vdom::{FamilyExt, NodeId, Text};
+    use crate::vdom::{FamilyExt, Text};
 
     #[test]
     fn test_patch_target() {
@@ -822,7 +822,6 @@ mod tests {
                 let sid = StableId::from_raw(base_id + i as u64 + 1);
                 let elem_ext = IndexedElemExt::<OtherFamily> {
                     stable_id: sid,
-                    node_id: NodeId::new((i + 1) as u32),
                     family_data: (),
                 };
                 let mut p = Element::with_ext("p", FamilyExt::Other(elem_ext));
@@ -883,17 +882,14 @@ mod tests {
         let mut root_old = Element::new("div");
         let a_ext = IndexedElemExt::<OtherFamily> {
             stable_id: StableId::from_raw(1),
-            node_id: NodeId::new(1),
             family_data: (),
         };
         let b_ext = IndexedElemExt::<OtherFamily> {
             stable_id: StableId::from_raw(2),
-            node_id: NodeId::new(2),
             family_data: (),
         };
         let c_ext = IndexedElemExt::<OtherFamily> {
             stable_id: StableId::from_raw(3),
-            node_id: NodeId::new(3),
             family_data: (),
         };
         root_old
@@ -920,22 +916,18 @@ mod tests {
         let mut root_new = Element::new("div");
         let a_ext2 = IndexedElemExt::<OtherFamily> {
             stable_id: StableId::from_raw(1),
-            node_id: NodeId::new(1),
             family_data: (),
         };
         let c_ext2 = IndexedElemExt::<OtherFamily> {
             stable_id: StableId::from_raw(3),
-            node_id: NodeId::new(3),
             family_data: (),
         };
         let b_ext2 = IndexedElemExt::<OtherFamily> {
             stable_id: StableId::from_raw(2),
-            node_id: NodeId::new(2),
             family_data: (),
         };
         let d_ext = IndexedElemExt::<OtherFamily> {
             stable_id: StableId::from_raw(4),
-            node_id: NodeId::new(4),
             family_data: (),
         };
         root_new
@@ -1001,7 +993,6 @@ mod tests {
         let mut root_old = Element::new("body");
         let p_ext = IndexedElemExt::<OtherFamily> {
             stable_id: StableId::from_raw(100),
-            node_id: NodeId::new(1),
             family_data: (),
         };
         let p_old = Element::with_ext("p", FamilyExt::Other(p_ext));
@@ -1015,7 +1006,6 @@ mod tests {
         let mut root_new = Element::new("body");
         let p_ext2 = IndexedElemExt::<OtherFamily> {
             stable_id: StableId::from_raw(100),
-            node_id: NodeId::new(1),
             family_data: (),
         };
         let mut p_new = Element::with_ext("p", FamilyExt::Other(p_ext2));
@@ -1057,7 +1047,6 @@ mod tests {
         let mut root_old = Element::new("body");
         let p_ext = IndexedElemExt::<OtherFamily> {
             stable_id: StableId::from_raw(100),
-            node_id: NodeId::new(1),
             family_data: (),
         };
         let mut p_old = Element::with_ext("p", FamilyExt::Other(p_ext));
@@ -1073,7 +1062,6 @@ mod tests {
         let mut root_new = Element::new("body");
         let p_ext2 = IndexedElemExt::<OtherFamily> {
             stable_id: StableId::from_raw(100),
-            node_id: NodeId::new(1),
             family_data: (),
         };
         let p_new = Element::with_ext("p", FamilyExt::Other(p_ext2));

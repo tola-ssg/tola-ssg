@@ -9,7 +9,6 @@
 use std::fmt::Debug;
 
 use super::family::TagFamily;
-use super::node::NodeId;
 
 // =============================================================================
 // Phase trait
@@ -191,13 +190,8 @@ pub struct IndexedElemExt<F: TagFamily> {
     /// Stable node identifier for cross-compilation identity
     ///
     /// Used for VDOM diffing and SyncTeX functionality.
-    /// Generated from Typst Span (preferred) or content hash (fallback).
+    /// Generated from content hash with occurrence-based disambiguation.
     pub stable_id: super::id::StableId,
-    /// Legacy node identifier (sequential u32)
-    ///
-    /// Retained for backward compatibility and internal indexing.
-    /// Will be deprecated in favor of stable_id.
-    pub node_id: NodeId,
     /// Family-specific data (via TagFamily::IndexedData)
     pub family_data: F::IndexedData,
 }
@@ -207,7 +201,6 @@ impl<F: TagFamily> std::fmt::Debug for IndexedElemExt<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IndexedElemExt")
             .field("stable_id", &self.stable_id)
-            .field("node_id", &self.node_id)
             .field("family_data", &self.family_data)
             .finish()
     }
@@ -217,7 +210,6 @@ impl<F: TagFamily> Clone for IndexedElemExt<F> {
     fn clone(&self) -> Self {
         Self {
             stable_id: self.stable_id,
-            node_id: self.node_id,
             family_data: self.family_data.clone(),
         }
     }
@@ -227,7 +219,6 @@ impl<F: TagFamily> Default for IndexedElemExt<F> {
     fn default() -> Self {
         Self {
             stable_id: super::id::StableId::default(),
-            node_id: NodeId::default(),
             family_data: F::IndexedData::default(),
         }
     }
@@ -265,37 +256,39 @@ impl IndexedTextExt {
 pub struct IndexedDocExt {
     /// Base info from Raw phase
     pub base: RawDocExt,
-    /// Total node count
-    pub node_count: u32,
+    /// Total node count (elements + text nodes)
+    pub node_count: usize,
     /// Element count
     pub element_count: usize,
     /// Text node count
     pub text_count: usize,
-    /// SVG element node IDs
-    pub svg_nodes: Vec<NodeId>,
-    /// Link element node IDs
-    pub link_nodes: Vec<NodeId>,
-    /// Heading element node IDs
-    pub heading_nodes: Vec<NodeId>,
-    /// Media element node IDs
-    pub media_nodes: Vec<NodeId>,
+    /// SVG element count
+    pub svg_count: usize,
+    /// Link element count
+    pub link_count: usize,
+    /// Heading element count
+    pub heading_count: usize,
+    /// Media element count
+    pub media_count: usize,
 }
 
 impl IndexedDocExt {
-    /// Total indexed nodes count
-    pub fn total_indexed_nodes(&self) -> usize {
-        self.svg_nodes.len() + self.link_nodes.len() +
-        self.heading_nodes.len() + self.media_nodes.len()
+    /// Total indexed family nodes count (svg + link + heading + media)
+    pub fn total_family_nodes(&self) -> usize {
+        self.svg_count + self.link_count + self.heading_count + self.media_count
     }
 
     /// Check if has SVG nodes
-    pub fn has_svg(&self) -> bool { !self.svg_nodes.is_empty() }
+    pub fn has_svg(&self) -> bool { self.svg_count > 0 }
 
     /// Check if has link nodes
-    pub fn has_links(&self) -> bool { !self.link_nodes.is_empty() }
+    pub fn has_links(&self) -> bool { self.link_count > 0 }
 
     /// Check if has heading nodes
-    pub fn has_headings(&self) -> bool { !self.heading_nodes.is_empty() }
+    pub fn has_headings(&self) -> bool { self.heading_count > 0 }
+
+    /// Check if has media nodes
+    pub fn has_media(&self) -> bool { self.media_count > 0 }
 }
 
 // Note: IndexedFrameExt has been removed.

@@ -28,6 +28,48 @@ use std::fmt;
 use std::hash::Hash;
 
 // =============================================================================
+// PageSeed - Page-specific seed for globally unique StableIds
+// =============================================================================
+
+/// Page-specific seed for globally unique StableIds
+///
+/// When building for hot reload, each page gets a unique seed based on its
+/// URL path. This ensures StableIds are unique across different pages,
+/// allowing the browser to safely ignore patches for elements that don't
+/// exist in current DOM.
+///
+/// # Creation
+///
+/// ```ignore
+/// let seed = PageSeed::from_path("/blog/post.html");
+/// let indexed = Indexer::new().with_page_seed(seed).transform(raw_doc);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct PageSeed(pub u64);
+
+impl PageSeed {
+    /// Create a PageSeed from a page path
+    pub fn from_path(path: &str) -> Self {
+        use crate::utils::hash::StableHasher;
+        Self(StableHasher::new()
+            .update_str("__page__")
+            .update_str(path)
+            .finish())
+    }
+
+    /// Create a zero seed (for single-page or test scenarios)
+    pub const fn zero() -> Self {
+        Self(0)
+    }
+
+    /// Get the raw u64 value
+    #[inline]
+    pub const fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+// =============================================================================
 // StableId
 // =============================================================================
 

@@ -59,14 +59,18 @@ macro_rules! impl_family_match {
 
 /// Generate method that reads a field from extension data across all variants
 ///
+/// # Generated method
+/// `pub fn $method(&self) -> $ret` - Returns the value of `$field` from any family variant
+///
 /// # Example
 /// ```ignore
-/// impl_family_field_get!(node_id, NodeId);
-/// // Expands to: pub fn node_id(&self) -> NodeId { match self { ... e.node_id ... } }
+/// impl_family_field_get!(stable_id, stable_id, StableId, Svg, Link, Heading, Media, Other);
+/// // Expands to: pub fn stable_id(&self) -> StableId { match self { ... e.stable_id ... } }
 /// ```
 #[macro_export]
 macro_rules! impl_family_field_get {
     ($method:ident, $field:ident, $ret:ty, $($variant:ident),* $(,)?) => {
+        #[doc = concat!("Get `", stringify!($field), "` from any family variant")]
         pub fn $method(&self) -> $ret {
             match self {
                 $(Self::$variant(e) => e.$field,)*
@@ -77,13 +81,18 @@ macro_rules! impl_family_field_get {
 
 /// Generate method that sets a field on extension data across all variants
 ///
+/// # Generated method
+/// `pub fn $method(&mut self, value: $ty)` - Sets `$field` on any family variant
+///
 /// # Example
 /// ```ignore
-/// impl_family_field_set!(set_modified, modified, bool);
+/// impl_family_field_set!(set_modified, modified, bool, Svg, Link, Heading, Media, Other);
+/// // Expands to: pub fn set_modified(&mut self, value: bool) { match self { ... e.modified = value ... } }
 /// ```
 #[macro_export]
 macro_rules! impl_family_field_set {
     ($method:ident, $field:ident, $ty:ty, $($variant:ident),* $(,)?) => {
+        #[doc = concat!("Set `", stringify!($field), "` on any family variant")]
         pub fn $method(&mut self, value: $ty) {
             match self {
                 $(Self::$variant(e) => e.$field = value,)*
@@ -138,9 +147,9 @@ macro_rules! impl_enum_accessors {
 ///
 /// # Example
 /// ```ignore
-/// // Transform ext within the same phase (e.g., updating node_id)
+/// // Transform ext within the same phase (e.g., updating stable_id)
 /// let new_ext: FamilyExt<Indexed> = map_family_ext!(old_ext, |e| IndexedElemExt {
-///     node_id: new_id,
+///     stable_id: new_id,
 ///     family_data: e.family_data.clone(),
 /// });
 /// ```
@@ -223,30 +232,29 @@ macro_rules! process_family_ext {
 mod tests {
     use crate::vdom::id::StableId;
     use crate::vdom::phase::{Indexed, IndexedElemExt, Processed};
-    use crate::vdom::node::{FamilyExt, NodeId};
+    use crate::vdom::node::FamilyExt;
     use crate::vdom::family::{LinkIndexedData, LinkType};
 
     #[test]
     fn test_map_family_ext() {
         let link_ext: FamilyExt<Indexed> = FamilyExt::Link(IndexedElemExt {
             stable_id: StableId::from_raw(1001),
-            node_id: NodeId(1),
             family_data: LinkIndexedData {
                 link_type: LinkType::External,
                 original_href: Some("https://example.com".into()),
             },
         });
 
-        // Map to update node_id
+        // Map to update stable_id
+        let new_stable_id = StableId::from_raw(2001);
         let updated: FamilyExt<Indexed> = map_family_ext!(link_ext, |e| IndexedElemExt {
-            stable_id: e.stable_id,
-            node_id: NodeId(e.node_id.0 + 100),
+            stable_id: new_stable_id,
             family_data: e.family_data.clone(),
         });
 
         assert!(updated.is_link());
         if let FamilyExt::Link(ext) = updated {
-            assert_eq!(ext.node_id, NodeId(101));
+            assert_eq!(ext.stable_id, new_stable_id);
         }
     }
 
@@ -254,7 +262,6 @@ mod tests {
     fn test_process_family_ext() {
         let indexed_ext: FamilyExt<Indexed> = FamilyExt::Link(IndexedElemExt {
             stable_id: StableId::from_raw(42),
-            node_id: NodeId(42),
             family_data: LinkIndexedData {
                 link_type: LinkType::External,
                 original_href: Some("https://example.com".into()),

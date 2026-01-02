@@ -26,7 +26,7 @@ use smallvec::SmallVec;
 use super::family::{
     HeadingFamily, LinkFamily, MediaFamily, OtherFamily, SvgFamily, TagFamily,
 };
-use super::node::{Document, Element, FamilyExt, Node, NodeId, Text};
+use super::node::{Document, Element, FamilyExt, Node, Text};
 use super::phase::{
     Indexed, IndexedElemExt, PhaseData, Processed, ProcessedDocExt, ProcessedElemExt,
 };
@@ -172,39 +172,6 @@ impl<P: PhaseData> Transform<P> for IdentityTransform<P> {
 
     fn transform(self, doc: Document<P>) -> Document<P> {
         doc
-    }
-}
-
-// =============================================================================
-// NodeIdGenerator
-// =============================================================================
-
-/// Generator for unique node IDs
-///
-/// Used during tree construction and transformation.
-pub struct NodeIdGenerator {
-    next: u32,
-}
-
-impl NodeIdGenerator {
-    pub fn new() -> Self {
-        Self { next: 0 }
-    }
-
-    pub fn next(&mut self) -> NodeId {
-        let id = NodeId::new(self.next);
-        self.next += 1;
-        id
-    }
-
-    pub fn current(&self) -> u32 {
-        self.next
-    }
-}
-
-impl Default for NodeIdGenerator {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -357,15 +324,6 @@ mod tests {
             .finish();
 
         assert_eq!(result.root.get_attr("id"), Some("main"));
-    }
-
-    #[test]
-    fn test_node_id_generator() {
-        let mut id_gen = NodeIdGenerator::new();
-        assert_eq!(id_gen.next().as_u32(), 0);
-        assert_eq!(id_gen.next().as_u32(), 1);
-        assert_eq!(id_gen.next().as_u32(), 2);
-        assert_eq!(id_gen.current(), 3);
     }
 
     #[test]

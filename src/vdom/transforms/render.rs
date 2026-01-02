@@ -21,7 +21,7 @@
 //! but rather HTML bytes. It consumes Document<Processed> and produces Vec<u8>.
 
 use crate::vdom::node::{Document, Element, Node, Text};
-use crate::vdom::phase::{Processed, Rendered};
+use crate::vdom::phase::Processed;
 
 // =============================================================================
 // HtmlRenderer
@@ -96,30 +96,6 @@ impl HtmlRenderer {
     pub fn render(mut self, doc: Document<Processed>) -> Vec<u8> {
         self.render_element(&doc.root);
         self.buffer
-    }
-
-    /// Render a document and return a Rendered phase document
-    ///
-    /// This wraps the HTML bytes in a Document<Rendered> for type safety,
-    /// but typically you'd use `render()` directly for the bytes.
-    pub fn render_to_document(self, doc: Document<Processed>) -> Document<Rendered> {
-        let html_bytes = self.render(doc);
-        let html = String::from_utf8_lossy(&html_bytes).into_owned();
-        let output_bytes = html_bytes.len();
-
-        Document {
-            root: Element {
-                tag: String::from("__rendered__"),
-                attrs: vec![],
-                children: smallvec::smallvec![],
-                ext: crate::vdom::node::FamilyExt::Other(()),
-            },
-            ext: crate::vdom::phase::RenderedDocExt {
-                html,
-                output_bytes,
-                ..Default::default()
-            },
-        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

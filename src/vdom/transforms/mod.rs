@@ -3,7 +3,7 @@
 //! This module contains all concrete Transform implementations for the
 //! VDOM phase pipeline. Each transform handles a specific concern:
 //!
-//! - `indexer`: Raw → Indexed (assign NodeIds, identify families)
+//! - `indexer`: Raw → Indexed (assign StableIds, identify families)
 //! - `link`: Process and validate links
 //! - `heading`: Generate anchor IDs for headings
 //! - `svg`: Optimize and optionally extract SVGs
