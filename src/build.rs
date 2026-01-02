@@ -48,6 +48,19 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+/// Collect font directories from config for font loading.
+///
+/// Scans `assets/`, `content/`, and all `deps/` directories for fonts.
+/// Excludes `output/` directory to avoid loading duplicate fonts.
+fn collect_font_dirs(config: &SiteConfig) -> Vec<&Path> {
+    let mut dirs: Vec<&Path> = vec![
+        config.build.assets.as_path(),
+        config.build.content.as_path(),
+    ];
+    dirs.extend(config.build.deps.iter().map(|p| p.as_path()));
+    dirs
+}
+
 /// Build the entire site, processing content and assets in parallel.
 ///
 /// Uses two-phase compilation to support virtual data files:
@@ -70,11 +83,9 @@ pub fn build_site<D: BuildDriver + Copy>(
 ) -> Result<(ThreadSafeRepository, Pages)> {
     let output = &config.build.output;
     let assets = &config.build.assets;
-    let content = &config.build.content;
 
     // Pre-warm typst library resources
-    // Only scan assets/ and content/ for fonts to avoid loading duplicates from output/
-    typst_lib::warmup_with_font_dirs(&[assets.as_path(), content.as_path()]);
+    typst_lib::warmup_with_font_dirs(&collect_font_dirs(config));
 
     // Ensure output directory has git repo (for deploy)
     let repo = ensure_output_repo(output, config.build.clean)?;

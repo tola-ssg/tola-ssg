@@ -55,17 +55,88 @@ static GLOBAL_FONTS: OnceLock<(Fonts, LazyHash<FontBook>)> = OnceLock::new();
 /// `fontdb` uses `std::fs::read_dir()` which does not guarantee order,
 /// causing non-deterministic font indices across process runs.
 /// This key ensures fonts are always ordered the same way.
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct FontSortKey {
     path: Option<PathBuf>,
     index: u32,
 }
 
+// =============================================================================
+// Debug Utilities
+// =============================================================================
+
+/// **DEBUG ONLY**: Write font list to `/tmp/tola_fonts_debug.txt` for debugging.
+///
+/// This function is used to diagnose font loading issues, particularly:
+/// - Non-deterministic font ordering across runs
+/// - Duplicate fonts from different directories (e.g., `assets/` vs `public/`)
+/// - Missing or unexpected fonts
+///
+/// # Output Format
+///
+/// ```text
+/// === Font Debug Output (PID: 12345) ===
+/// Total fonts: 977
+///
+///    0: Maple Mono | /path/to/font.otf | idx=0 | Normal-700-FontStretch(1000)
+///    1: SF Pro | /System/Library/Fonts/SF-Pro.otf | idx=0 | Normal-400-FontStretch(1000)
+/// ...
+/// === End of Debug Output ===
+/// ```
+///
+/// # Usage
+///
+/// Uncomment the call in `init_fonts()` when debugging font issues:
+/// ```ignore
+/// let fonts = searcher.search_with(font_paths);
+/// debug_dump_fonts(&fonts);  // <-- uncomment this line
+/// ```
+#[allow(dead_code)]
+fn debug_dump_fonts(fonts: &Fonts) {
+    use std::io::Write;
+    let debug_path = std::path::Path::new("/tmp/tola_fonts_debug.txt");
+    if let Ok(mut file) = std::fs::File::create(debug_path) {
+        let _ = writeln!(file, "=== Font Debug Output (PID: {}) ===", std::process::id());
+        let _ = writeln!(file, "Total fonts: {}", fonts.fonts.len());
+        let _ = writeln!(file);
+        for (i, slot) in fonts.fonts.iter().enumerate() {
+            let path = slot
+                .path()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "embedded".to_string());
+            let info = fonts.book.info(i);
+            let family = info.map(|i| i.family.as_str()).unwrap_or("?");
+            let variant = info
+                .map(|i| format!("{:?}", i.variant))
+                .unwrap_or_else(|| "?".to_string());
+            let _ = writeln!(
+                file,
+                "{:4}: {} | {} | idx={} | {}",
+                i,
+                family,
+                path,
+                slot.index(),
+                variant
+            );
+        }
+        let _ = writeln!(file);
+        let _ = writeln!(file, "=== End of Debug Output ===");
+        eprintln!("[FONT DEBUG] Wrote {} fonts to {:?}", fonts.fonts.len(), debug_path);
+    }
+}
+
+// =============================================================================
+// Font Initialization
+// =============================================================================
+
 /// Initialize fonts with custom font paths.
 ///
 /// # Arguments
 ///
-/// * `font_paths` - Additional directories to search for fonts
+/// * `font_paths` - Directories to search for fonts (e.g., `[assets/, content/]`).
+///   **Important**: Should NOT include output directory (e.g., `public/`) to avoid
+///   loading duplicate fonts that cause non-deterministic behavior.
 ///
 /// # Returns
 ///
@@ -73,11 +144,10 @@ struct FontSortKey {
 /// - `Fonts`: The font collection with lazy-loaded font data
 /// - `LazyHash<FontBook>`: The font book index wrapped for comemo caching
 ///
-/// # Determinism
+/// # Debugging
 ///
-/// Fonts are sorted by (path, index) to ensure deterministic ordering
-/// across different process runs. This is necessary because `fontdb`
-/// uses `read_dir()` which has filesystem-dependent ordering.
+/// To debug font loading issues, uncomment the `debug_dump_fonts()` call below.
+/// This writes all loaded fonts to `/tmp/tola_fonts_debug.txt`.
 fn init_fonts(font_paths: &[&Path]) -> (Fonts, LazyHash<FontBook>) {
     let mut searcher = Fonts::searcher();
     // Include system fonts (platform-specific locations)
@@ -85,7 +155,11 @@ fn init_fonts(font_paths: &[&Path]) -> (Fonts, LazyHash<FontBook>) {
     // Search custom paths and system fonts
     let fonts = searcher.search_with(font_paths);
 
-    // Sort fonts for deterministic ordering
+    // DEBUG: Uncomment to dump font list for debugging
+    debug_dump_fonts(&fonts);
+
+    // NOTE: Font sorting is currently disabled.
+    // See `sort_fonts_deterministically` for details on when it's needed.
     // let fonts = sort_fonts_deterministically(fonts);
 
     // Wrap font book in LazyHash for comemo caching
@@ -93,9 +167,49 @@ fn init_fonts(font_paths: &[&Path]) -> (Fonts, LazyHash<FontBook>) {
     (fonts, book)
 }
 
+// =============================================================================
+// Font Sorting (Currently Disabled)
+// =============================================================================
+
 /// Sort fonts by (path, index) to ensure deterministic ordering.
 ///
-/// This fixes non-determinism caused by `fontdb` using `read_dir()`.
+/// # Background: The Non-Determinism Problem
+///
+/// `fontdb` uses `std::fs::read_dir()` to scan font directories, which does NOT
+/// guarantee consistent ordering across runs. This causes font indices to vary:
+///
+/// ```text
+/// Run 1: [SF Pro (idx=0), Helvetica (idx=1), Arial (idx=2)]
+/// Run 2: [Arial (idx=0), SF Pro (idx=1), Helvetica (idx=2)]
+/// ```
+///
+/// Typst uses these indices in SVG output (e.g., `font-family: f0, f1`), so
+/// different indices → different SVG content → non-reproducible builds.
+///
+/// # Why This Is Currently Disabled
+///
+/// The root cause was fixed differently: instead of sorting fonts after loading,
+/// we now only scan `assets/` and `content/` directories for fonts, excluding
+/// the output directory (`public/`). This prevents:
+///
+/// 1. **Duplicate fonts**: `public/fonts/` contains copies of `assets/fonts/`,
+///    causing the same font to be loaded twice with different paths.
+///
+/// 2. **Font count variation**: First build has N fonts, subsequent builds
+///    have N+M fonts (where M = fonts copied to public/), changing all indices.
+///
+/// # When To Re-enable This
+///
+/// If you encounter non-deterministic SVG output again (fonts appearing in
+/// different order between runs), uncomment the call in `init_fonts()`:
+///
+/// ```ignore
+/// let fonts = sort_fonts_deterministically(fonts);
+/// ```
+///
+/// This sorts fonts by (path, index) to ensure consistent ordering regardless
+/// of `read_dir()` behavior.
+#[allow(dead_code)]
 fn sort_fonts_deterministically(fonts: Fonts) -> Fonts {
     let n = fonts.fonts.len();
     if n == 0 {
