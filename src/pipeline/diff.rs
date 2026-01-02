@@ -7,6 +7,33 @@ use crate::vdom::VdomCache;
 use crate::vdom::diff::{diff, DiffResult as VdomDiffResult, Patch};
 use crate::vdom::{Document, Indexed};
 
+/// Normalize URL path for consistent cache keys.
+///
+/// Ensures:
+/// - Always starts with `/`
+/// - No trailing slash (except for root `/`)
+/// - No double slashes
+fn normalize_url_path(url_path: &str) -> String {
+    let mut path = url_path.to_string();
+
+    // Collapse multiple slashes
+    while path.contains("//") {
+        path = path.replace("//", "/");
+    }
+
+    // Ensure starts with /
+    if !path.starts_with('/') {
+        path = format!("/{}", path);
+    }
+
+    // Remove trailing slash (except for root)
+    if path.len() > 1 && path.ends_with('/') {
+        path.pop();
+    }
+
+    path
+}
+
 /// Outcome of diff computation
 #[derive(Debug)]
 pub enum DiffOutcome {
@@ -35,9 +62,12 @@ pub fn compute_diff(
     url_path: &str,
     new_vdom: Document<Indexed>,
 ) -> DiffOutcome {
+    // Normalize url_path for consistent cache keys
+    let url_path = normalize_url_path(url_path);
+
     crate::log!("diff"; "computing diff for {} (cache size: {})", url_path, cache.len());
 
-    if let Some(old_vdom) = cache.get(url_path) {
+    if let Some(old_vdom) = cache.get(&url_path) {
         crate::log!("diff"; "found cached vdom for {}", url_path);
         let diff_result: VdomDiffResult = diff(old_vdom, &new_vdom);
 

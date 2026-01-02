@@ -136,6 +136,17 @@ impl Debouncer {
         self.last_event = Some(std::time::Instant::now());
 
         for path in &event.paths {
+            // Skip editor temporary/backup files
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name.ends_with(".bck")
+                || name.ends_with(".swp")
+                || name.ends_with('~')
+                || name.starts_with('.') && name.ends_with(".swp")
+                || name.starts_with('~')
+            {
+                continue;
+            }
+
             // Canonicalize path to ensure consistency with SiteConfig paths
             let canonical = crate::compiler::canonicalize(path);
             if !self.changed.contains(&canonical) {
