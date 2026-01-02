@@ -37,17 +37,18 @@
 - [x] **Remove Dead Code**: 无 `#[allow(dead_code)]`，已清理完毕。
 - [x] **Harden SVG Parsing**: `convert.rs` 目前使用手动字符串解析 SVG 属性，较为脆弱。考虑引入轻量级 XML 解析器或增强测试覆盖。
 
-### Phase 2.2: 模块解耦 (Decoupling)
+### Phase 2.2: 模块解耦 (Decoupling) ✅
 
 这是 Actor 迁移的前置条件。Actor 之间传递的消息必须是纯数据，不能携带复杂的运行时引用。
 
-1.  **净化 `typst_lib` (The "Clean Compiler" Goal)**:
+1.  **净化 `typst_lib` (The \"Clean Compiler\" Goal)**: ✅
     *   **问题**: `typst_lib` 知道 `vdom` 的存在。
     *   **目标**: `typst_lib` 应该只负责 `path -> typst::Document` 的编译。
     *   **方案**:
-        *   创建 `src/compiler/bridge.rs` (作为适配层)。
-        *   将 `compile_vdom`、`compile_document` 移入 `bridge.rs`。
-        *   `typst_lib` 的 public API 仅保留返回 `typst::Document` 的函数。
+        *   ✅ 创建 `src/compiler/bridge.rs` (作为适配层)。
+        *   ✅ 将 `compile_vdom` 移入 `bridge.rs`。
+        *   ✅ 添加 `typst_lib::compile_html` 作为纯编译 API。
+        *   旧 `typst_lib::compile_vdom` 保留以向后兼容。
 
 2.  **无状态工具库 (Stateless Utils)**:
     *   **问题**: `utils/minify.rs` 等直接调用 `config::cfg()`。

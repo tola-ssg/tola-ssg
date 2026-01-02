@@ -18,6 +18,7 @@
 //! ```
 
 pub mod assets;
+pub mod bridge;
 pub mod deps;
 pub mod meta;
 pub mod pages;

@@ -4,7 +4,7 @@ use crate::data::{PageData, GLOBAL_SITE_DATA};
 use crate::freshness::{self, ContentHash};
 use crate::utils::minify::{minify, MinifyType};
 use crate::utils::xml::process_html;
-use crate::{config::SiteConfig, log, typst_lib};
+use crate::{config::SiteConfig, log};
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
@@ -12,6 +12,19 @@ use std::sync::Mutex;
 use rayon::prelude::*;
 
 // TOLA_META_LABEL is imported from crate::compiler::meta
+
+// ============================================================================
+// Type Aliases
+// ============================================================================
+
+/// Indexed VDOM document for hot reload diffing
+pub type IndexedDocument = crate::vdom::Document<crate::vdom::Indexed>;
+
+/// Result of compile_meta: (html, metadata, indexed_vdom)
+pub type CompileMetaResult = (Vec<u8>, Option<ContentMeta>, Option<IndexedDocument>);
+
+/// Result of collect_metadata_smart: (dynamic_pages, static_count, dynamic_count)
+pub type MetadataResult = (Vec<std::path::PathBuf>, usize, usize);
 
 // ============================================================================
 // Warnings Collection
@@ -80,7 +93,7 @@ pub struct PageResult {
     /// Page metadata
     pub page: PageMeta,
     /// Indexed VDOM for diff comparison (only in development mode)
-    pub indexed_vdom: Option<crate::vdom::Document<crate::vdom::Indexed>>,
+    pub indexed_vdom: Option<IndexedDocument>,
     /// URL path for the page (e.g., "/blog/post")
     pub url_path: String,
 }
@@ -104,7 +117,7 @@ pub fn process_page<D: crate::driver::BuildDriver>(
     let url_path = page.paths.url_path.clone();
 
     // Compile with driver, passing url_path for unique StableIds
-    let result = typst_lib::compile_vdom(
+    let result = super::bridge::compile_vdom(
         driver,
         path,
         config.get_root(),
@@ -220,18 +233,18 @@ fn write_page(
 /// Uses the VDOM pipeline for HTML generation.
 ///
 /// When using `Development` driver, emits `data-tola-id` attributes
-/// and caches indexed VDOM for hot reload.
+/// and returns indexed VDOM for caller to cache (decoupled from hotreload).
 pub fn compile_meta<D: crate::driver::BuildDriver>(
     driver: &D,
     path: &Path,
     config: &SiteConfig,
-) -> Result<(Vec<u8>, Option<ContentMeta>)> {
+) -> Result<CompileMetaResult> {
     let root = config.get_root();
 
     // Use unified compile_vdom with driver
     // Pass None for url_path - compile_meta is typically used for production
     // where globally unique StableIds aren't needed
-    let result = typst_lib::compile_vdom(driver, path, root, TOLA_META_LABEL, None)?;
+    let result = super::bridge::compile_vdom(driver, path, root, TOLA_META_LABEL, None)?;
 
     let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
 
@@ -239,12 +252,9 @@ pub fn compile_meta<D: crate::driver::BuildDriver>(
         .write()
         .record_dependencies(path, &result.accessed_files);
 
-    // Cache the indexed VDOM if available (development mode)
-    // Canonicalize for consistent VDOM_CACHE key matching
-    if let Some(indexed) = result.indexed_vdom {
-        let cache_key = super::canonicalize(path);
-        crate::hotreload::VDOM_CACHE.insert(cache_key, indexed);
-    }
+    // Return indexed_vdom to caller for caching decision
+    // (decouples compiler from hotreload)
+    let indexed_vdom = result.indexed_vdom;
 
     let html = result.html;
 
@@ -253,7 +263,7 @@ pub fn compile_meta<D: crate::driver::BuildDriver>(
         collect_warning(warnings);
     }
 
-    Ok((html, meta))
+    Ok((html, meta, indexed_vdom))
 }
 
 /// Check if content metadata indicates a draft.
@@ -302,7 +312,7 @@ pub fn collect_metadata_smart<D: crate::driver::BuildDriver + Copy>(
     clean: bool,
     deps_hash: Option<ContentHash>,
     on_progress: impl Fn() + Sync,
-) -> Result<(Vec<std::path::PathBuf>, usize, usize)> {
+) -> Result<MetadataResult> {
     let content_files = collect_all_files(&config.build.content);
 
     let typ_files: Vec<_> = content_files
@@ -323,7 +333,7 @@ pub fn collect_metadata_smart<D: crate::driver::BuildDriver + Copy>(
 
             // Compile to extract metadata
             let root = config.get_root();
-            let result = typst_lib::compile_vdom(
+            let result = super::bridge::compile_vdom(
                 &driver,
                 path,
                 root,
@@ -331,16 +341,11 @@ pub fn collect_metadata_smart<D: crate::driver::BuildDriver + Copy>(
                 Some(&url_path),
             )?;
 
-            // Cache indexed VDOM for hot reload (Development mode only)
-            // This ensures the cache matches the HTML written to disk
-            // Canonicalize for consistent VDOM_CACHE key matching
-            if let Some(ref indexed_vdom) = result.indexed_vdom {
-                let cache_key = super::canonicalize(path);
-                crate::hotreload::VDOM_CACHE.insert(cache_key, indexed_vdom.clone());
-            }
-
-            // Check if this page uses virtual data
+            // Check if this page uses virtual data (before moving indexed_vdom)
             let uses_virtual_data = result.uses_virtual_data();
+
+            // Store indexed_vdom for caller to cache (decouples compiler from hotreload)
+            let indexed_vdom = result.indexed_vdom;
 
             // Record dependencies for incremental rebuild
             super::deps::DEPENDENCY_GRAPH
@@ -418,7 +423,7 @@ pub fn compile_dynamic_pages<D: crate::driver::BuildDriver + Copy>(
             let mut page = PageMeta::from_paths(path.clone(), config)?;
 
             // Compile with complete data
-            let (html, content_meta) = compile_meta(&driver, path, config)?;
+            let (html, content_meta, _indexed_vdom) = compile_meta(&driver, path, config)?;
 
             page.content_meta = content_meta;
             page.compiled_html = Some(html);

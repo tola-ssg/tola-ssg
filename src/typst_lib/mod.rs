@@ -196,6 +196,35 @@ pub fn compile_meta(
 }
 
 // =============================================================================
+// Clean Compilation API (for bridge module)
+// =============================================================================
+
+/// Compile a Typst file to HtmlDocument (pure compilation, no VDOM).
+///
+/// This is the **decoupled** compilation entry point used by `compiler::bridge`.
+/// It only does Typst compilation - no VDOM processing, no HTML serialization.
+///
+/// # Returns
+///
+/// Tuple of (document, accessed_files, warnings):
+/// - `document`: The compiled HtmlDocument tree
+/// - `accessed_files`: Files accessed during compilation (for dependency tracking)
+/// - `warnings`: Optional formatted warning string
+///
+/// # Note
+///
+/// For full VDOM compilation, use `compiler::bridge::compile_vdom` instead.
+pub fn compile_html(
+    path: &Path,
+    root: &Path,
+) -> anyhow::Result<(typst_html::HtmlDocument, Vec<PathBuf>, Option<String>)> {
+    let _guard = acquire_test_lock();
+    let (_world, document, warnings) = compile_base(path, root)?;
+    let accessed_files = collect_accessed_files(root);
+    Ok((document, accessed_files, warnings))
+}
+
+// =============================================================================
 // VDOM-Ready API (for future vdom integration)
 // =============================================================================
 
@@ -247,145 +276,9 @@ pub fn compile_document(
     })
 }
 
-// =============================================================================
-// VDOM Compilation API
-// =============================================================================
-
-/// Result of VDOM compilation.
-///
-/// Used by both production and development builds.
-pub struct VdomResult {
-    /// Generated HTML bytes
-    pub html: Vec<u8>,
-    /// Indexed VDOM for diff comparison (only in development mode)
-    pub indexed_vdom: Option<crate::vdom::Document<crate::vdom::Indexed>>,
-    /// Extracted metadata
-    pub metadata: Option<serde_json::Value>,
-    /// Files accessed during compilation
-    pub accessed_files: Vec<std::path::PathBuf>,
-    /// Formatted warnings (e.g., unknown font family)
-    /// Caller is responsible for displaying these at appropriate time.
-    pub warnings: Option<String>,
-}
-
-impl VdomResult {
-    /// Check if this compilation accessed any virtual data files.
-    ///
-    /// Virtual data files (`/_data/pages.json`, `/_data/tags.json`) contain
-    /// dynamically generated content that depends on other pages' metadata.
-    /// Pages that access these files are "dynamic" and may need to be
-    /// recompiled when other pages change.
-    #[inline]
-    pub fn uses_virtual_data(&self) -> bool {
-        self.accessed_files
-            .iter()
-            .any(|p| crate::data::is_virtual_data_path(p))
-    }
-}
-
-/// Compile a Typst file using the VDOM pipeline.
-///
-/// This is the **unified entry point** for all compilation modes.
-/// The `driver` parameter controls:
-/// - `emit_ids()`: Whether to output `data-tola-id` attributes
-/// - `cache_vdom()`: Whether to return indexed VDOM for hot reload
-///
-/// # Examples
-///
-/// ```ignore
-/// // Production build
-/// let result = compile_vdom(&Production, path, root, "tola-meta", None)?;
-/// assert!(result.indexed_vdom.is_none());
-///
-/// // Development build (hot reload)
-/// let result = compile_vdom(&Development, path, root, "tola-meta", Some("/blog/post.html"))?;
-/// cache.insert(path, result.indexed_vdom.unwrap());
-/// ```
-pub fn compile_vdom<D: crate::driver::BuildDriver>(
-    driver: &D,
-    path: &Path,
-    root: &Path,
-    label_name: &str,
-    url_path: Option<&str>,
-) -> anyhow::Result<VdomResult> {
-    let _guard = acquire_test_lock();
-    let (_world, document, warnings) = compile_base(path, root)?;
-
-    let accessed_files = collect_accessed_files(root);
-
-    // Use unified VDOM compile function
-    // Pass url_path for globally unique StableIds (enables correct hot reload)
-    let output = crate::vdom::compile(&document, label_name, driver, url_path);
-
-    Ok(VdomResult {
-        html: output.html,
-        indexed_vdom: output.indexed,
-        metadata: output.metadata,
-        accessed_files,
-        warnings,
-    })
-}
-
-// =============================================================================
-// Deprecated APIs (backward compatibility)
-// =============================================================================
-
-/// Result of dev compilation with VDOM for diffing
-///
-/// Deprecated: Use `VdomResult` instead.
-#[allow(dead_code)]
-pub struct DevCompileResult {
-    /// Generated HTML bytes
-    pub html: Vec<u8>,
-    /// Indexed VDOM for diff comparison
-    pub indexed_vdom: crate::vdom::Document<crate::vdom::Indexed>,
-    /// Extracted metadata
-    pub metadata: Option<serde_json::Value>,
-    /// Files accessed during compilation
-    pub accessed_files: Vec<std::path::PathBuf>,
-}
-
-/// Deprecated: Use `compile_vdom(&Development, ...)` instead.
-#[deprecated(since = "0.7.0", note = "Use `compile_vdom(&Development, ...)` instead")]
-#[allow(deprecated)]
-#[allow(dead_code)]
-pub fn compile_vdom_for_dev(
-    path: &Path,
-    root: &Path,
-    label_name: &str,
-) -> anyhow::Result<DevCompileResult> {
-    let result = compile_vdom(&crate::driver::Development, path, root, label_name, None)?;
-    Ok(DevCompileResult {
-        html: result.html,
-        indexed_vdom: result.indexed_vdom.expect("Development driver should cache VDOM"),
-        metadata: result.metadata,
-        accessed_files: result.accessed_files,
-    })
-}
-
-/// Deprecated: Use `compile_vdom(&Development, ...)` instead.
-#[deprecated(since = "0.7.0", note = "Use `compile_vdom(&Development, ...)` instead")]
-#[allow(dead_code)]
-pub fn compile_vdom_with_cache(
-    path: &Path,
-    root: &Path,
-    label_name: &str,
-) -> anyhow::Result<DevCompileResult> {
-    #[allow(deprecated)]
-    compile_vdom_for_dev(path, root, label_name)
-}
-
-/// Deprecated: Use `compile_vdom(&Development, ...)` instead.
-#[deprecated(since = "0.7.0", note = "Use `compile_vdom(&Development, ...)` instead")]
-#[allow(dead_code)]
-pub fn compile_for_dev_with_vdom(
-    path: &Path,
-    root: &Path,
-    label_name: &str,
-) -> anyhow::Result<DevCompileResult> {
-    #[allow(deprecated)]
-    compile_vdom_for_dev(path, root, label_name)
-}
+// Note: VDOM compilation functions have been moved to compiler::bridge.
+// typst_lib now only handles pure Typst compilation (path -> HtmlDocument).
+// Use compiler::bridge::compile_vdom for VDOM pipeline integration.
 
 // =============================================================================
 // Internal Helpers
