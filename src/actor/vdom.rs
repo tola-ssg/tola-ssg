@@ -3,7 +3,7 @@
 //! This actor is responsible for:
 //! 1. Receiving compiled VDOM from CompilerActor
 //! 2. Computing diffs via `pipeline::diff`
-//! 3. Managing VDOM cache via `pipeline::cache`
+//! 3. Managing VDOM cache via `pipeline::diff`
 //! 4. Sending patch/reload messages to WsActor
 //!
 //! # Design
@@ -13,7 +13,35 @@
 //! - spawn_blocking for CPU work (diffing)
 //! - Routing results to WsActor
 //!
-//! All business logic lives in `pipeline::diff` and `pipeline::cache`.
+
+/// Normalize URL path for consistent cache keys.
+/// Must match the normalization in `pipeline::diff::normalize_url_path`.
+fn normalize_url_path(url_path: &str) -> String {
+    // Remove fragment (#...) and query string (?...)
+    let path = url_path
+        .split('#').next().unwrap_or(url_path)
+        .split('?').next().unwrap_or(url_path);
+
+    let mut path = path.to_string();
+
+    // Collapse multiple slashes
+    while path.contains("//") {
+        path = path.replace("//", "/");
+    }
+
+    // Ensure starts with /
+    if !path.starts_with('/') {
+        path = format!("/{}", path);
+    }
+
+    // Remove trailing slash (except for root)
+    if path.len() > 1 && path.ends_with('/') {
+        path.pop();
+    }
+
+    path
+}
+
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -55,10 +83,12 @@ impl VdomActor {
             match msg {
                 VdomMsg::Populate { entries } => {
                     // Pre-fill cache with initial build results
+                    // Normalize url_path to match compute_diff behavior
                     let count = entries.len();
                     let mut cache = self.cache.lock();
                     for (url_path, vdom) in entries {
-                        cache.insert(url_path, vdom);
+                        let normalized = normalize_url_path(&url_path);
+                        cache.insert(normalized, vdom);
                     }
                     crate::log!("vdom"; "populated cache with {} entries", count);
                 }
