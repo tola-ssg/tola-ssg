@@ -49,9 +49,9 @@ pub fn compile_page(path: &Path, config: &SiteConfig) -> CompileOutcome {
         Some("css" | "js" | "html") => CompileOutcome::Reload {
             reason: format!("asset changed: {}", path.display()),
         },
-        _ => CompileOutcome::Reload {
-            reason: format!("file changed: {}", path.display()),
-        },
+        // Unknown file types are ignored (whitelist approach)
+        // This prevents editor temp files from triggering reload
+        _ => CompileOutcome::Skipped,
     }
 }
 

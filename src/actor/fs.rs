@@ -15,6 +15,16 @@ use super::messages::CompilerMsg;
 const DEBOUNCE_MS: u64 = 300;
 const REBUILD_COOLDOWN_MS: u64 = 800;
 
+/// Check if path is a temp/backup file (editor artifacts).
+fn is_temp_file(path: &std::path::Path) -> bool {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    matches!(ext, "bck" | "bak" | "backup" | "swp" | "swo" | "tmp")
+        || name.ends_with('~')
+        || name.starts_with('.')
+}
+
 /// FileSystem Actor - watches for file changes
 pub struct FsActor {
     /// Paths to watch
@@ -137,20 +147,12 @@ impl Debouncer {
 
         for path in &event.paths {
             // Skip editor temporary/backup files
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if name.ends_with(".bck")
-                || name.ends_with(".swp")
-                || name.ends_with('~')
-                || name.starts_with('.') && name.ends_with(".swp")
-                || name.starts_with('~')
-            {
+            if is_temp_file(path) {
                 continue;
             }
 
-            // Canonicalize path to ensure consistency with SiteConfig paths
-            let canonical = crate::compiler::canonicalize(path);
-            if !self.changed.contains(&canonical) {
-                self.changed.push(canonical);
+            if !self.changed.contains(path) {
+                self.changed.push(path.clone());
             }
         }
     }

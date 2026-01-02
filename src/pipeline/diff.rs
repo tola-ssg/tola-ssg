@@ -13,8 +13,14 @@ use crate::vdom::{Document, Indexed};
 /// - Always starts with `/`
 /// - No trailing slash (except for root `/`)
 /// - No double slashes
+/// - No fragment (#...) or query string (?...)
 fn normalize_url_path(url_path: &str) -> String {
-    let mut path = url_path.to_string();
+    // Remove fragment (#...) and query string (?...)
+    let path = url_path
+        .split('#').next().unwrap_or(url_path)
+        .split('?').next().unwrap_or(url_path);
+
+    let mut path = path.to_string();
 
     // Collapse multiple slashes
     while path.contains("//") {
