@@ -244,6 +244,7 @@ Goal: *"Local refresh feels like a web app"*
 Typst's HTML output is not yet as mature as its PDF output. Some features require workarounds:
 
 - **math rendering** — Equations are exported as inline SVGs, which may need CSS tweaks for proper sizing and alignment ([issue #24](https://github.com/tola-ssg/tola-ssg/issues/24))
+- **font & SVG rendering** — Font loading and SVG generation may produce inconsistent results; deterministic font ordering is enforced internally to ensure reproducible hash builds
 - **whitespace handling** — Typst inserts `<span style="white-space: pre-wrap">` between inline elements to preserve spacing ([PR #6750](https://github.com/typst/typst/pull/6750))
 - **layout** — Some Typst layout primitives don't translate perfectly to HTML semantics
 
