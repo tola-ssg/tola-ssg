@@ -1,7 +1,19 @@
-//! WebSocket Actor
+//! WebSocket Actor - Pure Broadcast Relay
 //!
-//! Manages WebSocket connections and broadcasts patches/reload messages
-//! to all connected clients.
+//! This actor is responsible for:
+//! 1. Managing WebSocket client connections
+//! 2. Broadcasting messages to all connected clients
+//!
+//! # Responsibility Boundary
+//!
+//! - **This Actor**: Connection management, message broadcast
+//! - **NOT This Actor**: Message serialization (delegated to hotreload::message)
+//!
+//! # Architecture
+//!
+//! ```text
+//! VdomActor ──[Patch/Reload]──► WsActor ──[broadcast]──► Clients
+//! ```
 
 use std::net::TcpStream;
 
@@ -11,9 +23,8 @@ use tungstenite::WebSocket;
 
 use super::messages::WsMsg;
 use crate::hotreload::message::HotReloadMessage;
-use crate::vdom::diff::Patch;
 
-/// WebSocket Actor - manages client connections
+/// WebSocket Actor - manages client connections and broadcasts
 pub struct WsActor {
     /// Channel to receive messages
     rx: mpsc::Receiver<WsMsg>,
@@ -34,87 +45,19 @@ impl WsActor {
     pub async fn run(mut self) {
         while let Some(msg) = self.rx.recv().await {
             match msg {
-                WsMsg::Patch(patches) => {
-                    // Convert patches to JSON message
-                    let json = serde_json::json!({
-                        "type": "patch",
-                        "ops": patches.iter().map(|p| {
-                            match p {
-                                Patch::Replace { target, html } => {
-                                    serde_json::json!({
-                                        "type": "replace",
-                                        "target": target.to_string(),
-                                        "html": html,
-                                    })
-                                }
-                                Patch::UpdateText { target, text } => {
-                                    serde_json::json!({
-                                        "type": "text",
-                                        "target": target.to_string(),
-                                        "text": text,
-                                    })
-                                }
-                                Patch::UpdateTextAtPosition { parent, position, text } => {
-                                    serde_json::json!({
-                                        "type": "textAtPosition",
-                                        "parent": parent.to_string(),
-                                        "position": position,
-                                        "text": text,
-                                    })
-                                }
-                                Patch::Remove { target } => {
-                                    serde_json::json!({
-                                        "type": "remove",
-                                        "target": target.to_string(),
-                                    })
-                                }
-                                Patch::RemoveAtPosition { parent, position } => {
-                                    serde_json::json!({
-                                        "type": "removeAtPosition",
-                                        "parent": parent.to_string(),
-                                        "position": position,
-                                    })
-                                }
-                                Patch::Insert { parent, position, html } => {
-                                    serde_json::json!({
-                                        "type": "insert",
-                                        "parent": parent.to_string(),
-                                        "position": position,
-                                        "html": html,
-                                    })
-                                }
-                                Patch::Move { target, new_parent, position } => {
-                                    serde_json::json!({
-                                        "type": "move",
-                                        "target": target.to_string(),
-                                        "newParent": new_parent.to_string(),
-                                        "position": position,
-                                    })
-                                }
-                                Patch::UpdateAttrs { target, attrs } => {
-                                    serde_json::json!({
-                                        "type": "attrs",
-                                        "target": target.to_string(),
-                                        "attrs": attrs.iter().map(|(k, v)| {
-                                            serde_json::json!({ "name": k, "value": v })
-                                        }).collect::<Vec<_>>(),
-                                    })
-                                }
-                            }
-                        }).collect::<Vec<_>>(),
-                    });
-
-                    self.broadcast(Message::Text(json.to_string().into()));
+                WsMsg::Patch { url_path, patches } => {
+                    // Delegate serialization to hotreload::message module
+                    let hr_msg = HotReloadMessage::from_patches(&url_path, &patches);
+                    self.broadcast(Message::Text(hr_msg.to_json().into()));
                 }
 
                 WsMsg::Reload { reason } => {
-                    let msg = HotReloadMessage::reload_with_reason(&reason);
-                    self.broadcast(Message::Text(msg.to_json().into()));
+                    let hr_msg = HotReloadMessage::reload_with_reason(&reason);
+                    self.broadcast(Message::Text(hr_msg.to_json().into()));
                 }
 
                 WsMsg::ClientConnected => {
                     crate::log!("ws"; "client connected (total: {})", self.clients.len() + 1);
-                    // Client is added externally via add_client()
                 }
 
                 WsMsg::Shutdown => {
@@ -156,8 +99,8 @@ impl WsActor {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn test_placeholder() {
-        // Placeholder test
+    fn test_ws_actor_creation() {
+        // Basic construction test
         assert!(true);
     }
 }

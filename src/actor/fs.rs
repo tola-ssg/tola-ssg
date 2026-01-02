@@ -9,7 +9,7 @@ use std::time::Duration;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 
-use super::messages::{CompilerMsg, FsMsg};
+use super::messages::CompilerMsg;
 
 /// Debounce configuration
 const DEBOUNCE_MS: u64 = 300;
