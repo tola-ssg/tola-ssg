@@ -133,7 +133,7 @@ graph TD
 *   **实现**: 在 `src/actor/ws.rs`，接收消息并广播
 
 
-### 3.5 Actor Type Safety (Typestates) ❌ **RECONSIDERING**
+### 3.6 Actor Type Safety (Typestates) ❌ **DEPRECATED**
 
 > [!WARNING]
 > 经评估，Typestate 模式对于单次同步编译调用**过度复杂**，收益不明确。
@@ -143,9 +143,11 @@ graph TD
 
 ## 4. 迁移策略 (Migration Strategy)
 
-### 4.1 `src/watch.rs` -> `Coordinator Actor`
-*   拆分 `Debouncer` 和 `ContentCache` 到独立的 `FileWatcherActor`。
-*   `handle_changes` 不再直接调用编译，而是发送消息给 Coordinator。
+### 4.1 `src/watch.rs` -> `Coordinator Actor` 🚧 **PARTIAL**
+*   ✅ `Coordinator` 已实现在 `src/actor/coordinator.rs`
+*   ✅ `FsActor` 已实现在 `src/actor/fs.rs`
+*   📋 `watch.rs` 尚未迁移使用 Actor 模式（仍用直接函数调用）
+*   📋 `watch.rs` 可复用 `pipeline/` 中的业务逻辑
 
 ### 4.2 `src/compiler/*.rs` -> `Compiler Actor`
 *   移除 `process_page_for_dev` 中的副作用（写文件），使其变为纯计算函数。
@@ -154,9 +156,10 @@ graph TD
 ### 4.3 `src/serve.rs` -> Bootstrapper
 *   `serve.rs` 仅负责 `tokio::spawn` 启动所有 Actor 并连接 Channels。
 
-### 4.4 `src/hotreload` -> Reliable Messenger
-*   `diff` 逻辑移回 `vdom/diff.rs`。
-*   `HotReloadServer` 只保留 WebSocket 通讯逻辑。
+### 4.4 `src/hotreload` -> Reliable Messenger ✅ **DONE**
+*   ✅ `diff` 逻辑已移到 `vdom/diff.rs`。
+*   ✅ `pipeline/diff.rs` 封装业务逻辑。
+*   ✅ `WsActor` 只保留 WebSocket 通讯逻辑。
 
 ### 4.5 XML Generators Integration (RSS/Sitemap) 📋 **PLANNED**
 *   **现状**: `src/generator/{rss,sitemap}.rs` 使用手动 String 拼接或 `rss` crate Builder 模式生成 XML。
@@ -165,16 +168,14 @@ graph TD
     *   在 `vdom` 核心层增加 `xml_renderer.rs`，支持将 VDOM 渲染为 XML。
 
 > **Note**: 当前实现工作正常，此迁移为架构一致性优化，非必需。
-### 4.6 Data Store Refactoring (`src/data`) 📋 **PLANNED**
+### 4.6 Data Store Refactoring (`src/data`) � **PARTIAL**
 *   **现状**: `src/data` 依赖全局可变状态 `GLOBAL_SITE_DATA` (`LazyLock<RwLock>`)。
-*   **Hot Reload** 增加了 `VDOM_CACHE` (`src/hotreload/cache.rs`) 另一个全局状态。
-*   **迁移** (待 Actor 实现后):
-    *   废弃 `GLOBAL_SITE_DATA` 和 `VDOM_CACHE` 静态变量。
-    *   `SiteData` 将作为 `Compiler Actor` 的内部 State。
-    *   `VdomCache` 将作为 `VDOM Actor` 的内部 State。
-
-> [!IMPORTANT]
-> **当前仍使用全局状态**。迁移依赖 Actor Model 实现。
+*   **进展**: 
+    *   ✅ `VdomCache` 已移动到 `pipeline::cache::VdomCache`，作为 Actor 内部状态
+    *   📋 `GLOBAL_SITE_DATA` 尚未迁移
+*   **待完成**:
+    *   废弃 `GLOBAL_SITE_DATA` 静态变量
+    *   `SiteData` 将作为 `Compiler Actor` 的内部 State
 
 ### 4.7 Cleanup `src/typst_lib`
 *   **现状**: `src/typst_lib` 目前包含了一些便捷函数 (如 `compile_vdom`)，直接调用了 `crate::vdom` 进行转换。这导致了 `Compiler` 和 `VDOM` 的耦合。

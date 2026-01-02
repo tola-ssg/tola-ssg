@@ -400,3 +400,90 @@ fn generate_directory_listing(dir_path: &PathBuf, request_path: &str, data_dir_n
         HtmlVar::Entries(&entries_str),
     ]))
 }
+
+// ============================================================================
+// Actor-Based Server (Feature: actor)
+// ============================================================================
+
+/// Start the development server with actor-based hot reload.
+///
+/// This is an alternative to `serve_site()` that uses the actor model
+/// for file watching and compilation. Enable with `--features actor`.
+///
+/// Benefits over blocking mode:
+/// - Non-blocking compilation (file events buffer while compiling)
+/// - Clean shutdown via message passing
+/// - Better separation of concerns
+#[cfg(feature = "actor")]
+pub fn serve_site_with_actors() -> Result<()> {
+    use crate::actor::Coordinator;
+
+    let c = cfg();
+    let interface: std::net::IpAddr = c.serve.interface.parse()?;
+    let base_port = c.serve.port;
+
+    let (server, addr) = try_bind_port(interface, base_port, MAX_PORT_RETRIES)?;
+    let server = Arc::new(server);
+
+    // Start WebSocket server for hot reload
+    let ws_port = if c.serve.watch {
+        let ws_server = hotreload::HotReloadServer::new(DEFAULT_WS_PORT);
+        match ws_server.start() {
+            Ok(port) => {
+                log!("hotreload"; "ws://localhost:{}", port);
+
+                // Generate hotreload JS file in output directory
+                if let Err(e) = hotreload::server::generate_hotreload_js(&c.build.output, port) {
+                    log!("hotreload"; "failed to generate JS: {}", e);
+                }
+                let _ = hotreload::server::cleanup_old_hotreload_js(&c.build.output, port);
+                Some(port)
+            }
+            Err(e) => {
+                log!("hotreload"; "failed to start: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Set up Ctrl+C handler for graceful shutdown
+    let server_for_signal = Arc::clone(&server);
+    ctrlc::set_handler(move || {
+        log!("serve"; "shutting down...");
+        server_for_signal.unblock();
+    })
+    .context("Failed to set Ctrl+C handler")?;
+
+    log!("serve"; "http://{} (actor mode)", addr);
+
+    // Spawn actor system in a separate thread with its own tokio runtime
+    if c.serve.watch {
+        let config = cfg(); // Already Arc<SiteConfig>
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("Failed to create tokio runtime");
+
+            rt.block_on(async {
+                let coordinator = Coordinator::with_config(config);
+                if let Err(e) = coordinator.run().await {
+                    log!("actor"; "error: {}", e);
+                }
+            });
+        });
+    }
+
+    // Handle requests in main thread (blocks until Ctrl+C)
+    for request in server.incoming_requests() {
+        if let Err(e) = handle_request(request, &cfg(), ws_port) {
+            log!("serve"; "request error: {e}");
+        }
+    }
+
+    Ok(())
+}
+
