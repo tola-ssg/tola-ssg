@@ -14,11 +14,13 @@
 //!
 //! - [`transform`] - Generic transform trait for pipeline composition
 //! - [`cache`] - Cache trait abstraction for memoization
-//! - [`hash`] - Content-based hashing utilities
+//! - [`hash`] - Deterministic content-based hashing using blake3
 
 pub mod cache;
 pub mod hash;
 pub mod transform;
 
-pub use cache::Cache;
+// Re-exports for convenience
+pub use cache::{Cache, HashMapCache};
+pub use hash::{compute, StableHasher};
 pub use transform::Transform;

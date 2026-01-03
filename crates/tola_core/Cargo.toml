@@ -16,6 +16,7 @@ serde = ["dep:serde"]
 parallel = ["dep:rayon"]
 
 [dependencies]
+blake3 = "1.5"
 smallvec = "1.13"
 serde = { version = "1.0", features = ["derive"], optional = true }
 rayon = { version = "1.10", optional = true }

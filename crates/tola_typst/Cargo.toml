@@ -1,0 +1,24 @@
+[package]
+name = "tola_typst"
+version = "0.1.0"
+edition = "2024"
+description = "Typst integration for tola - world, fonts, packages"
+license = "MIT"
+
+[dependencies]
+# Typst core
+typst = "0.14.1"
+typst-kit = { version = "0.14.1", features = ["fonts", "packages"] }
+typst-html = "0.14.1"
+typst-svg = "0.14.1"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Concurrency
+parking_lot = "0.12"
+arc-swap = "1.7"
+
+# Utilities
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

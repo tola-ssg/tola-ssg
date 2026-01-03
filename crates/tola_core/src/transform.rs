@@ -34,14 +34,14 @@ pub trait Transform<I, O> {
 /// Allows chaining transforms with `.pipe()` syntax:
 ///
 /// ```rust
-/// use tola_core::{Transform, Pipeable};
+/// use tola_core::transform::{Transform, Pipeable};
 ///
 /// struct Double;
 /// impl Transform<i32, i32> for Double {
 ///     fn transform(self, input: i32) -> i32 { input * 2 }
 /// }
 ///
-/// let result = 5.pipe(Double);
+/// let result = 5_i32.pipe(Double);
 /// assert_eq!(result, 10);
 /// ```
 pub trait Pipeable: Sized {

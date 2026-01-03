@@ -5057,6 +5057,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "tola_core"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "rayon",
+ "serde",
+ "smallvec",
+]
+
+[[package]]
+name = "tola_typst"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "chrono",
+ "parking_lot",
+ "thiserror 2.0.17",
+ "typst",
+ "typst-html",
+ "typst-kit",
+ "typst-svg",
+]
+
+[[package]]
+name = "tola_vdom"
+version = "0.1.0"
+dependencies = [
+ "compact_str",
+ "paste",
+ "rayon",
+ "rustc-hash 2.1.1",
+ "serde",
+ "smallvec",
+ "tokio",
+ "tola_core",
+ "tungstenite",
+]
+
+[[package]]
 name = "toml"
 version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"

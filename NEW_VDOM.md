@@ -1930,7 +1930,7 @@ match config.output_format {
 > **注意**：`tola_core` 不包含 diagnostic，因为诊断信息的"位置"概念在不同领域完全不同：
 > - Typst: 源码行列号 (`Span`)
 > - VDOM: DOM 节点 ID (`StableId`)
-> 
+>
 > 各 crate 应定义自己的诊断类型。
 
 ```toml
@@ -2108,7 +2108,7 @@ pub struct SpanLocation {
 impl SpanLocation {
     /// 从 typst Span 解析位置信息
     pub fn from_span<W: World>(world: &W, span: typst::syntax::Span) -> Option<Self>;
-    
+
     /// 是否跨多行
     pub fn is_multiline(&self) -> bool;
 }
@@ -2118,16 +2118,16 @@ impl SpanLocation {
 #[cfg(feature = "format")]
 pub mod format {
     use super::*;
-    
+
     /// 格式化诊断列表（带颜色，类似 typst-cli 输出）
     pub fn format_diagnostics<W: World>(
-        world: &W, 
+        world: &W,
         diags: &[typst::diag::SourceDiagnostic]
     ) -> String;
-    
+
     /// 格式化单个诊断（带颜色）
     pub fn format_one(diag: &TypstDiagnostic) -> String;
-    
+
     /// 格式化单个诊断（无颜色，用于日志文件）
     pub fn format_plain(diag: &TypstDiagnostic) -> String;
 }
