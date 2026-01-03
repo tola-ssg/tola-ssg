@@ -20,6 +20,7 @@ pub enum CompilerMsg {
     /// Compile files
     Compile(Vec<PathBuf>),
     /// Compile content files that depend on changed deps
+    #[allow(dead_code)] // Reserved for future dependency-aware rebuild
     CompileDependents(Vec<PathBuf>),
     /// Full rebuild (config changed)
     FullRebuild,
@@ -49,10 +50,12 @@ pub enum VdomMsg {
     /// File skipped
     Skip,
     /// Invalidate cache for URL path
+    #[allow(dead_code)] // Reserved for selective cache invalidation
     Invalidate { url_path: String },
     /// Clear cache
     Clear,
     /// Shutdown
+    #[allow(dead_code)] // Reserved for graceful shutdown
     Shutdown,
 }
 
@@ -72,7 +75,9 @@ pub enum WsMsg {
     /// Add client
     AddClient(std::net::TcpStream),
     /// Client connected notification
+    #[allow(dead_code)] // Reserved for connection tracking
     ClientConnected,
     /// Shutdown
+    #[allow(dead_code)] // Reserved for graceful shutdown
     Shutdown,
 }
