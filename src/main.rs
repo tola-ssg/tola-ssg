@@ -19,7 +19,10 @@ mod pipeline;
 mod serve;
 mod typst_lib;
 mod utils;
-mod vdom;
+mod vdom_compile;
+
+// Use tola_vdom crate, aliased as vdom for compatibility
+use tola_vdom as vdom;
 
 use anyhow::Result;
 use build::build_site;

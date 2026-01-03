@@ -1,93 +1,160 @@
-//! # tola_vdom
+//! TTG (Trees That Grow) VDOM Core Module
 //!
-//! Type-safe, multi-phase HTML/XML DOM processing using the Trees That Grow (TTG) pattern.
+//! Multi-phase type-safe architecture based on GATs:
 //!
-//! ## Overview
+//! ## Core Modules
+//! - `phase`: Phase/PhaseData trait and phase definitions (Raw → Indexed → Processed → Rendered)
+//! - `node`: Node/Element/Text/Document types + FamilyExt
+//! - `family`: TagFamily trait (SVG, Link, Heading, Media, Other)
+//! - `attr`: Attribute system (Attrs type alias)
 //!
-//! `tola_vdom` provides a virtual DOM implementation specifically designed for:
-//! - **Multi-phase document processing**: Parse → Transform → Diff → Patch
-//! - **Type-safe phase transitions**: GATs enforce correct phase usage at compile time
-//! - **Efficient diffing**: LCS-based algorithm with stable ID tracking
-//! - **Hot reload support**: WebSocket-based incremental updates
+//! ## Transformation System
+//! - `transform`: `Transform` trait + `Pipeline` (unified API)
+//!   - `Processor`: Indexed → Processed transformation
+//! - `transforms/`: Concrete transform implementations
+//!   - `indexer`: Raw → Indexed (StableId generation, family identification)
+//!   - `render`: Processed → HTML (rendering)
 //!
-//! ## Architecture
+//! ## Algorithms
+//! - `diff`: VDOM diff algorithm (generates Patches)
+//! - `lcs`: Longest Common Subsequence (used by diff)
+//! - `id`: StableId (content-hash based identity)
 //!
-//! The crate is built around the Trees That Grow pattern, where a single AST type
-//! can represent different compilation phases through type-level parameterization:
+//! ## Conversion
+//! - `convert`: typst-html → Raw VDOM conversion
 //!
-//! ```text
-//! ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-//! │   Parsed    │ ──► │ Transformed │ ──► │  Diffable   │
-//! │   (Raw)     │     │  (Stable)   │     │  (With ID)  │
-//! └─────────────┘     └─────────────┘     └─────────────┘
+//! # Usage
+//!
+//! ```ignore
+//! use vdom::{Document, Raw, Indexed, Processed, Transform, Processor};
+//! use vdom::transforms::Indexer;
+//!
+//! // Pipeline: Raw → Indexed → Processed → HTML
+//! let indexed = raw_doc.pipe(Indexer::new());
+//! let processed = indexed.pipe(Processor::new());
+//! let html = HtmlRenderer::new().render(processed);
 //! ```
-//!
-//! ## Quick Start
-//!
-//! ```rust,ignore
-//! use tola_vdom::{Document, Phase, diff};
-//!
-//! // Parse HTML into initial phase
-//! let doc1 = parse_html("<div>Hello</div>")?;
-//! let doc2 = parse_html("<div>World</div>")?;
-//!
-//! // Transform through phases
-//! let stable1 = doc1.stabilize();
-//! let stable2 = doc2.stabilize();
-//!
-//! // Generate diff
-//! let patches = diff(&stable1, &stable2);
-//! ```
-//!
-//! ## Feature Flags
-//!
-//! - `std` (default): Enable standard library support
-//! - `serde`: Serialization support for all types
-//! - `parallel`: Parallel processing with rayon
-//! - `hotreload`: WebSocket-based hot reload support
-//!
-//! ## Modules
-//!
-//! - [`node`]: Core DOM node types (Element, Text, Document, etc.)
-//! - [`phase`]: Phase definitions and transitions
-//! - [`diff`]: DOM diffing algorithm
-//! - [`transform`]: Transform pipeline utilities
-//! - [`id`]: Stable ID generation and tracking
 
-#![forbid(unsafe_code)]
-#![warn(missing_docs)]
+// Allow dead code at module level - this is a standalone design that will be
+// integrated when convert.rs is implemented
+#![allow(dead_code)]
 
-// Core modules
 pub mod attr;
 pub mod cache;
+pub mod convert;
 pub mod diff;
 pub mod family;
+pub mod hash;
 pub mod id;
 pub mod lcs;
+#[macro_use]
+pub mod macros;
+pub mod node;
 pub mod phase;
 pub mod transform;
-
-// Node types
-pub mod node;
-
-// Transform implementations
 pub mod transforms;
 
-// Macros
-#[macro_use]
-mod macros;
+// =============================================================================
+// Re-exports for public API
+// =============================================================================
 
-// Prelude for convenient imports
-pub mod prelude {
-    //! Commonly used types and traits.
+// These exports may appear unused within the crate but are part of the public API
 
-    pub use crate::attr::{Attrs, AttrsExt};
-    pub use crate::diff::*;
-    pub use crate::family::{
-        HeadingFamily, LinkFamily, MediaFamily, OtherFamily, SvgFamily, TagFamily,
-    };
-    pub use crate::id::{PageSeed, StableId};
-    pub use crate::node::{Document, Element, FamilyExt, HasFamilyData, Node, Text};
-    pub use crate::phase::{Indexed, Phase, PhaseData, Processed, Raw, Rendered};
-    pub use crate::transform::*;
+// Family system
+#[allow(unused_imports)]
+pub use family::{
+    FamilyKind, HeadingFamily, HeadingIndexedData, HeadingProcessedData, LinkFamily,
+    LinkIndexedData, LinkProcessedData, LinkType, MediaFamily, MediaIndexedData,
+    MediaProcessedData, MediaType, OtherFamily, SvgFamily, SvgIndexedData, SvgProcessedData,
+    TagFamily,
+};
+
+// Transform system (unified API)
+#[allow(unused_imports)]
+pub use transform::{
+    process_family_ext, IdentityTransform, Pipeline, Processor, Transform,
+};
+
+// Node types
+#[allow(unused_imports)]
+pub use node::{Document, Element, FamilyExt, HasFamilyData, Node, Stats, Text};
+
+// Phase types
+#[allow(unused_imports)]
+pub use phase::{
+    Indexed, IndexedDocExt, IndexedElemExt, IndexedTextExt, Phase, PhaseData, Processed,
+    ProcessedDocExt, ProcessedElemExt, Raw, RawDocExt, RawElemExt, RawTextExt,
+    Rendered, RenderedDocExt,
+};
+
+// Conversion
+#[allow(unused_imports)]
+pub use convert::{from_typst_html, from_typst_html_with_meta};
+
+// Identity
+#[allow(unused_imports)]
+pub use id::{PageSeed, StableId};
+
+// Diff algorithm
+#[allow(unused_imports)]
+pub use diff::{diff, DiffResult, DiffStats, Patch};
+#[allow(unused_imports)]
+pub use lcs::{diff_sequences, Edit, LcsResult, LcsStats};
+
+// Cache
+pub use cache::{CacheKey, VdomCache};
+
+// Hash utilities
+pub use hash::StableHasher;
+
+// =============================================================================
+// High-level API for compilation pipeline integration
+// =============================================================================
+
+use transforms::{HtmlRenderer, Indexer};
+
+/// Result of VDOM compilation
+#[derive(Debug)]
+pub struct VdomCompileResult {
+    /// Generated HTML bytes
+    pub html: Vec<u8>,
+    /// Processing statistics
+    pub stats: ProcessedDocExt,
 }
+
+/// Compile a typst HtmlDocument to HTML bytes using the VDOM pipeline.
+///
+/// This is the main entry point for integrating VDOM with the compilation pipeline.
+///
+/// # Pipeline
+///
+/// 1. `from_typst_html()` - Convert typst HtmlDocument to Raw VDOM
+/// 2. `Indexer` - Transform Raw → Indexed (assign StableIds, identify families)
+/// 3. `Processor` - Transform Indexed → Processed (prepare for rendering)
+/// 4. `HtmlRenderer` - Render Processed → HTML bytes
+///
+/// # Usage
+///
+/// ```ignore
+/// let doc_result = typst_lib::compile_document(path, root, "tola-meta")?;
+/// let result = vdom::compile_to_html(&doc_result.document);
+/// fs::write(output_path, &result.html)?;
+/// ```
+pub fn compile_to_html(document: &typst_html::HtmlDocument) -> VdomCompileResult {
+    use transform::Transform;
+
+    // Raw phase: convert from typst
+    let raw_doc = from_typst_html(document);
+
+    // Transform through pipeline
+    let indexed_doc = Indexer::new().transform(raw_doc);
+    let processed_doc = Processor::new().transform(indexed_doc);
+    let stats = processed_doc.ext.clone();
+
+    // Render to HTML
+    let html = HtmlRenderer::new().render(processed_doc);
+
+    VdomCompileResult { html, stats }
+}
+
+

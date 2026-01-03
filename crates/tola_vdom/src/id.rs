@@ -28,60 +28,6 @@ use std::fmt;
 use std::hash::Hash;
 
 // =============================================================================
-// StableHasher - Internal deterministic hasher using blake3
-// =============================================================================
-
-/// A deterministic hasher using blake3 for stable content-based identity.
-///
-/// This is internal to the id module - external code should use `StableId`
-/// constructors instead.
-struct StableHasher {
-    inner: blake3::Hasher,
-}
-
-impl StableHasher {
-    /// Create a new StableHasher.
-    #[inline]
-    fn new() -> Self {
-        Self {
-            inner: blake3::Hasher::new(),
-        }
-    }
-
-    /// Update with raw bytes.
-    #[inline]
-    fn update(mut self, data: &[u8]) -> Self {
-        self.inner.update(data);
-        self
-    }
-
-    /// Update with a string slice.
-    #[inline]
-    fn update_str(self, s: &str) -> Self {
-        self.update(s.as_bytes())
-    }
-
-    /// Update with a u64 value (little-endian).
-    #[inline]
-    fn update_u64(self, v: u64) -> Self {
-        self.update(&v.to_le_bytes())
-    }
-
-    /// Update with a usize value (little-endian).
-    #[inline]
-    fn update_usize(self, v: usize) -> Self {
-        self.update(&v.to_le_bytes())
-    }
-
-    /// Finish and return the hash as u64.
-    #[inline]
-    fn finish(self) -> u64 {
-        let hash = self.inner.finalize();
-        u64::from_le_bytes(hash.as_bytes()[..8].try_into().unwrap())
-    }
-}
-
-// =============================================================================
 // PageSeed - Page-specific seed for globally unique StableIds
 // =============================================================================
 
@@ -104,6 +50,7 @@ pub struct PageSeed(pub u64);
 impl PageSeed {
     /// Create a PageSeed from a page path
     pub fn from_path(path: &str) -> Self {
+        use crate::hash::StableHasher;
         Self(StableHasher::new()
             .update_str("__page__")
             .update_str(path)
@@ -199,6 +146,8 @@ impl StableId {
         occurrence: usize,
         parent_seed: u64,
     ) -> Self {
+        use crate::hash::StableHasher;
+
         let mut hasher = StableHasher::new()
             .update_u64(parent_seed)
             .update_str(tag);
@@ -239,6 +188,8 @@ impl StableId {
     /// - With position only: "Hello" → "World" is recognized as Keep + UpdateText
     #[inline]
     pub fn for_text(occurrence: usize, parent_seed: u64) -> Self {
+        use crate::hash::StableHasher;
+
         Self(StableHasher::new()
             .update_u64(parent_seed)
             .update_str("__text__")
@@ -254,6 +205,8 @@ impl StableId {
     /// * `occurrence` - How many same-frame_id siblings appeared before this one
     #[inline]
     pub fn for_frame(frame_id: usize, occurrence: usize, parent_seed: u64) -> Self {
+        use crate::hash::StableHasher;
+
         Self(StableHasher::new()
             .update_u64(parent_seed)
             .update_str("__frame__")
@@ -323,7 +276,7 @@ impl Default for StableId {
 
 #[cfg(feature = "rkyv")]
 mod rkyv_impl {
-    use crate::StableId;
+    use super::StableId;
     use rkyv::{Archive, Deserialize, Serialize};
 
     impl Archive for StableId {
@@ -367,3 +320,60 @@ pub use rkyv_impl::ArchivedStableId;
 // Tests
 // =============================================================================
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detached_id() {
+        let id = StableId::detached();
+        assert!(id.is_detached());
+        // Note: has_span was removed when switching from Span to content hash
+    }
+
+    #[test]
+    fn test_content_hash_deterministic() {
+        let attrs = vec![("class".to_string(), "foo".to_string())];
+        let children = vec![StableId::from_raw(1), StableId::from_raw(2)];
+
+        let id1 = StableId::from_content_hash("div", &attrs, &children);
+        let id2 = StableId::from_content_hash("div", &attrs, &children);
+
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn test_content_hash_differs() {
+        // Use key attributes (id, key) to test hash difference
+        // Note: class is NOT a key attribute, so it won't affect hash
+        let attrs1 = vec![("id".to_string(), "foo".to_string())];
+        let attrs2 = vec![("id".to_string(), "bar".to_string())];
+        let children: Vec<StableId> = vec![];
+
+        let id1 = StableId::from_content_hash("div", &attrs1, &children);
+        let id2 = StableId::from_content_hash("div", &attrs2, &children);
+
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn test_non_key_attrs_dont_affect_hash() {
+        // class and style are NOT key attributes
+        // Changing them should NOT change the StableId
+        let attrs1 = vec![("class".to_string(), "foo".to_string())];
+        let attrs2 = vec![("class".to_string(), "bar".to_string())];
+        let children: Vec<StableId> = vec![];
+
+        let id1 = StableId::from_content_hash("div", &attrs1, &children);
+        let id2 = StableId::from_content_hash("div", &attrs2, &children);
+
+        // Same ID because class is not a key attribute!
+        assert_eq!(id1, id2, "class attr should not affect StableId");
+    }
+
+    #[test]
+    fn test_display_format() {
+        let id = StableId::from_raw(0x123456789abcdef0);
+        assert_eq!(format!("{}", id), "#123456789abcdef0");
+    }
+}

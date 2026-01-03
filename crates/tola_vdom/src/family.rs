@@ -1,19 +1,6 @@
-//! TagFamily trait and family definitions.
+//! TagFamily trait and family definitions
 //!
-//! The family system is the core of TTG architecture, implementing tag
-//! classification and type specialization for DOM elements.
-//!
-//! # Family System Overview
-//!
-//! Elements are classified into families based on their tag name and attributes:
-//!
-//! - **Svg**: `<svg>`, `<path>`, `<circle>`, etc.
-//! - **Link**: `<a>`, elements with `href`/`src` attributes
-//! - **Heading**: `<h1>` through `<h6>`
-//! - **Media**: `<img>`, `<video>`, `<audio>`, etc.
-//! - **Other**: All other elements
-//!
-//! Each family carries phase-specific data through the processing pipeline.
+//! The family system is the core of TTG architecture, implementing tag classification and type specialization.
 
 use std::fmt::Debug;
 
@@ -21,39 +8,33 @@ use std::fmt::Debug;
 // FamilyKind enum
 // =============================================================================
 
-/// Type-safe family identification result enum.
+/// Type-safe family identification result enum
+///
+/// NOTE: Currently unused but reserved for runtime family identification.
+/// Will be used in `convert.rs` for HTML → Raw VDOM conversion.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FamilyKind {
-    /// SVG graphics elements
     Svg,
-    /// Hyperlink elements
     Link,
-    /// Heading elements (h1-h6)
     Heading,
-    /// Media elements (img, video, audio)
     Media,
-    /// All other elements
     Other,
 }
 
+#[allow(dead_code)]
 impl FamilyKind {
-    /// Returns all FamilyKind variants.
+    /// Returns all FamilyKind variants
     pub const fn all() -> &'static [FamilyKind] {
-        &[
-            Self::Svg,
-            Self::Link,
-            Self::Heading,
-            Self::Media,
-            Self::Other,
-        ]
+        &[Self::Svg, Self::Link, Self::Heading, Self::Media, Self::Other]
     }
 
-    /// Number of variants.
+    /// Number of variants
     pub const fn count() -> usize {
         5
     }
 
-    /// Get family name as string.
+    /// Get family name
     pub fn name(&self) -> &'static str {
         match self {
             Self::Svg => SvgFamily::NAME,
@@ -63,11 +44,28 @@ impl FamilyKind {
             Self::Other => OtherFamily::NAME,
         }
     }
-}
 
-impl Default for FamilyKind {
-    fn default() -> Self {
-        Self::Other
+    /// Create default FamilyExt from runtime FamilyKind
+    ///
+    /// This bridges runtime FamilyKind → compile-time FamilyExt.
+    /// Useful when creating elements from parsed HTML where family
+    /// is determined at runtime.
+    pub fn into_default_ext<P: super::phase::PhaseData>(self) -> super::node::FamilyExt<P>
+    where
+        P::ElemExt<SvgFamily>: Default,
+        P::ElemExt<LinkFamily>: Default,
+        P::ElemExt<HeadingFamily>: Default,
+        P::ElemExt<MediaFamily>: Default,
+        P::ElemExt<OtherFamily>: Default,
+    {
+        use super::node::FamilyExt;
+        match self {
+            Self::Svg => FamilyExt::Svg(P::ElemExt::<SvgFamily>::default()),
+            Self::Link => FamilyExt::Link(P::ElemExt::<LinkFamily>::default()),
+            Self::Heading => FamilyExt::Heading(P::ElemExt::<HeadingFamily>::default()),
+            Self::Media => FamilyExt::Media(P::ElemExt::<MediaFamily>::default()),
+            Self::Other => FamilyExt::Other(P::ElemExt::<OtherFamily>::default()),
+        }
     }
 }
 
@@ -75,48 +73,49 @@ impl Default for FamilyKind {
 // TagFamily trait
 // =============================================================================
 
-/// Tag family trait - tags in same family share extension data types.
+/// Tag family trait - tags in same family share extension data types
 ///
-/// The true value of GAT: each family can have different data structures at
-/// different phases:
+/// The true value of GAT: each family can have different data structures at different phases
 /// - Indexed phase: collect raw information (href, id, viewbox, etc.)
 /// - Processed phase: processing results (resolved_url, anchor_id, optimized, etc.)
 pub trait TagFamily: 'static + Send + Sync {
-    /// Family name for debugging and display.
     const NAME: &'static str;
-    /// Family kind for runtime identification.
     const KIND: FamilyKind;
 
-    /// Family data at Indexed phase (raw information).
+    /// Family data at Indexed phase (raw information)
     type IndexedData: Debug + Clone + Default + Send + Sync;
 
-    /// Family data at Processed phase (processing results).
+    /// Family data at Processed phase (processing results)
     type ProcessedData: Debug + Clone + Default + Send + Sync;
 
-    /// Unified data transformation interface: IndexedData → ProcessedData.
+    /// Unified data transformation interface: IndexedData → ProcessedData
     fn process(indexed: &Self::IndexedData) -> Self::ProcessedData;
 }
 
 // =============================================================================
-// SVG Family
+// Family definitions
 // =============================================================================
 
-/// SVG family: `<svg>`, `<path>`, `<circle>`, `<rect>`, `<g>`, ...
+/// SVG family: <svg>, <path>, <circle>, <rect>, <g>, ...
+#[allow(dead_code)]
 pub struct SvgFamily;
 
+#[allow(dead_code)]
 impl SvgFamily {
-    /// Check if a tag is an SVG element.
+    /// Check if a tag is an SVG element
     pub fn is_svg_tag(tag: &str) -> bool {
         is_svg_tag(tag)
     }
 
-    /// SVG container elements.
-    pub const CONTAINER_TAGS: &'static [&'static str] =
-        &["svg", "g", "defs", "symbol", "use", "switch"];
+    /// SVG container elements
+    pub const CONTAINER_TAGS: &'static [&'static str] = &[
+        "svg", "g", "defs", "symbol", "use", "switch"
+    ];
 
-    /// SVG shape elements.
-    pub const SHAPE_TAGS: &'static [&'static str] =
-        &["path", "circle", "rect", "line", "polyline", "polygon", "ellipse"];
+    /// SVG shape elements
+    pub const SHAPE_TAGS: &'static [&'static str] = &[
+        "path", "circle", "rect", "line", "polyline", "polygon", "ellipse"
+    ];
 }
 
 impl TagFamily for SvgFamily {
@@ -130,25 +129,20 @@ impl TagFamily for SvgFamily {
     }
 }
 
-/// SVG Indexed phase data.
+/// SVG Indexed phase data
 #[derive(Debug, Clone, Default)]
 pub struct SvgIndexedData {
-    /// Whether this is a root `<svg>` element.
     pub is_root: bool,
-    /// SVG viewBox attribute value.
     pub viewbox: Option<String>,
-    /// Explicit width/height dimensions.
     pub dimensions: Option<(f32, f32)>,
 }
 
 impl SvgIndexedData {
-    /// Parse viewBox string into (min_x, min_y, width, height).
-    ///
+    /// Parse viewBox string into (min_x, min_y, width, height)
     /// Example: "0 0 100 200" → Some((0.0, 0.0, 100.0, 200.0))
     pub fn parse_viewbox(&self) -> Option<(f32, f32, f32, f32)> {
         let vb = self.viewbox.as_ref()?;
-        let parts: Vec<f32> = vb
-            .split_whitespace()
+        let parts: Vec<f32> = vb.split_whitespace()
             .filter_map(|s| s.parse().ok())
             .collect();
         if parts.len() == 4 {
@@ -158,35 +152,29 @@ impl SvgIndexedData {
         }
     }
 
-    /// Get width/height from viewBox.
+    /// Get width/height from viewBox
     pub fn viewbox_dimensions(&self) -> Option<(f32, f32)> {
         self.parse_viewbox().map(|(_, _, w, h)| (w, h))
     }
 
-    /// Get effective dimensions (prefers explicit dimensions over viewBox).
+    /// Get effective dimensions (prefers explicit dimensions over viewBox)
     pub fn effective_dimensions(&self) -> Option<(f32, f32)> {
         self.dimensions.or_else(|| self.viewbox_dimensions())
     }
 }
 
-/// SVG Processed phase data.
+/// SVG Processed phase data
 #[derive(Debug, Clone, Default)]
 pub struct SvgProcessedData {
-    /// Whether SVG has been optimized.
     pub optimized: bool,
-    /// Original byte size before optimization.
     pub original_bytes: usize,
-    /// Byte size after optimization.
     pub optimized_bytes: usize,
-    /// Path to extracted external SVG file (if any).
     pub extracted_path: Option<String>,
 }
 
-// =============================================================================
-// Link Family
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
 
-/// Link family: `<a>`, any element with href/src attribute.
+/// Link family: <a>, any element with href/src attribute
 pub struct LinkFamily;
 
 impl TagFamily for LinkFamily {
@@ -205,46 +193,35 @@ impl TagFamily for LinkFamily {
     }
 }
 
-/// Link Indexed phase data.
+/// Link Indexed phase data
 #[derive(Debug, Clone, Default)]
 pub struct LinkIndexedData {
-    /// Detected link type.
     pub link_type: LinkType,
-    /// Original href attribute value.
     pub original_href: Option<String>,
 }
 
-/// Link Processed phase data.
+/// Link Processed phase data
 #[derive(Debug, Clone, Default)]
 pub struct LinkProcessedData {
-    /// Resolved (absolute) URL.
     pub resolved_url: Option<String>,
-    /// Whether link points to external site.
     pub is_external: bool,
-    /// Whether link target was verified to not exist.
     pub is_broken: bool,
-    /// Whether rel="nofollow" should be added.
     pub nofollow: bool,
 }
 
-/// Link type classification.
+/// Link type
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum LinkType {
-    /// No href attribute.
     #[default]
     None,
-    /// Absolute path: `/path`.
-    Absolute,
-    /// Relative path: `./file`.
-    Relative,
-    /// Fragment link: `#anchor`.
-    Fragment,
-    /// External URL: `https://...`.
-    External,
+    Absolute,   // /path
+    Relative,   // ./file
+    Fragment,   // #anchor
+    External,   // https://...
 }
 
 impl LinkType {
-    /// Infer link type from href string.
+    /// Infer link type from href string
     pub fn from_href(href: &str) -> Self {
         if href.starts_with("http://") || href.starts_with("https://") || href.starts_with("//") {
             Self::External
@@ -257,37 +234,23 @@ impl LinkType {
         }
     }
 
-    /// Check if link type is None.
-    pub fn is_none(&self) -> bool {
-        matches!(self, Self::None)
-    }
-    /// Check if link is absolute path.
-    pub fn is_absolute(&self) -> bool {
-        matches!(self, Self::Absolute)
-    }
-    /// Check if link is relative path.
-    pub fn is_relative(&self) -> bool {
-        matches!(self, Self::Relative)
-    }
-    /// Check if link is a fragment.
-    pub fn is_fragment(&self) -> bool {
-        matches!(self, Self::Fragment)
-    }
-    /// Check if link is external.
-    pub fn is_external(&self) -> bool {
-        matches!(self, Self::External)
-    }
-    /// Check if link is internal (not external or none).
-    pub fn is_internal(&self) -> bool {
-        !matches!(self, Self::External | Self::None)
-    }
+    /// Check if link type is None
+    pub fn is_none(&self) -> bool { matches!(self, Self::None) }
+    /// Check if link is absolute path
+    pub fn is_absolute(&self) -> bool { matches!(self, Self::Absolute) }
+    /// Check if link is relative path
+    pub fn is_relative(&self) -> bool { matches!(self, Self::Relative) }
+    /// Check if link is a fragment
+    pub fn is_fragment(&self) -> bool { matches!(self, Self::Fragment) }
+    /// Check if link is external
+    pub fn is_external(&self) -> bool { matches!(self, Self::External) }
+    /// Check if link is internal (not external or none)
+    pub fn is_internal(&self) -> bool { !matches!(self, Self::External | Self::None) }
 }
 
-// =============================================================================
-// Heading Family
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
 
-/// Heading family: `<h1>` through `<h6>`.
+/// Heading family: <h1> - <h6>
 pub struct HeadingFamily;
 
 impl TagFamily for HeadingFamily {
@@ -305,17 +268,15 @@ impl TagFamily for HeadingFamily {
     }
 }
 
-/// Heading Indexed phase data.
+/// Heading Indexed phase data
 #[derive(Debug, Clone, Default)]
 pub struct HeadingIndexedData {
-    /// Heading level (1-6).
     pub level: u8,
-    /// Original id attribute value.
     pub original_id: Option<String>,
 }
 
 impl HeadingIndexedData {
-    /// Parse heading level from tag name: "h1" → 1.
+    /// Parse heading level from tag name: "h1" → 1
     pub fn level_from_tag(tag: &str) -> u8 {
         tag.chars()
             .last()
@@ -323,53 +284,29 @@ impl HeadingIndexedData {
             .unwrap_or(1) as u8
     }
 
-    /// Check heading level.
-    pub fn is_h1(&self) -> bool {
-        self.level == 1
-    }
-    /// Check heading level.
-    pub fn is_h2(&self) -> bool {
-        self.level == 2
-    }
-    /// Check heading level.
-    pub fn is_h3(&self) -> bool {
-        self.level == 3
-    }
-    /// Check heading level.
-    pub fn is_h4(&self) -> bool {
-        self.level == 4
-    }
-    /// Check heading level.
-    pub fn is_h5(&self) -> bool {
-        self.level == 5
-    }
-    /// Check heading level.
-    pub fn is_h6(&self) -> bool {
-        self.level == 6
-    }
+    /// Check heading level
+    pub fn is_h1(&self) -> bool { self.level == 1 }
+    pub fn is_h2(&self) -> bool { self.level == 2 }
+    pub fn is_h3(&self) -> bool { self.level == 3 }
+    pub fn is_h4(&self) -> bool { self.level == 4 }
+    pub fn is_h5(&self) -> bool { self.level == 5 }
+    pub fn is_h6(&self) -> bool { self.level == 6 }
 
-    /// Check if top-level heading (h1 or h2).
-    pub fn is_top_level(&self) -> bool {
-        self.level <= 2
-    }
+    /// Check if top-level heading (h1 or h2)
+    pub fn is_top_level(&self) -> bool { self.level <= 2 }
 }
 
-/// Heading Processed phase data.
+/// Heading Processed phase data
 #[derive(Debug, Clone, Default)]
 pub struct HeadingProcessedData {
-    /// Generated anchor ID for linking.
     pub anchor_id: String,
-    /// Text content for table of contents.
     pub toc_text: String,
-    /// Whether to include in table of contents.
     pub in_toc: bool,
 }
 
-// =============================================================================
-// Media Family
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
 
-/// Media family: `<img>`, `<video>`, `<audio>`.
+/// Media family: <img>, <video>, <audio>
 pub struct MediaFamily;
 
 impl TagFamily for MediaFamily {
@@ -388,17 +325,15 @@ impl TagFamily for MediaFamily {
     }
 }
 
-/// Media Indexed phase data.
+/// Media Indexed phase data
 #[derive(Debug, Clone, Default)]
 pub struct MediaIndexedData {
-    /// Source URL attribute value.
     pub src: Option<String>,
-    /// Whether media is an inline SVG image.
     pub is_svg_image: bool,
 }
 
 impl MediaIndexedData {
-    /// Infer media type from file extension.
+    /// Infer media type from file extension
     pub fn media_type(&self) -> MediaType {
         let src = match &self.src {
             Some(s) => s.to_lowercase(),
@@ -407,13 +342,8 @@ impl MediaIndexedData {
 
         if src.ends_with(".svg") {
             MediaType::Svg
-        } else if src.ends_with(".png")
-            || src.ends_with(".jpg")
-            || src.ends_with(".jpeg")
-            || src.ends_with(".gif")
-            || src.ends_with(".webp")
-            || src.ends_with(".avif")
-        {
+        } else if src.ends_with(".png") || src.ends_with(".jpg") || src.ends_with(".jpeg")
+            || src.ends_with(".gif") || src.ends_with(".webp") || src.ends_with(".avif") {
             MediaType::Image
         } else if src.ends_with(".mp4") || src.ends_with(".webm") || src.ends_with(".ogg") {
             MediaType::Video
@@ -424,50 +354,39 @@ impl MediaIndexedData {
         }
     }
 
-    /// Check if media is an image type.
+    /// Check if media is an image type
     pub fn is_image(&self) -> bool {
         matches!(self.media_type(), MediaType::Image | MediaType::Svg)
     }
 
-    /// Check if media is a video type.
+    /// Check if media is a video type
     pub fn is_video(&self) -> bool {
         matches!(self.media_type(), MediaType::Video)
     }
 }
 
-/// Media type enumeration for type detection.
+/// Media type enum for type detection
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaType {
-    /// Raster image format.
     Image,
-    /// SVG vector format.
     Svg,
-    /// Video format.
     Video,
-    /// Audio format.
     Audio,
-    /// Unknown format.
     Unknown,
 }
 
-/// Media Processed phase data.
+/// Media Processed phase data
 #[derive(Debug, Clone, Default)]
 pub struct MediaProcessedData {
-    /// Resolved source URL.
     pub resolved_src: Option<String>,
-    /// Image width (if known).
     pub width: Option<u32>,
-    /// Image height (if known).
     pub height: Option<u32>,
-    /// Whether lazy loading is enabled.
     pub lazy_load: bool,
 }
 
-// =============================================================================
-// Other Family
-// =============================================================================
+// ─────────────────────────────────────────────────────────────────────────────
 
-/// Other family: all elements that don't belong to specialized families.
+/// Other family: all other elements
 pub struct OtherFamily;
 
 impl TagFamily for OtherFamily {
@@ -483,7 +402,10 @@ impl TagFamily for OtherFamily {
 // Family identification functions
 // =============================================================================
 
-/// Identify family by tag name and attributes.
+/// Identify family by tag name and attributes
+///
+/// NOTE: Reserved for `convert.rs` HTML → Raw conversion.
+#[allow(dead_code)]
 pub fn identify_family_kind(tag: &str, attrs: &[(String, String)]) -> FamilyKind {
     if is_svg_tag(tag) {
         return FamilyKind::Svg;
@@ -491,18 +413,17 @@ pub fn identify_family_kind(tag: &str, attrs: &[(String, String)]) -> FamilyKind
 
     match tag {
         "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => FamilyKind::Heading,
-        "img" | "video" | "audio" | "source" | "track" | "picture" | "canvas" | "embed"
-        | "object" => FamilyKind::Media,
+        "img" | "video" | "audio" | "source" | "track" | "picture" | "canvas" | "embed" | "object" => FamilyKind::Media,
         "a" => FamilyKind::Link,
         _ if attrs.iter().any(|(k, _)| k == "href" || k == "src") => FamilyKind::Link,
         _ => FamilyKind::Other,
     }
 }
 
-/// Check if a tag is an SVG element.
-pub fn is_svg_tag(tag: &str) -> bool {
-    matches!(
-        tag,
+/// Check if a tag is an SVG element
+#[allow(dead_code)]
+fn is_svg_tag(tag: &str) -> bool {
+    matches!(tag,
         // Container elements
         "svg" | "g" | "defs" | "symbol" | "use" | "switch"
         // Shape elements
@@ -561,16 +482,5 @@ mod tests {
     fn test_heading_level() {
         assert_eq!(HeadingIndexedData::level_from_tag("h1"), 1);
         assert_eq!(HeadingIndexedData::level_from_tag("h6"), 6);
-    }
-
-    #[test]
-    fn test_svg_viewbox() {
-        let data = SvgIndexedData {
-            is_root: true,
-            viewbox: Some("0 0 100 200".into()),
-            dimensions: None,
-        };
-        assert_eq!(data.parse_viewbox(), Some((0.0, 0.0, 100.0, 200.0)));
-        assert_eq!(data.viewbox_dimensions(), Some((100.0, 200.0)));
     }
 }

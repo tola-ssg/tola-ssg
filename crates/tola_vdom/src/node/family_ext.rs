@@ -1,51 +1,42 @@
-//! FamilyExt enum - Zero-cost family extension mechanism.
+//! FamilyExt enum and HasFamilyData trait
 //!
-//! This is the core of the TTG pattern: each element carries family-specific
-//! extension data through a compile-time determined enum.
+//! Zero-cost family extension mechanism for type-safe phase transformations.
 
 use crate::family::{
-    FamilyKind, HeadingFamily, LinkFamily, MediaFamily, OtherFamily, SvgFamily, TagFamily,
+    HeadingFamily, HeadingIndexedData, HeadingProcessedData, LinkFamily, LinkIndexedData,
+    LinkProcessedData, MediaFamily, MediaIndexedData, MediaProcessedData, OtherFamily, SvgFamily,
+    SvgIndexedData, SvgProcessedData, TagFamily,
 };
-use crate::phase::PhaseData;
+use crate::phase::{Indexed, PhaseData, Processed, Raw};
+
+use super::Element;
 
 // =============================================================================
 // FamilyExt - Zero-cost family extension enum
 // =============================================================================
 
-/// Family extension enum - compile-time determined, zero runtime overhead.
+/// Family extension enum - compile-time determined, zero runtime overhead
 ///
-/// Key design: Use enum instead of `Box<dyn Any>`
+/// Key design: Use enum instead of Box<dyn Any>
 /// - Stack allocated (no heap overhead)
 /// - Size known at compile time
 /// - Pattern matching (no downcast overhead)
 #[derive(Debug, Clone)]
 pub enum FamilyExt<P: PhaseData> {
-    /// SVG family extension.
     Svg(P::ElemExt<SvgFamily>),
-    /// Link family extension.
     Link(P::ElemExt<LinkFamily>),
-    /// Heading family extension.
     Heading(P::ElemExt<HeadingFamily>),
-    /// Media family extension.
     Media(P::ElemExt<MediaFamily>),
-    /// Other family extension.
     Other(P::ElemExt<OtherFamily>),
 }
 
 impl<P: PhaseData> FamilyExt<P> {
-    /// Get the family name.
-    pub fn family_name(&self) -> &'static str {
-        match self {
-            Self::Svg(_) => SvgFamily::NAME,
-            Self::Link(_) => LinkFamily::NAME,
-            Self::Heading(_) => HeadingFamily::NAME,
-            Self::Media(_) => MediaFamily::NAME,
-            Self::Other(_) => OtherFamily::NAME,
-        }
-    }
+    // Generates: family_name() -> &'static str (returns TagFamily::NAME)
+    impl_family_match!(family_name, NAME, &'static str, Svg, Link, Heading, Media, Other);
 
-    /// Get the FamilyKind for this extension.
-    pub fn kind(&self) -> FamilyKind {
+    /// Get the FamilyKind for this extension
+    pub fn kind(&self) -> crate::family::FamilyKind {
+        use crate::family::FamilyKind;
         match self {
             Self::Svg(_) => FamilyKind::Svg,
             Self::Link(_) => FamilyKind::Link,
@@ -55,135 +46,56 @@ impl<P: PhaseData> FamilyExt<P> {
         }
     }
 
-    // =========================================================================
-    // Type checking methods
-    // =========================================================================
-
-    /// Check if this is an SVG family.
-    pub fn is_svg(&self) -> bool {
-        matches!(self, Self::Svg(_))
-    }
-
-    /// Check if this is a Link family.
-    pub fn is_link(&self) -> bool {
-        matches!(self, Self::Link(_))
-    }
-
-    /// Check if this is a Heading family.
-    pub fn is_heading(&self) -> bool {
-        matches!(self, Self::Heading(_))
-    }
-
-    /// Check if this is a Media family.
-    pub fn is_media(&self) -> bool {
-        matches!(self, Self::Media(_))
-    }
-
-    /// Check if this is an Other family.
-    pub fn is_other(&self) -> bool {
-        matches!(self, Self::Other(_))
-    }
-
-    // =========================================================================
-    // Accessor methods
-    // =========================================================================
-
-    /// Get SVG extension data if this is an SVG family.
-    pub fn as_svg(&self) -> Option<&P::ElemExt<SvgFamily>> {
-        match self {
-            Self::Svg(ext) => Some(ext),
-            _ => None,
-        }
-    }
-
-    /// Get mutable SVG extension data.
-    pub fn as_svg_mut(&mut self) -> Option<&mut P::ElemExt<SvgFamily>> {
-        match self {
-            Self::Svg(ext) => Some(ext),
-            _ => None,
-        }
-    }
-
-    /// Get Link extension data if this is a Link family.
-    pub fn as_link(&self) -> Option<&P::ElemExt<LinkFamily>> {
-        match self {
-            Self::Link(ext) => Some(ext),
-            _ => None,
-        }
-    }
-
-    /// Get mutable Link extension data.
-    pub fn as_link_mut(&mut self) -> Option<&mut P::ElemExt<LinkFamily>> {
-        match self {
-            Self::Link(ext) => Some(ext),
-            _ => None,
-        }
-    }
-
-    /// Get Heading extension data if this is a Heading family.
-    pub fn as_heading(&self) -> Option<&P::ElemExt<HeadingFamily>> {
-        match self {
-            Self::Heading(ext) => Some(ext),
-            _ => None,
-        }
-    }
-
-    /// Get mutable Heading extension data.
-    pub fn as_heading_mut(&mut self) -> Option<&mut P::ElemExt<HeadingFamily>> {
-        match self {
-            Self::Heading(ext) => Some(ext),
-            _ => None,
-        }
-    }
-
-    /// Get Media extension data if this is a Media family.
-    pub fn as_media(&self) -> Option<&P::ElemExt<MediaFamily>> {
-        match self {
-            Self::Media(ext) => Some(ext),
-            _ => None,
-        }
-    }
-
-    /// Get mutable Media extension data.
-    pub fn as_media_mut(&mut self) -> Option<&mut P::ElemExt<MediaFamily>> {
-        match self {
-            Self::Media(ext) => Some(ext),
-            _ => None,
-        }
-    }
-
-    /// Get Other extension data if this is an Other family.
-    pub fn as_other(&self) -> Option<&P::ElemExt<OtherFamily>> {
-        match self {
-            Self::Other(ext) => Some(ext),
-            _ => None,
-        }
-    }
-
-    /// Get mutable Other extension data.
-    pub fn as_other_mut(&mut self) -> Option<&mut P::ElemExt<OtherFamily>> {
-        match self {
-            Self::Other(ext) => Some(ext),
-            _ => None,
-        }
-    }
+    // Generates for each variant (Svg, Link, Heading, Media, Other):
+    //   - is_xxx(&self) -> bool
+    //   - as_xxx(&self) -> Option<&ElemExt<XxxFamily>>
+    //   - as_xxx_mut(&mut self) -> Option<&mut ElemExt<XxxFamily>>
+    impl_family_accessors!(Svg, Link, Heading, Media, Other);
 }
 
 // NOTE: FamilyExt intentionally does NOT implement Default.
 // Rationale: Silently defaulting to `Other` family hides errors.
 // Users must explicitly specify the family when creating elements.
+// Use Element::svg(), Element::link(), etc. or Element::auto() instead.
 
 // =============================================================================
-// Phase-specific implementations
+// FamilyExt phase-specific implementations
 // =============================================================================
 
-use crate::id::StableId;
-use crate::phase::{Indexed, Processed};
+/// Raw phase: access and set Span for StableId generation
+impl FamilyExt<Raw> {
+    /// Get the Span from any family variant
+    pub fn span(&self) -> Option<typst::syntax::Span> {
+        match self {
+            Self::Svg(ext) => ext.span,
+            Self::Link(ext) => ext.span,
+            Self::Heading(ext) => ext.span,
+            Self::Media(ext) => ext.span,
+            Self::Other(ext) => ext.span,
+        }
+    }
 
-/// Indexed phase: access StableId from any family variant.
+    /// Set the Span on any family variant
+    pub fn set_span(&mut self, span: typst::syntax::Span) {
+        match self {
+            Self::Svg(ext) => ext.span = Some(span),
+            Self::Link(ext) => ext.span = Some(span),
+            Self::Heading(ext) => ext.span = Some(span),
+            Self::Media(ext) => ext.span = Some(span),
+            Self::Other(ext) => ext.span = Some(span),
+        }
+    }
+
+    /// Check if this element has a valid (non-detached) Span
+    pub fn has_span(&self) -> bool {
+        self.span().map(|s| !s.is_detached()).unwrap_or(false)
+    }
+}
+
+/// Indexed phase: access common fields across all families
 impl FamilyExt<Indexed> {
-    /// Get the StableId from any family variant.
-    pub fn stable_id(&self) -> StableId {
+    /// Get the StableId from any family variant
+    pub fn stable_id(&self) -> crate::id::StableId {
         match self {
             Self::Svg(ext) => ext.stable_id,
             Self::Link(ext) => ext.stable_id,
@@ -194,10 +106,16 @@ impl FamilyExt<Indexed> {
     }
 }
 
-/// Processed phase: access StableId from any family variant.
+/// Processed phase: access common fields across all families
 impl FamilyExt<Processed> {
-    /// Get the StableId from any family variant (preserved from Indexed phase).
-    pub fn stable_id(&self) -> StableId {
+    // Generates: is_modified(&self) -> bool (reads e.modified from each variant)
+    impl_family_field_get!(is_modified, modified, bool, Svg, Link, Heading, Media, Other);
+
+    // Generates: set_modified(&mut self, value: bool) (sets e.modified on each variant)
+    impl_family_field_set!(set_modified, modified, bool, Svg, Link, Heading, Media, Other);
+
+    /// Get the StableId from any family variant (preserved from Indexed phase)
+    pub fn stable_id(&self) -> crate::id::StableId {
         match self {
             Self::Svg(ext) => ext.stable_id,
             Self::Link(ext) => ext.stable_id,
@@ -208,16 +126,80 @@ impl FamilyExt<Processed> {
     }
 }
 
-/// Trait for types that have family data.
-pub trait HasFamilyData<P: PhaseData> {
-    /// Get family extension reference.
-    fn family_ext(&self) -> &FamilyExt<P>;
+// =============================================================================
+// HasFamilyData trait - unified family data access
+// =============================================================================
 
-    /// Get mutable family extension reference.
-    fn family_ext_mut(&mut self) -> &mut FamilyExt<P>;
+/// Unified family data access trait
+///
+/// Allows accessing family-specific data without manual match branches.
+///
+/// # Example
+/// ```ignore
+/// use tola::vdom::{Element, Indexed, LinkFamily, HasFamilyData};
+///
+/// fn process_link(elem: &Element<Indexed>) {
+///     if let Some(link_data) = elem.family_data::<LinkFamily>() {
+///         println!("href: {:?}", link_data.original_href);
+///     }
+/// }
+/// ```
+pub trait HasFamilyData<F: TagFamily> {
+    /// The concrete data type for this (Phase, Family) combination
+    type Data;
 
-    /// Get the family kind.
-    fn family_kind(&self) -> FamilyKind {
-        self.family_ext().kind()
-    }
+    /// Get immutable reference to family data if this element belongs to family F
+    fn family_data(&self) -> Option<&Self::Data>;
+
+    /// Get mutable reference to family data if this element belongs to family F
+    fn family_data_mut(&mut self) -> Option<&mut Self::Data>;
 }
+
+// Macro to generate HasFamilyData implementations
+// Uses paste to auto-generate method names (Svg -> as_svg, as_svg_mut)
+// and data types (Indexed + Svg -> SvgIndexedData, Processed + Svg -> SvgProcessedData)
+macro_rules! impl_has_family_data {
+    // With explicit data type (for OtherFamily which uses () instead of OtherXxxData)
+    ($phase:ident, $family:ident, $data_type:ty) => {
+        ::paste::paste! {
+            impl HasFamilyData<[<$family Family>]> for Element<$phase> {
+                type Data = $data_type;
+
+                fn family_data(&self) -> Option<&Self::Data> {
+                    self.ext.[<as_ $family:lower>]().map(|e| &e.family_data)
+                }
+
+                fn family_data_mut(&mut self) -> Option<&mut Self::Data> {
+                    self.ext.[<as_ $family:lower _mut>]().map(|e| &mut e.family_data)
+                }
+            }
+        }
+    };
+    // Auto-generate data type (XxxFamily + Phase -> XxxPhaseData)
+    ($phase:ident, $family:ident) => {
+        ::paste::paste! {
+            impl_has_family_data!($phase, $family, [<$family $phase Data>]);
+        }
+    };
+}
+
+// Generates for each (Phase, Family):
+//   impl HasFamilyData<XxxFamily> for Element<Phase> {
+//     type Data = XxxPhaseData;  // or () for Other
+//     fn family_data(&self) -> Option<&Self::Data>
+//     fn family_data_mut(&mut self) -> Option<&mut Self::Data>
+//   }
+
+// Indexed phase implementations
+impl_has_family_data!(Indexed, Svg);         // -> SvgIndexedData
+impl_has_family_data!(Indexed, Link);        // -> LinkIndexedData
+impl_has_family_data!(Indexed, Heading);     // -> HeadingIndexedData
+impl_has_family_data!(Indexed, Media);       // -> MediaIndexedData
+impl_has_family_data!(Indexed, Other, ());   // -> Other uses ()
+
+// Processed phase implementations
+impl_has_family_data!(Processed, Svg);       // -> SvgProcessedData
+impl_has_family_data!(Processed, Link);      // -> LinkProcessedData
+impl_has_family_data!(Processed, Heading);   // -> HeadingProcessedData
+impl_has_family_data!(Processed, Media);     // -> MediaProcessedData
+impl_has_family_data!(Processed, Other, ()); // -> Other uses ()

@@ -5059,16 +5059,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tola_core"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "rayon",
- "serde",
- "smallvec",
-]
-
-[[package]]
 name = "tola_typst"
 version = "0.1.0"
 dependencies = [
@@ -5099,6 +5089,9 @@ dependencies = [
  "smallvec",
  "tokio",
  "tungstenite",
+ "typst",
+ "typst-html",
+ "typst-svg",
 ]
 
 [[package]]

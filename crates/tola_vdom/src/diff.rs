@@ -22,10 +22,10 @@
 //!
 //! For typical document updates (small changes), this is effectively O(n).
 
-use crate::id::StableId;
-use crate::lcs::{diff_sequences, Edit};
-use crate::node::{Document, Element, Node};
-use crate::phase::Indexed;
+use super::id::StableId;
+use super::lcs::{diff_sequences, Edit};
+use super::node::{Document, Element, Node};
+use super::phase::Indexed;
 
 /// Maximum depth for recursive diffing before fallback to full replace
 const MAX_DIFF_DEPTH: usize = 50;
@@ -637,7 +637,7 @@ impl DiffContext {
                 // This case is handled by parent (diff_mixed_children or single-text optimization)
                 if old_text.content != new_text.content {
                     // This shouldn't happen if `diff_mixed_children` works correctly
-                    // Logging removed - handled by parent
+                    // Fallback: count as text update
                     self.stats.text_updates += 1;
                 }
             }
@@ -728,7 +728,7 @@ fn render_node_html_ctx(node: &Node<Indexed>, in_svg: bool) -> String {
             // Inside SVG: content is raw SVG markup, don't escape
             // Outside SVG: normal text, escape HTML characters
             if in_svg {
-                text.content.to_string()
+                text.content.clone()
             } else {
                 html_escape(&text.content)
             }
@@ -772,5 +772,323 @@ fn is_void_element(tag: &str) -> bool {
     )
 }
 
-// Tests temporarily removed during crate extraction
-// TODO: Re-add tests with proper imports
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::family::OtherFamily;
+    use crate::phase::IndexedElemExt;
+    use crate::{FamilyExt, Text};
+
+    #[test]
+    fn test_patch_target() {
+        let patch = Patch::Replace {
+            target: StableId::from_raw(42),
+            html: "<div></div>".to_string(),
+        };
+        assert_eq!(patch.target().as_raw(), 42);
+    }
+
+    #[test]
+    fn test_diff_result_reload() {
+        let result = DiffResult::reload("test reason");
+        assert!(result.should_reload);
+        assert_eq!(result.reload_reason, Some("test reason".to_string()));
+        assert!(result.has_changes());
+    }
+
+    #[test]
+    fn test_diff_stats_default() {
+        let stats = DiffStats::default();
+        assert_eq!(stats.elements_compared, 0);
+        assert_eq!(stats.nodes_kept, 0);
+        assert_eq!(stats.nodes_moved, 0);
+    }
+
+    #[test]
+    fn test_html_escape() {
+        assert_eq!(html_escape("a < b"), "a &lt; b");
+        assert_eq!(html_escape("a & b"), "a &amp; b");
+        assert_eq!(html_escape("\"quoted\""), "&quot;quoted&quot;");
+    }
+
+    #[test]
+    fn test_diff_detects_text_update_and_revert() {
+        // Helper to build a simple document with three paragraphs
+        fn build_doc(texts: &[&str], base_id: u64) -> Document<Indexed> {
+            let mut root = Element::new("body");
+
+            for (i, t) in texts.iter().enumerate() {
+                // Create indexed elem ext with stable id
+                let sid = StableId::from_raw(base_id + i as u64 + 1);
+                let elem_ext = IndexedElemExt::<OtherFamily> {
+                    stable_id: sid,
+                    family_data: (),
+                };
+                let mut p = Element::with_ext("p", FamilyExt::Other(elem_ext));
+
+                // Text node with stable id
+                let text_sid = StableId::from_raw(base_id + 100 + i as u64 + 1);
+                let mut txt = Text::new(*t);
+                txt.ext = crate::phase::IndexedTextExt::new(text_sid);
+                p.children.push(Node::Text(txt));
+                root.children.push(Node::Element(Box::new(p)));
+            }
+
+            Document::new(root)
+        }
+
+        // Original
+        let old = build_doc(&["cosplay堂吉珂德", "浊富 or 清贫?", "GALGAME!"], 1000);
+        // First edit: remove a char (simulate small change)
+        let new1 = build_doc(&["cosplay堂吉珂德", "浊富 or 清?", "GALGAME!"], 1000);
+        // Second edit: restore
+        let new2 = build_doc(&["cosplay堂吉珂德", "浊富 or 清贫?", "GALGAME!"], 1000);
+
+        // Diff old -> new1
+        let r1 = diff(&old, &new1);
+        assert!(!r1.should_reload, "diff should not force reload");
+        // Should have at least one UpdateText or Replace targeting the second paragraph's text id
+        let has_update1 = r1.ops.iter().any(|op| match op {
+            Patch::UpdateText { target, text } => {
+                target.as_raw() == (100 + 100 + 2) || text.contains("浊富")
+            }
+            Patch::Replace { target, html } => target.as_raw() == (100 + 2) || html.contains("浊富"),
+            _ => false,
+        });
+        assert!(
+            has_update1,
+            "Expected a text update or replace for the first edit, got ops={:?}",
+            r1.ops
+        );
+
+        // Update cache scenario: diff new1 -> new2 (restore)
+        let r2 = diff(&new1, &new2);
+        assert!(!r2.should_reload, "diff should not force reload on revert");
+        let has_update2 = r2.ops.iter().any(|op| match op {
+            Patch::UpdateText { text, .. } => text.contains("清贫"),
+            Patch::Replace { html, .. } => html.contains("清贫"),
+            _ => false,
+        });
+        assert!(
+            has_update2,
+            "Expected a text update or replace restoring the text, got ops={:?}",
+            r2.ops
+        );
+    }
+
+    #[test]
+    fn test_edit_ordering_prevents_duplicates() {
+        // Build old: A,B,C
+        let mut root_old = Element::new("div");
+        let a_ext = IndexedElemExt::<OtherFamily> {
+            stable_id: StableId::from_raw(1),
+            family_data: (),
+        };
+        let b_ext = IndexedElemExt::<OtherFamily> {
+            stable_id: StableId::from_raw(2),
+            family_data: (),
+        };
+        let c_ext = IndexedElemExt::<OtherFamily> {
+            stable_id: StableId::from_raw(3),
+            family_data: (),
+        };
+        root_old
+            .children
+            .push(Node::Element(Box::new(Element::with_ext(
+                "p",
+                FamilyExt::Other(a_ext),
+            ))));
+        root_old
+            .children
+            .push(Node::Element(Box::new(Element::with_ext(
+                "p",
+                FamilyExt::Other(b_ext),
+            ))));
+        root_old
+            .children
+            .push(Node::Element(Box::new(Element::with_ext(
+                "p",
+                FamilyExt::Other(c_ext),
+            ))));
+        let old = Document::new(root_old);
+
+        // Build new: A,C,B (move C before B) and insert D at end
+        let mut root_new = Element::new("div");
+        let a_ext2 = IndexedElemExt::<OtherFamily> {
+            stable_id: StableId::from_raw(1),
+            family_data: (),
+        };
+        let c_ext2 = IndexedElemExt::<OtherFamily> {
+            stable_id: StableId::from_raw(3),
+            family_data: (),
+        };
+        let b_ext2 = IndexedElemExt::<OtherFamily> {
+            stable_id: StableId::from_raw(2),
+            family_data: (),
+        };
+        let d_ext = IndexedElemExt::<OtherFamily> {
+            stable_id: StableId::from_raw(4),
+            family_data: (),
+        };
+        root_new
+            .children
+            .push(Node::Element(Box::new(Element::with_ext(
+                "p",
+                FamilyExt::Other(a_ext2),
+            ))));
+        root_new
+            .children
+            .push(Node::Element(Box::new(Element::with_ext(
+                "p",
+                FamilyExt::Other(c_ext2),
+            ))));
+        root_new
+            .children
+            .push(Node::Element(Box::new(Element::with_ext(
+                "p",
+                FamilyExt::Other(b_ext2),
+            ))));
+        root_new
+            .children
+            .push(Node::Element(Box::new(Element::with_ext(
+                "p",
+                FamilyExt::Other(d_ext),
+            ))));
+        let new = Document::new(root_new);
+
+        let r = diff(&old, &new);
+        // Ensure all removes appear before inserts in the ops order (no duplicate insert of moved node)
+        let mut first_insert = None;
+        let mut first_remove = None;
+        for (i, op) in r.ops.iter().enumerate() {
+            match op {
+                Patch::Insert { .. } => {
+                    if first_insert.is_none() {
+                        first_insert = Some(i)
+                    }
+                }
+                Patch::Remove { .. } => {
+                    if first_remove.is_none() {
+                        first_remove = Some(i)
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            first_remove.is_none()
+                || first_insert.is_none()
+                || first_remove.unwrap() < first_insert.unwrap(),
+            "Removals should come before inserts to avoid duplicates: ops={:?}",
+            r.ops
+        );
+    }
+
+    #[test]
+    fn test_single_text_child_empty_to_text() {
+        // Test: old element is empty, new element has single text child
+        // Should generate UpdateText to parent, not Insert of text node
+
+        // Build old: <p></p>
+        let mut root_old = Element::new("body");
+        let p_ext = IndexedElemExt::<OtherFamily> {
+            stable_id: StableId::from_raw(100),
+            family_data: (),
+        };
+        let p_old = Element::with_ext("p", FamilyExt::Other(p_ext));
+        // Empty children
+        root_old
+            .children
+            .push(Node::Element(Box::new(p_old)));
+        let old = Document::new(root_old);
+
+        // Build new: <p>Hello</p>
+        let mut root_new = Element::new("body");
+        let p_ext2 = IndexedElemExt::<OtherFamily> {
+            stable_id: StableId::from_raw(100),
+            family_data: (),
+        };
+        let mut p_new = Element::with_ext("p", FamilyExt::Other(p_ext2));
+        let mut txt = Text::new("Hello");
+        txt.ext = crate::phase::IndexedTextExt::new(StableId::from_raw(200));
+        p_new.children.push(Node::Text(txt));
+        root_new
+            .children
+            .push(Node::Element(Box::new(p_new)));
+        let new = Document::new(root_new);
+
+        let result = diff(&old, &new);
+
+        // Should have UpdateText targeting the paragraph (id=100), not Insert
+        let has_update_text = result.ops.iter().any(|op| {
+            matches!(op, Patch::UpdateText { target, text } if target.as_raw() == 100 && text == "Hello")
+        });
+        assert!(
+            has_update_text,
+            "Expected UpdateText to parent element, got: {:?}",
+            result.ops
+        );
+
+        // Should NOT have any Insert operations
+        let has_insert = result.ops.iter().any(|op| matches!(op, Patch::Insert { .. }));
+        assert!(
+            !has_insert,
+            "Should not have Insert for text node: {:?}",
+            result.ops
+        );
+    }
+
+    #[test]
+    fn test_single_text_child_text_to_empty() {
+        // Test: old element has single text child, new element is empty
+        // Should generate UpdateText with empty string, not Remove of text node
+
+        // Build old: <p>Hello</p>
+        let mut root_old = Element::new("body");
+        let p_ext = IndexedElemExt::<OtherFamily> {
+            stable_id: StableId::from_raw(100),
+            family_data: (),
+        };
+        let mut p_old = Element::with_ext("p", FamilyExt::Other(p_ext));
+        let mut txt = Text::new("Hello");
+        txt.ext = crate::phase::IndexedTextExt::new(StableId::from_raw(200));
+        p_old.children.push(Node::Text(txt));
+        root_old
+            .children
+            .push(Node::Element(Box::new(p_old)));
+        let old = Document::new(root_old);
+
+        // Build new: <p></p>
+        let mut root_new = Element::new("body");
+        let p_ext2 = IndexedElemExt::<OtherFamily> {
+            stable_id: StableId::from_raw(100),
+            family_data: (),
+        };
+        let p_new = Element::with_ext("p", FamilyExt::Other(p_ext2));
+        // Empty children
+        root_new
+            .children
+            .push(Node::Element(Box::new(p_new)));
+        let new = Document::new(root_new);
+
+        let result = diff(&old, &new);
+
+        // Should have UpdateText targeting the paragraph with empty string
+        let has_update_text = result.ops.iter().any(|op| {
+            matches!(op, Patch::UpdateText { target, text } if target.as_raw() == 100 && text.is_empty())
+        });
+        assert!(
+            has_update_text,
+            "Expected UpdateText with empty string to parent element, got: {:?}",
+            result.ops
+        );
+
+        // Should NOT have any Remove operations
+        let has_remove = result.ops.iter().any(|op| matches!(op, Patch::Remove { .. }));
+        assert!(
+            !has_remove,
+            "Should not have Remove for text node: {:?}",
+            result.ops
+        );
+    }
+}

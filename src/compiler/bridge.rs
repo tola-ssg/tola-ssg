@@ -107,7 +107,7 @@ pub fn compile_vdom<D: BuildDriver>(
     let (document, accessed_files, warnings) = crate::typst_lib::compile_html(path, root)?;
 
     // Use VDOM pipeline for processing
-    let output = crate::vdom::compile(&document, label_name, driver, url_path);
+    let output = crate::vdom_compile::compile(&document, label_name, driver, url_path);
 
     Ok(VdomResult {
         html: output.html,

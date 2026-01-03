@@ -1,54 +1,29 @@
-//! Attribute system for VDOM elements.
+//! Attribute system for VDOM elements
 //!
-//! Provides a simple attribute type and extension trait for common operations.
-//!
-//! # Design
-//!
-//! Uses `Vec<(String, String)>` directly instead of complex wrapper types.
-//! This is simple and sufficient for HTML attribute handling while supporting
-//! all standard operations.
+//! Simplified design following ttg_demo.rs v8:
+//! - Direct `Vec<(String, String)>` for attributes
+//! - No wrapper types (AttrName/AttrValue removed)
 
-/// Element attributes as simple key-value pairs.
+/// Element attributes as simple key-value pairs
 ///
-/// This is the primary attribute type used throughout the VDOM.
-/// Each attribute is a (name, value) tuple stored in insertion order.
+/// Following ttg_demo.rs v8 design: use Vec<(String, String)> directly
+/// instead of complex wrapper types. This is simpler and sufficient
+/// for HTML attribute handling.
 pub type Attrs = Vec<(String, String)>;
 
-/// Extension trait for attribute operations on [`Attrs`].
-///
-/// # Example
-///
-/// ```
-/// use tola_vdom::attr::{Attrs, AttrsExt};
-///
-/// let mut attrs: Attrs = Vec::new();
-/// attrs.set_attr("id", "main");
-/// attrs.set_attr("class", "container");
-///
-/// assert_eq!(attrs.get_attr("id"), Some("main"));
-/// assert!(attrs.has_attr("class"));
-/// ```
+/// Extension trait for attribute operations on Attrs
 pub trait AttrsExt {
-    /// Get an attribute value by name.
+    /// Get an attribute value by name
     fn get_attr(&self, name: &str) -> Option<&str>;
 
-    /// Check if an attribute exists.
+    /// Check if an attribute exists
     fn has_attr(&self, name: &str) -> bool;
 
-    /// Set an attribute value (insert or update).
+    /// Set an attribute value (insert or update)
     fn set_attr(&mut self, name: impl Into<String>, value: impl Into<String>);
 
-    /// Remove an attribute by name, returning the old value if present.
+    /// Remove an attribute by name, returning the old value if present
     fn remove_attr(&mut self, name: &str) -> Option<String>;
-
-    /// Get id attribute if present.
-    fn id(&self) -> Option<&str>;
-
-    /// Get class attribute if present.
-    fn class(&self) -> Option<&str>;
-
-    /// Check if element has a specific class.
-    fn has_class(&self, class_name: &str) -> bool;
 }
 
 impl AttrsExt for Attrs {
@@ -77,48 +52,11 @@ impl AttrsExt for Attrs {
             .position(|(k, _)| k == name)
             .map(|pos| self.remove(pos).1)
     }
-
-    fn id(&self) -> Option<&str> {
-        self.get_attr("id")
-    }
-
-    fn class(&self) -> Option<&str> {
-        self.get_attr("class")
-    }
-
-    fn has_class(&self, class_name: &str) -> bool {
-        self.class()
-            .map(|c| c.split_whitespace().any(|cls| cls == class_name))
-            .unwrap_or(false)
-    }
 }
 
-/// Extension trait for building attributes fluently.
-pub trait AttrsBuilder {
-    /// Add an attribute and return self for chaining.
-    fn with_attr(self, name: impl Into<String>, value: impl Into<String>) -> Self;
-
-    /// Add id attribute.
-    fn with_id(self, id: impl Into<String>) -> Self;
-
-    /// Add class attribute.
-    fn with_class(self, class: impl Into<String>) -> Self;
-}
-
-impl AttrsBuilder for Attrs {
-    fn with_attr(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
-        self.set_attr(name, value);
-        self
-    }
-
-    fn with_id(self, id: impl Into<String>) -> Self {
-        self.with_attr("id", id)
-    }
-
-    fn with_class(self, class: impl Into<String>) -> Self {
-        self.with_attr("class", class)
-    }
-}
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -152,32 +90,5 @@ mod tests {
         assert_eq!(removed.as_deref(), Some("main"));
         assert!(!attrs.has_attr("id"));
         assert_eq!(attrs.len(), 1);
-    }
-
-    #[test]
-    fn test_convenience_methods() {
-        let attrs: Attrs = vec![
-            ("id".into(), "main".into()),
-            ("class".into(), "foo bar baz".into()),
-        ];
-
-        assert_eq!(attrs.id(), Some("main"));
-        assert_eq!(attrs.class(), Some("foo bar baz"));
-        assert!(attrs.has_class("foo"));
-        assert!(attrs.has_class("bar"));
-        assert!(!attrs.has_class("qux"));
-    }
-
-    #[test]
-    fn test_builder() {
-        let attrs = Attrs::new()
-            .with_id("main")
-            .with_class("container")
-            .with_attr("data-value", "42");
-
-        assert_eq!(attrs.len(), 3);
-        assert_eq!(attrs.id(), Some("main"));
-        assert_eq!(attrs.class(), Some("container"));
-        assert_eq!(attrs.get_attr("data-value"), Some("42"));
     }
 }

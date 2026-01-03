@@ -18,7 +18,7 @@
 
 use std::collections::HashMap;
 
-use crate::id::StableId;
+use super::id::StableId;
 
 /// Edit operation in a diff sequence
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -266,3 +266,129 @@ pub fn diff_small(old: &[StableId], new: &[StableId]) -> LcsResult {
     diff_sequences(old, new)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ids(nums: &[u64]) -> Vec<StableId> {
+        nums.iter().map(|&n| StableId::from_raw(n)).collect()
+    }
+
+    #[test]
+    fn test_empty_sequences() {
+        let result = diff_sequences(&[], &[]);
+        assert!(result.edits.is_empty());
+        assert!(result.stats.is_empty());
+    }
+
+    #[test]
+    fn test_insert_all() {
+        let old = ids(&[]);
+        let new = ids(&[1, 2, 3]);
+
+        let result = diff_sequences(&old, &new);
+        assert_eq!(result.stats.inserted, 3);
+        assert_eq!(result.stats.deleted, 0);
+        assert_eq!(result.stats.moved, 0);
+    }
+
+    #[test]
+    fn test_delete_all() {
+        let old = ids(&[1, 2, 3]);
+        let new = ids(&[]);
+
+        let result = diff_sequences(&old, &new);
+        assert_eq!(result.stats.deleted, 3);
+        assert_eq!(result.stats.inserted, 0);
+        assert_eq!(result.stats.moved, 0);
+    }
+
+    #[test]
+    fn test_no_changes() {
+        let old = ids(&[1, 2, 3]);
+        let new = ids(&[1, 2, 3]);
+
+        let result = diff_sequences(&old, &new);
+        assert_eq!(result.stats.kept, 3);
+        assert!(result.stats.is_empty());
+    }
+
+    #[test]
+    fn test_single_insert() {
+        let old = ids(&[1, 3]);
+        let new = ids(&[1, 2, 3]);
+
+        let result = diff_sequences(&old, &new);
+        assert_eq!(result.stats.kept, 2);
+        assert_eq!(result.stats.inserted, 1);
+    }
+
+    #[test]
+    fn test_single_delete() {
+        let old = ids(&[1, 2, 3]);
+        let new = ids(&[1, 3]);
+
+        let result = diff_sequences(&old, &new);
+        assert_eq!(result.stats.kept, 2);
+        assert_eq!(result.stats.deleted, 1);
+    }
+
+    #[test]
+    fn test_move_detection() {
+        // Move element 2 from position 1 to position 2
+        let old = ids(&[1, 2, 3]);
+        let new = ids(&[1, 3, 2]);
+
+        let result = diff_sequences(&old, &new);
+
+        // Should detect a move
+        assert!(result.edits.iter().any(|e| e.is_move()));
+        assert!(result.stats.moved > 0 || result.stats.kept == 3);
+    }
+
+    #[test]
+    fn test_complete_reorder() {
+        let old = ids(&[1, 2, 3]);
+        let new = ids(&[3, 2, 1]);
+
+        let result = diff_sequences(&old, &new);
+
+        // All nodes still exist, some kept + some moved
+        assert_eq!(result.stats.deleted, 0);
+        assert_eq!(result.stats.inserted, 0);
+    }
+
+    #[test]
+    fn test_mixed_operations() {
+        // Old: [1, 2, 3, 4]
+        // New: [1, 5, 3]  (delete 2, delete 4, insert 5)
+        let old = ids(&[1, 2, 3, 4]);
+        let new = ids(&[1, 5, 3]);
+
+        let result = diff_sequences(&old, &new);
+
+        assert_eq!(result.stats.kept, 2); // 1 and 3
+        assert_eq!(result.stats.deleted, 2); // 2 and 4
+        assert_eq!(result.stats.inserted, 1); // 5
+    }
+
+    #[test]
+    fn test_edit_is_keep() {
+        let edit = Edit::Keep {
+            old_idx: 0,
+            new_idx: 0,
+        };
+        assert!(edit.is_keep());
+        assert!(!edit.is_move());
+    }
+
+    #[test]
+    fn test_edit_is_move() {
+        let edit = Edit::Move {
+            old_idx: 0,
+            new_idx: 1,
+        };
+        assert!(edit.is_move());
+        assert!(!edit.is_keep());
+    }
+}
