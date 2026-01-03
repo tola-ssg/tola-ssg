@@ -7,12 +7,8 @@
 //! - `diff_vdom()` - Pure function, computes diff without side effects
 //! - `compute_diff()` - Effectful, updates cache (used by VdomActor)
 
-use crate::vdom::VdomCache;
 use crate::vdom::diff::{diff, DiffResult as VdomDiffResult, Patch};
-use crate::vdom::{Document, Indexed};
-
-use crate::utils::path::normalize_url;
-
+use crate::vdom::{CacheKey, Document, Indexed, VdomCache};
 
 /// Outcome of diff computation
 #[derive(Debug)]
@@ -63,28 +59,27 @@ pub fn diff_vdom(
 /// # Side Effects
 /// - Reads from cache
 /// - Writes to cache (for Initial/Reload/Unchanged cases)
-/// - Logs via crate::log!
 ///
 /// # Cache Update Strategy
 /// - Initial: Insert new VDOM (browser will reload anyway)
 /// - NeedsReload: Insert new VDOM (browser will reload anyway)
 /// - Unchanged: Insert new VDOM (safe, content identical)
 /// - Patches: DON'T update cache here - caller updates after successful broadcast
+///
+/// # Note
+/// Caller must create `CacheKey` explicitly to ensure URL normalization.
 pub fn compute_diff(
     cache: &mut VdomCache,
-    url_path: &str,
+    key: CacheKey,
     new_vdom: Document<Indexed>,
 ) -> DiffOutcome {
-    // Normalize url_path for consistent cache keys
-    let url_path = normalize_url(url_path);
-
-    if let Some(old_vdom) = cache.get(&url_path) {
+    if let Some(old_vdom) = cache.get(&key) {
         let outcome = diff_vdom(old_vdom, &new_vdom);
 
         match &outcome {
             DiffOutcome::NeedsReload { .. } | DiffOutcome::Unchanged => {
                 // Safe to update cache - browser will reload or content is same
-                cache.insert(url_path.to_string(), new_vdom);
+                cache.insert(key, new_vdom);
             }
             DiffOutcome::Patches(..) => {
                 // DON'T update cache - caller updates after successful broadcast
@@ -96,7 +91,7 @@ pub fn compute_diff(
         outcome
     } else {
         // Initial - insert into cache
-        cache.insert(url_path.to_string(), new_vdom);
+        cache.insert(key, new_vdom);
         DiffOutcome::Initial
     }
 }
@@ -129,7 +124,8 @@ mod tests {
         let mut cache = VdomCache::new();
         let root: Element<Indexed> = Element::new("html");
         let doc = Document::new(root);
-        let outcome = compute_diff(&mut cache, "/test", doc);
+        let key = CacheKey::new("/test");
+        let outcome = compute_diff(&mut cache, key, doc);
         assert!(matches!(outcome, DiffOutcome::Initial));
     }
 }

@@ -101,7 +101,7 @@ pub use diff::{diff, DiffResult, DiffStats, Patch};
 pub use lcs::{diff_sequences, Edit, LcsResult, LcsStats};
 
 // Cache
-pub use cache::VdomCache;
+pub use cache::{CacheKey, VdomCache};
 
 // =============================================================================
 // High-level API for compilation pipeline integration

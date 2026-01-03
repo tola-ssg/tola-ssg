@@ -15,9 +15,6 @@
 //!
 
 use crate::logger::WatchStatus;
-use crate::utils::path::normalize_url;
-
-
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,8 +23,8 @@ use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
 use super::messages::{VdomMsg, WsMsg};
-use crate::vdom::VdomCache;
 use crate::pipeline::diff::{compute_diff, DiffOutcome};
+use crate::vdom::{CacheKey, VdomCache};
 use crate::vdom::{Document, Indexed};
 
 /// VDOM Actor - converts AST to VDOM and computes diffs
@@ -62,12 +59,11 @@ impl VdomActor {
             match msg {
                 VdomMsg::Populate { entries } => {
                     // Pre-fill cache with initial build results
-                    // Normalize url_path to match compute_diff behavior
                     let count = entries.len();
                     let mut cache = self.cache.lock();
                     for (url_path, vdom) in entries {
-                        let normalized = normalize_url(&url_path);
-                        cache.insert(normalized, vdom);
+                        let key = CacheKey::new(&url_path);
+                        cache.insert(key, vdom);
                     }
                     crate::log!("vdom"; "populated cache with {} entries", count);
                 }
@@ -87,7 +83,8 @@ impl VdomActor {
                 }
 
                 VdomMsg::Invalidate { url_path } => {
-                    self.cache.lock().remove(&url_path);
+                    let key = CacheKey::new(&url_path);
+                    self.cache.lock().remove(&key);
                     self.status.success(&format!("invalidated cache for {}", url_path));
                 }
 
@@ -114,12 +111,12 @@ impl VdomActor {
         new_vdom: Document<Indexed>,
     ) {
         let cache = Arc::clone(&self.cache);
-        let url_path_clone = url_path.clone();
+        let key = CacheKey::new(&url_path);
 
         // Compute diff in blocking thread (diff can be CPU intensive)
         let result = tokio::task::spawn_blocking(move || {
             let mut cache = cache.lock();
-            compute_diff(&mut cache, &url_path_clone, new_vdom)
+            compute_diff(&mut cache, key, new_vdom)
         }).await;
 
         // Route outcome to WsActor
@@ -145,7 +142,8 @@ impl VdomActor {
                 if self.ws_tx.send(WsMsg::Patch { url_path: url_path.clone(), patches }).await.is_ok() {
                     // Update cache AFTER successful send
                     // This keeps cache in sync with what browser should display
-                    self.cache.lock().insert(url_path, new_vdom);
+                    let key = CacheKey::new(&url_path);
+                    self.cache.lock().insert(key, new_vdom);
                 }
             }
             DiffOutcome::Initial => {
@@ -177,6 +175,7 @@ mod tests {
         let cache = VdomCache::new();
         assert!(cache.is_empty());
         assert_eq!(cache.len(), 0);
-        assert!(cache.get("/test").is_none());
+        let key = CacheKey::new("/test");
+        assert!(cache.get(&key).is_none());
     }
 }
