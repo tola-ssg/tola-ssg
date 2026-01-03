@@ -1927,6 +1927,12 @@ match config.output_format {
 
 ### 13.3 tola_core Crate
 
+> **注意**：`tola_core` 不包含 diagnostic，因为诊断信息的"位置"概念在不同领域完全不同：
+> - Typst: 源码行列号 (`Span`)
+> - VDOM: DOM 节点 ID (`StableId`)
+> 
+> 各 crate 应定义自己的诊断类型。
+
 ```toml
 # tola_core/Cargo.toml
 [package]
@@ -1936,7 +1942,7 @@ edition = "2021"
 rust-version = "1.75"
 license = "MIT OR Apache-2.0"
 description = "Core infrastructure for document processing pipelines"
-keywords = ["pipeline", "transform", "diagnostic", "actor"]
+keywords = ["pipeline", "transform", "cache"]
 categories = ["development-tools"]
 
 [features]
@@ -1944,25 +1950,23 @@ default = ["std"]
 std = []
 serde = ["dep:serde"]
 parallel = ["dep:rayon"]
-async = ["dep:tokio"]
 
 [dependencies]
 smallvec = "1.11"
 serde = { version = "1.0", features = ["derive"], optional = true }
 rayon = { version = "1.8", optional = true }
-tokio = { version = "1.35", features = ["sync"], optional = true }
 ```
 
 ```rust
 // tola_core/src/lib.rs
 
-pub mod diagnostic;   // Diagnostic, DiagnosticBag, Severity
 pub mod pipeline;     // Transform trait, Pipeline builder
 pub mod cache;        // Cache trait, Freshness checking
 pub mod hash;         // 通用哈希工具
 
-#[cfg(feature = "async")]
-pub mod actor;        // Actor trait, ActorSystem
+// 注意：不包含 diagnostic 和 actor
+// - diagnostic: 各 crate 自己定义（位置概念不同）
+// - actor: 应用级并发模型，属于主应用
 ```
 
 ### 13.4 tola_vdom Crate
@@ -2027,11 +2031,16 @@ description = "High-performance Typst compiler integration"
 keywords = ["typst", "compiler", "document"]
 categories = ["compilers"]
 
+[features]
+default = ["format"]
+format = ["colored"]  # 诊断格式化辅助函数
+
 [dependencies]
 tola_core = { version = "0.1", path = "../tola_core" }
 typst = "0.12"        # Typst 核心
 typst-html = "0.12"   # HTML 输出
 typst-svg = "0.12"    # SVG 渲染
+colored = { version = "2", optional = true }
 ```
 
 ```rust
@@ -2042,7 +2051,7 @@ mod font;             // 全局字体管理
 mod package;          // 包存储
 mod file;             // 文件缓存
 mod library;          // 标准库
-pub mod diagnostic;   // Typst 诊断格式化
+pub mod diagnostic;   // Typst 诊断（结构化 + 格式化）
 
 pub use world::SystemWorld;
 
@@ -2057,6 +2066,89 @@ pub fn warmup(font_dirs: &[&Path]);
 
 /// 清除文件缓存
 pub fn clear_cache();
+```
+
+#### 13.5.1 诊断 API 设计
+
+诊断模块提供**结构化数据 + 可选格式化辅助函数**，用户可以：
+- 直接用辅助函数（简单场景）
+- 访问结构化数据自定义格式化（高级场景）
+
+```rust
+// tola_typst/src/diagnostic.rs
+
+// ===== 核心结构化类型（始终公开）=====
+
+/// 结构化诊断信息
+#[derive(Debug, Clone)]
+pub struct TypstDiagnostic {
+    pub severity: Severity,
+    pub message: String,
+    pub span: Option<SpanLocation>,
+    pub hints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    Error,
+    Warning,
+}
+
+/// 源码位置信息（从 typst::Span 解析）
+#[derive(Debug, Clone)]
+pub struct SpanLocation {
+    pub path: String,
+    pub start_line: usize,      // 1-based
+    pub start_col: usize,       // 0-based (与 typst-cli 一致)
+    pub lines: Vec<String>,     // 涉及的源码行
+    pub highlight_start_col: usize,
+    pub highlight_end_col: usize,
+}
+
+impl SpanLocation {
+    /// 从 typst Span 解析位置信息
+    pub fn from_span<W: World>(world: &W, span: typst::syntax::Span) -> Option<Self>;
+    
+    /// 是否跨多行
+    pub fn is_multiline(&self) -> bool;
+}
+
+// ===== 格式化辅助函数（feature = "format"）=====
+
+#[cfg(feature = "format")]
+pub mod format {
+    use super::*;
+    
+    /// 格式化诊断列表（带颜色，类似 typst-cli 输出）
+    pub fn format_diagnostics<W: World>(
+        world: &W, 
+        diags: &[typst::diag::SourceDiagnostic]
+    ) -> String;
+    
+    /// 格式化单个诊断（带颜色）
+    pub fn format_one(diag: &TypstDiagnostic) -> String;
+    
+    /// 格式化单个诊断（无颜色，用于日志文件）
+    pub fn format_plain(diag: &TypstDiagnostic) -> String;
+}
+```
+
+**用户使用方式**：
+
+```rust
+use tola_typst::diagnostic::{TypstDiagnostic, SpanLocation};
+
+// 方式 1: 直接用辅助函数（大多数场景）
+#[cfg(feature = "format")]
+let output = tola_typst::diagnostic::format::format_diagnostics(&world, &errors);
+println!("{}", output);
+
+// 方式 2: 自定义格式化（高级场景）
+let diag = TypstDiagnostic::from(&typst_error);
+if let Some(span) = &diag.span {
+    // 访问结构化数据
+    eprintln!("Error at {}:{}: {}", span.path, span.start_line, diag.message);
+}
 ```
 
 ### 13.6 主应用 Bridge 模块

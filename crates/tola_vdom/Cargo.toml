@@ -1,0 +1,30 @@
+[package]
+name = "tola_vdom"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+description = "Type-safe, multi-phase HTML/XML DOM processing with TTG pattern"
+keywords = ["vdom", "html", "dom", "diff", "transform"]
+categories = ["parsing", "web-programming"]
+repository = "https://github.com/aspect-rs/tola"
+
+[features]
+default = ["std"]
+std = []
+serde = ["dep:serde", "tola_core/serde"]
+parallel = ["dep:rayon", "tola_core/parallel"]
+hotreload = ["dep:tokio", "dep:tungstenite"]
+
+[dependencies]
+tola_core = { version = "0.1", path = "../tola_core" }
+smallvec = { version = "1.13", features = ["union", "const_generics"] }
+compact_str = "0.8"
+paste = "1.0"
+rustc-hash = "2.1"
+
+# Optional dependencies
+serde = { version = "1.0", features = ["derive"], optional = true }
+rayon = { version = "1.10", optional = true }
+tokio = { version = "1", features = ["sync"], optional = true }
+tungstenite = { version = "0.27", optional = true }
