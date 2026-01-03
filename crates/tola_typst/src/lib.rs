@@ -50,8 +50,9 @@ pub mod world;
 // Re-export main types
 pub use diagnostic::{filter_html_warnings, format_diagnostics, has_errors};
 pub use file::{
-    clear_file_cache, get_accessed_files, record_file_access, reset_access_flags,
-    VirtualDataProvider, EMPTY_ID, GLOBAL_FILE_CACHE, STDIN_ID,
+    clear_file_cache, get_accessed_files, is_virtual_path, read_virtual, read_with_global_virtual,
+    record_file_access, reset_access_flags, set_virtual_provider, VirtualDataProvider, EMPTY_ID,
+    GLOBAL_FILE_CACHE, STDIN_ID,
 };
 pub use font::get_fonts;
 pub use library::GLOBAL_LIBRARY;

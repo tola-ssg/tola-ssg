@@ -90,6 +90,11 @@ rkyv = { version = "0.8", optional = true }
 # Embedded key-value store for VDOM caching (optional)
 redb = { version = "2", optional = true }
 
+# Workspace crates
+tola_typst = { path = "crates/tola_typst" }
+tola_vdom = { path = "crates/tola_vdom" }
+tola_core = { path = "crates/tola_core" }
+
 [features]
 default = []
 # Enable rkyv serialization for VDOM (Phase 2 of PLAN.md)

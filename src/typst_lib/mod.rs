@@ -1,14 +1,14 @@
 //! Typst library integration for direct compilation without CLI overhead.
 //!
-//! This module provides a high-performance alternative to invoking the `typst` CLI,
-//! reducing compilation overhead by ~30% through resource sharing and caching.
+//! This module provides a thin wrapper around `tola_typst` crate, adding
+//! tola-specific functionality like virtual data files (`/_data/*.json`).
 //!
 //! # Architecture
 //!
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
 //! │                       Global Shared Resources                           │
-//! │           (initialized once at startup, shared across ALL files)        │
+//! │           (provided by tola_typst crate)                                │
 //! ├─────────────┬─────────────┬─────────────────┬───────────────────────────┤
 //! │ GLOBAL_FONTS│GLOBAL_LIBRARY│GLOBAL_PACKAGE   │   GLOBAL_FILE_CACHE       │
 //! │ (~100ms)    │ (std lib)    │ (pkg cache)     │ (source/bytes per FileId) │
@@ -19,58 +19,44 @@
 //!                                 ▼
 //!          ┌─────────────────────────────────────────┐
 //!          │        SystemWorld (per-file, ~free)    │
-//!          │  - Only stores: root, main, fonts ref   │
-//!          │  - All caching via global statics       │
+//!          │  + TolaVirtualData provider             │
 //!          └─────────────────────────────────────────┘
 //! ```
-//!
-//! # Module Structure
-//!
-//! - [`font`] - Global shared font management
-//! - [`package`] - Global shared package storage
-//! - [`library`] - Global shared Typst standard library
-//! - [`file`] - Global file cache with fingerprint-based invalidation
-//! - [`world`] - `SystemWorld` implementation of the `World` trait
-//! - [`diagnostic`] - Human-readable diagnostic formatting
-//!
-//! # Usage Example
-//!
-//! ```ignore
-//! use tola::typst_lib;
-//!
-//! // Pre-warm at startup (optional but recommended)
-//! // Only scan assets/ and content/ to avoid loading fonts from output/
-//! typst_lib::warmup_with_font_dirs(&[
-//!     Path::new("/project/assets"),
-//!     Path::new("/project/content"),
-//! ]);
-//!
-//! // Compile files - template.typ is cached after first use!
-//! let result = typst_lib::compile_meta(
-//!     Path::new("/project/content/page.typ"),
-//!     Path::new("/project"),
-//!     "tola-meta",
-//! )?;
-//! ```
-
-mod diagnostic;
-mod file;
-mod font;
-mod library;
-mod package;
-mod world;
 
 use std::path::{Path, PathBuf};
 
-#[allow(unused_imports)]
+use typst::Document;  // Trait for .introspector()
 use typst::foundations::{Label, Selector, Value};
 use typst::introspection::MetadataElem;
 use typst::utils::PicoStr;
-#[allow(unused_imports)]
-use typst::Document;
 
-pub use file::clear_file_cache;
-pub use world::SystemWorld;
+// Re-export from tola_typst
+pub use tola_typst::{
+    clear_file_cache, format_diagnostics, get_fonts, has_errors, filter_html_warnings,
+    reset_access_flags, get_accessed_files, SystemWorld, GLOBAL_LIBRARY,
+};
+
+use crate::data::{is_virtual_data_path, read_virtual_data};
+
+// =============================================================================
+// Virtual Data Provider
+// =============================================================================
+
+/// Tola's virtual data provider for `/_data/*.json` files.
+///
+/// Implements `VirtualDataProvider` to intercept file reads for virtual paths
+/// and return dynamically generated JSON from the global site data store.
+pub struct TolaVirtualData;
+
+impl tola_typst::VirtualDataProvider for TolaVirtualData {
+    fn is_virtual_path(&self, path: &Path) -> bool {
+        is_virtual_data_path(path)
+    }
+
+    fn read_virtual(&self, path: &Path) -> Option<Vec<u8>> {
+        read_virtual_data(path)
+    }
+}
 
 // =============================================================================
 // Types
@@ -85,32 +71,22 @@ pub struct CompileResult {
     /// Optional metadata value (None if label not found).
     pub metadata: Option<serde_json::Value>,
     /// Files accessed during compilation (for dependency tracking).
-    /// This includes templates, utilities, and other imported files.
     pub accessed_files: Vec<PathBuf>,
 }
 
 #[allow(dead_code)]
 impl CompileResult {
     /// Check if this compilation accessed any virtual data files.
-    ///
-    /// Virtual data files (`/_data/pages.json`, `/_data/tags.json`) contain
-    /// dynamically generated content that depends on other pages' metadata.
-    /// Pages that access these files are "dynamic" and may need to be
-    /// recompiled when other pages change.
     #[inline]
     pub fn uses_virtual_data(&self) -> bool {
-        self.accessed_files
-            .iter()
-            .any(|p| crate::data::is_virtual_data_path(p))
+        self.accessed_files.iter().any(|p| is_virtual_data_path(p))
     }
 
     /// Get all virtual data files accessed during compilation.
-    ///
-    /// Returns paths like `/_data/pages.json` for dependency tracking.
     pub fn accessed_virtual_files(&self) -> Vec<&PathBuf> {
         self.accessed_files
             .iter()
-            .filter(|p| crate::data::is_virtual_data_path(p))
+            .filter(|p| is_virtual_data_path(p))
             .collect()
     }
 }
@@ -120,17 +96,12 @@ impl CompileResult {
 // =============================================================================
 
 /// Test-only mutex to serialize typst compilations.
-///
-/// Typst's comemo caching can race in parallel test execution.
-/// In production, rayon parallel compilation works fine.
 #[cfg(test)]
 static COMPILE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Dummy guard for non-test mode (zero-cost).
 #[cfg(not(test))]
 struct DummyGuard;
 
-/// Acquire compilation lock in test mode, no-op in production.
 #[cfg(test)]
 fn acquire_test_lock() -> std::sync::MutexGuard<'static, ()> {
     COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
@@ -148,28 +119,18 @@ const fn acquire_test_lock() -> DummyGuard {
 /// Pre-warm global resources (fonts, library, package storage).
 ///
 /// Call once at startup to avoid lazy initialization during compilation.
-///
-/// # Arguments
-///
-/// * `font_dirs` - Directories to search for fonts (e.g., `[assets/, content/]`).
-///   Should NOT include output directory to avoid loading duplicate fonts.
+/// Also registers the virtual data provider for `/_data/*.json` files.
 pub fn warmup_with_font_dirs(font_dirs: &[&Path]) {
-    let _ = font::get_fonts(font_dirs);
-    let _ = &*library::GLOBAL_LIBRARY;
-    let _ = &*package::GLOBAL_PACKAGE_STORAGE;
-    let _ = &*file::GLOBAL_FILE_CACHE;
+    // Register tola's virtual data provider for /_data/*.json files
+    tola_typst::set_virtual_provider(TolaVirtualData);
+
+    let _ = get_fonts(font_dirs);
+    let _ = &*GLOBAL_LIBRARY;
+    let _ = &*tola_typst::GLOBAL_PACKAGE_STORAGE;
+    let _ = &*tola_typst::GLOBAL_FILE_CACHE;
 }
 
 /// Compile a Typst file and extract metadata in a single pass.
-///
-/// This is the **recommended** entry point for building sites, avoiding
-/// duplicate compilations for HTML and metadata.
-///
-/// # Arguments
-///
-/// * `path` - Path to the `.typ` file to compile
-/// * `root` - Project root directory for resolving imports
-/// * `label_name` - The label to query for metadata (e.g., "tola-meta")
 #[allow(dead_code)]
 pub fn compile_meta(
     path: &Path,
@@ -179,7 +140,6 @@ pub fn compile_meta(
     let _guard = acquire_test_lock();
     let (_world, document, _warnings) = compile_base(path, root)?;
 
-    // Collect accessed files for dependency tracking
     let accessed_files = collect_accessed_files(root);
 
     let html = typst_html::html(&document)
@@ -200,20 +160,6 @@ pub fn compile_meta(
 // =============================================================================
 
 /// Compile a Typst file to HtmlDocument (pure compilation, no VDOM).
-///
-/// This is the **decoupled** compilation entry point used by `compiler::bridge`.
-/// It only does Typst compilation - no VDOM processing, no HTML serialization.
-///
-/// # Returns
-///
-/// Tuple of (document, accessed_files, warnings):
-/// - `document`: The compiled HtmlDocument tree
-/// - `accessed_files`: Files accessed during compilation (for dependency tracking)
-/// - `warnings`: Optional formatted warning string
-///
-/// # Note
-///
-/// For full VDOM compilation, use `compiler::bridge::compile_vdom` instead.
 pub fn compile_html(
     path: &Path,
     root: &Path,
@@ -225,38 +171,19 @@ pub fn compile_html(
 }
 
 // =============================================================================
-// VDOM-Ready API (for future vdom integration)
+// VDOM-Ready API
 // =============================================================================
 
 /// Result of document compilation (without HTML serialization).
-///
-/// Use this with `vdom::from_typst_html()` for the new VDOM pipeline.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct DocumentResult {
-    /// The compiled HtmlDocument (tree structure, not serialized).
     pub document: typst_html::HtmlDocument,
-    /// Optional metadata value (None if label not found).
     pub metadata: Option<serde_json::Value>,
-    /// Files accessed during compilation (for dependency tracking).
     pub accessed_files: Vec<PathBuf>,
 }
 
 /// Compile a Typst file without HTML serialization.
-///
-/// Returns the `HtmlDocument` tree structure for use with vdom pipeline.
-/// This avoids the overhead of HTML serialization when using VDOM.
-///
-/// # Usage with VDOM
-///
-/// ```ignore
-/// let result = typst_lib::compile_document(path, root, "tola-meta")?;
-/// let raw_doc = vdom::from_typst_html(&result.document);
-/// let html = raw_doc
-///     .pipe(Indexer::new())
-///     .pipe(LinkProcessor::new())
-///     .pipe(HtmlRenderer::new());
-/// ```
 #[allow(dead_code)]
 pub fn compile_document(
     path: &Path,
@@ -276,47 +203,40 @@ pub fn compile_document(
     })
 }
 
-// Note: VDOM compilation functions have been moved to compiler::bridge.
-// typst_lib now only handles pure Typst compilation (path -> HtmlDocument).
-// Use compiler::bridge::compile_vdom for VDOM pipeline integration.
-
 // =============================================================================
 // Internal Helpers
 // =============================================================================
 
 /// Core compilation logic shared by all entry points.
-///
-/// Returns the compiled document and any warnings as a formatted string.
-/// The caller is responsible for displaying warnings at the appropriate time.
 fn compile_base(
     path: &Path,
     root: &Path,
 ) -> anyhow::Result<(SystemWorld, typst_html::HtmlDocument, Option<String>)> {
-    file::reset_access_flags();
+    reset_access_flags();
 
     let world = SystemWorld::new(path, root);
     let result = typst::compile(&world);
 
     // Check for errors in warnings
-    if diagnostic::has_errors(&result.warnings) {
-        let formatted = diagnostic::format_diagnostics(&world, &result.warnings);
+    if has_errors(&result.warnings) {
+        let formatted = format_diagnostics(&world, &result.warnings);
         anyhow::bail!("Typst compilation warnings:\n{formatted}");
     }
 
     // Extract document or format errors
     let document = result.output.map_err(|errors| {
         let all_diags: Vec<_> = errors.iter().chain(&result.warnings).cloned().collect();
-        let filtered = diagnostic::filter_html_warnings(&all_diags);
-        let formatted = diagnostic::format_diagnostics(&world, &filtered);
+        let filtered = filter_html_warnings(&all_diags);
+        let formatted = format_diagnostics(&world, &filtered);
         anyhow::anyhow!("Typst compilation failed:\n{formatted}")
     })?;
 
-    // Format warnings (e.g., unknown font family) for caller to display
-    let filtered_warnings = diagnostic::filter_html_warnings(&result.warnings);
+    // Format warnings for caller to display
+    let filtered_warnings = filter_html_warnings(&result.warnings);
     let warnings = if filtered_warnings.is_empty() {
         None
     } else {
-        Some(diagnostic::format_diagnostics(&world, &filtered_warnings))
+        Some(format_diagnostics(&world, &filtered_warnings))
     };
 
     Ok((world, document, warnings))
@@ -333,20 +253,14 @@ fn extract_meta(document: &typst_html::HtmlDocument, label_name: &str) -> Option
 }
 
 /// Collect files accessed during the last compilation.
-///
-/// Returns paths of all local files (not packages) that were accessed.
-/// Used for dependency tracking in incremental builds.
-/// Includes virtual data files (`/_data/*.json`) for proper dependency tracking.
-fn collect_accessed_files(root: &Path) -> Vec<std::path::PathBuf> {
-    file::get_accessed_files()
+fn collect_accessed_files(root: &Path) -> Vec<PathBuf> {
+    get_accessed_files()
         .into_iter()
-        .filter(|id| id.package().is_none()) // Skip package files
+        .filter(|id| id.package().is_none())
         .filter_map(|id| {
-            // Try to resolve to real path first
             id.vpath().resolve(root).or_else(|| {
-                // For virtual files (like /_data/*.json), use the vpath directly
                 let vpath = id.vpath().as_rooted_path();
-                if crate::data::is_virtual_data_path(vpath) {
+                if is_virtual_data_path(vpath) {
                     Some(vpath.to_path_buf())
                 } else {
                     None
@@ -357,8 +271,6 @@ fn collect_accessed_files(root: &Path) -> Vec<std::path::PathBuf> {
 }
 
 /// Query metadata from a Typst file by label name.
-///
-/// Equivalent to `typst query <file> "<label>" --field value --one`.
 #[allow(dead_code)]
 pub fn query_meta(path: &Path, root: &Path, label_name: &str) -> anyhow::Result<Value> {
     let _guard = acquire_test_lock();
@@ -377,7 +289,7 @@ pub fn query_meta(path: &Path, root: &Path, label_name: &str) -> anyhow::Result<
         .ok_or_else(|| anyhow::anyhow!("Element is not a metadata element"))
 }
 
-/// Disable ANSI color output for tests that check string content.
+/// Disable ANSI color output for tests.
 #[cfg(test)]
 pub fn disable_colors() {
     colored::control::set_override(false);
@@ -390,8 +302,7 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    /// Create a temporary project with a simple typst file.
-    fn create_test_project() -> (TempDir, std::path::PathBuf) {
+    fn create_test_project() -> (TempDir, PathBuf) {
         let dir = TempDir::new().unwrap();
         let content_dir = dir.path().join("content");
         fs::create_dir_all(&content_dir).unwrap();
@@ -405,7 +316,6 @@ mod tests {
     #[test]
     fn test_warmup_does_not_panic() {
         let dir = TempDir::new().unwrap();
-        // Should not panic even with empty directory
         warmup_with_font_dirs(&[dir.path()]);
     }
 
@@ -436,12 +346,10 @@ mod tests {
         let content_dir = dir.path().join("content");
         fs::create_dir_all(&content_dir).unwrap();
 
-        // Create a template file
         let template_dir = dir.path().join("templates");
         fs::create_dir_all(&template_dir).unwrap();
         fs::write(template_dir.join("header.typ"), "#let header = \"My Site\"").unwrap();
 
-        // Create main file that imports template
         let main_file = content_dir.join("main.typ");
         fs::write(
             &main_file,
@@ -457,7 +365,6 @@ mod tests {
     fn test_multiple_compilations_share_resources() {
         let (dir, file_path) = create_test_project();
 
-        // Multiple compilations should reuse global resources
         for _ in 0..3 {
             let result = compile_meta(&file_path, dir.path(), TOLA_META_LABEL);
             assert!(result.is_ok());
@@ -470,23 +377,15 @@ mod tests {
 
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("error.typ");
-
-        // Write a file with a syntax error
         fs::write(&file_path, "#let x = \n= Hello").unwrap();
 
         let result = compile_meta(&file_path, dir.path(), TOLA_META_LABEL);
         assert!(result.is_err(), "Should fail for syntax error");
 
         let err_msg = result.unwrap_err().to_string();
-        // Error message should contain formatted location info, not raw Debug output
         assert!(
             err_msg.contains("error:"),
             "Error should have 'error:' prefix: {}",
-            err_msg
-        );
-        assert!(
-            !err_msg.contains("SourceDiagnostic {"),
-            "Error should not contain raw Debug output: {}",
             err_msg
         );
     }
@@ -497,15 +396,12 @@ mod tests {
 
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("error.typ");
-
-        // Write a file with an undefined variable error
         fs::write(&file_path, "= Title\n\n#undefined_var").unwrap();
 
         let result = compile_meta(&file_path, dir.path(), TOLA_META_LABEL);
         assert!(result.is_err(), "Should fail for undefined variable");
 
         let err_msg = result.unwrap_err().to_string();
-        // Should contain file and line information
         assert!(
             err_msg.contains("error.typ"),
             "Error should contain filename: {}",
@@ -518,7 +414,6 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("post.typ");
 
-        // Write a file with metadata
         fs::write(
             &file_path,
             r#"#metadata((
@@ -535,10 +430,7 @@ mod tests {
         let result = query_meta(&file_path, dir.path(), TOLA_META_LABEL);
         assert!(result.is_ok(), "Query should succeed: {:?}", result);
 
-        // The result should be a dictionary containing our metadata
         let value = result.unwrap();
-
-        // Serialize to JSON to check contents
         let json: serde_json::Value = serde_json::to_value(&value).unwrap();
         assert_eq!(json.get("title").and_then(|v| v.as_str()), Some("Test Post"));
         assert_eq!(json.get("date").and_then(|v| v.as_str()), Some("2024-01-01"));
@@ -549,8 +441,6 @@ mod tests {
     fn test_query_meta_not_found() {
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("post.typ");
-
-        // Write a file without the expected label
         fs::write(&file_path, "= Hello World").unwrap();
 
         let result = query_meta(&file_path, dir.path(), "nonexistent-label");

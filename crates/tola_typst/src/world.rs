@@ -234,15 +234,21 @@ impl World for SystemWorld {
     ///
     /// Returns the parsed source code, using the file slot cache
     /// for incremental compilation.
+    ///
+    /// Uses the global virtual data provider registered via
+    /// [`crate::file::set_virtual_provider`].
     fn source(&self, id: FileId) -> FileResult<Source> {
-        self.slot(id, |slot| slot.source(&self.root))
+        self.slot(id, |slot| slot.source_with_global_virtual(&self.root))
     }
 
     /// Load a file's raw bytes by ID.
     ///
     /// Used for binary files (images, etc.) that don't need parsing.
+    ///
+    /// Uses the global virtual data provider registered via
+    /// [`crate::file::set_virtual_provider`].
     fn file(&self, id: FileId) -> FileResult<Bytes> {
-        self.slot(id, |slot| slot.file(&self.root))
+        self.slot(id, |slot| slot.file_with_global_virtual(&self.root))
     }
 
     /// Load a font by index.

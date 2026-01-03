@@ -88,6 +88,55 @@ impl VirtualDataProvider for NoVirtualData {
 }
 
 // =============================================================================
+// Global Virtual Data Provider
+// =============================================================================
+
+/// Global virtual data provider.
+///
+/// This allows the main application to register a custom virtual data provider
+/// that will be used by `FileSlot::source()` and `FileSlot::file()`.
+static GLOBAL_VIRTUAL_PROVIDER: LazyLock<RwLock<Box<dyn VirtualDataProvider>>> =
+    LazyLock::new(|| RwLock::new(Box::new(NoVirtualData)));
+
+/// Set the global virtual data provider.
+///
+/// Call this at application startup to enable virtual data files like
+/// `/_data/pages.json`.
+///
+/// # Example
+///
+/// ```ignore
+/// use tola_typst::file::{set_virtual_provider, VirtualDataProvider};
+///
+/// struct MyVirtualData;
+///
+/// impl VirtualDataProvider for MyVirtualData {
+///     fn is_virtual_path(&self, path: &Path) -> bool {
+///         path.starts_with("/_data/")
+///     }
+///     fn read_virtual(&self, path: &Path) -> Option<Vec<u8>> {
+///         // Return virtual file content
+///         Some(b"{}".to_vec())
+///     }
+/// }
+///
+/// set_virtual_provider(MyVirtualData);
+/// ```
+pub fn set_virtual_provider<V: VirtualDataProvider + 'static>(provider: V) {
+    *GLOBAL_VIRTUAL_PROVIDER.write() = Box::new(provider);
+}
+
+/// Check if the given path is a virtual data path using the global provider.
+pub fn is_virtual_path(path: &Path) -> bool {
+    GLOBAL_VIRTUAL_PROVIDER.read().is_virtual_path(path)
+}
+
+/// Read virtual data for the given path using the global provider.
+pub fn read_virtual(path: &Path) -> Option<Vec<u8>> {
+    GLOBAL_VIRTUAL_PROVIDER.read().read_virtual(path)
+}
+
+// =============================================================================
 // Global File Cache
 // =============================================================================
 
@@ -216,6 +265,42 @@ pub fn read(id: FileId, project_root: &Path) -> FileResult<Vec<u8>> {
     read_with_virtual(id, project_root, &NoVirtualData)
 }
 
+/// Read file content using the global virtual data provider.
+///
+/// This function uses the globally registered virtual data provider.
+/// Call [`set_virtual_provider`] at startup to register your provider.
+pub fn read_with_global_virtual(id: FileId, project_root: &Path) -> FileResult<Vec<u8>> {
+    // Handle virtual file IDs first (don't need provider)
+    if id == *EMPTY_ID {
+        return Ok(Vec::new());
+    }
+    if id == *STDIN_ID {
+        return read_stdin();
+    }
+
+    // Check global virtual provider
+    let vpath = id.vpath().as_rooted_path();
+    if is_virtual_path(vpath) {
+        record_file_access(id);
+        return read_virtual(vpath).ok_or_else(|| FileError::NotFound(vpath.to_path_buf()));
+    }
+
+    // Resolve path with typst.toml fallback
+    let path = resolve_path(project_root, id).or_else(|e| {
+        id.vpath()
+            .resolve(project_root)
+            .filter(|p| p.ends_with("typst.toml") && !p.exists())
+            .ok_or(e)
+    })?;
+
+    // Generate default typst.toml if missing
+    if path.ends_with("typst.toml") && !path.exists() {
+        return Ok(DEFAULT_TYPST_TOML.to_vec());
+    }
+
+    read_disk(&path)
+}
+
 /// Read file content with virtual data support.
 ///
 /// Like [`read`], but also handles virtual data files via the provider.
@@ -337,9 +422,29 @@ impl FileSlot {
         self.file.reset_access();
     }
 
-    /// Retrieve parsed source for this file.
+    /// Retrieve parsed source for this file (no virtual data).
     pub fn source(&mut self, project_root: &Path) -> FileResult<Source> {
         self.source_with_virtual(project_root, &NoVirtualData)
+    }
+
+    /// Retrieve parsed source using the global virtual data provider.
+    ///
+    /// This uses the provider registered via [`set_virtual_provider`].
+    pub fn source_with_global_virtual(&mut self, project_root: &Path) -> FileResult<Source> {
+        record_file_access(self.id);
+        self.source.get_or_init(
+            || read_with_global_virtual(self.id, project_root),
+            |data, prev| {
+                let text = decode_utf8(&data)?;
+                match prev {
+                    Some(mut src) => {
+                        src.replace(text);
+                        Ok(src)
+                    }
+                    None => Ok(Source::new(self.id, text.into())),
+                }
+            },
+        )
     }
 
     /// Retrieve parsed source with virtual data support.
@@ -364,9 +469,20 @@ impl FileSlot {
         )
     }
 
-    /// Retrieve raw bytes for this file.
+    /// Retrieve raw bytes for this file (no virtual data).
     pub fn file(&mut self, project_root: &Path) -> FileResult<Bytes> {
         self.file_with_virtual(project_root, &NoVirtualData)
+    }
+
+    /// Retrieve raw bytes using the global virtual data provider.
+    ///
+    /// This uses the provider registered via [`set_virtual_provider`].
+    pub fn file_with_global_virtual(&mut self, project_root: &Path) -> FileResult<Bytes> {
+        record_file_access(self.id);
+        self.file.get_or_init(
+            || read_with_global_virtual(self.id, project_root),
+            |data, _| Ok(Bytes::new(data)),
+        )
     }
 
     /// Retrieve raw bytes with virtual data support.
