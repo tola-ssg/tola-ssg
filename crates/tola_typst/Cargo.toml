@@ -22,3 +22,8 @@ arc-swap = "1.7"
 
 # Utilities
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+colored = "3.0"
+rustc-hash = "2.1"
+
+[dev-dependencies]
+tempfile = "3.10"
