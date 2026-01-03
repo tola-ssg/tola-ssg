@@ -1,6 +1,5 @@
 //! Tola - A static site generator for Typst blogs.
 
-#[cfg(feature = "actor")]
 mod actor;
 mod build;
 mod cache;
@@ -16,7 +15,6 @@ mod generator;
 mod hotreload;
 mod init;
 mod logger;
-#[cfg(feature = "actor")]
 mod pipeline;
 mod serve;
 mod typst_lib;

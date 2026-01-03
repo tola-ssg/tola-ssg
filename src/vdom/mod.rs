@@ -164,33 +164,6 @@ pub fn compile_to_html_with_meta(
     (VdomCompileResult { html: result.html, stats: result.stats }, result.metadata)
 }
 
-/// Compile for development mode with hot reload support.
-///
-/// Emits `data-tola-id` attributes on all elements for VDOM diffing.
-#[deprecated(since = "0.7.0", note = "Use `compile` with Development driver")]
-#[allow(deprecated)]
-pub fn compile_to_html_for_dev(
-    document: &typst_html::HtmlDocument,
-    label_name: &str,
-) -> (VdomCompileResult, Option<serde_json::Value>) {
-    let result = compile(document, label_name, &crate::driver::Development, None);
-    (VdomCompileResult { html: result.html, stats: result.stats }, result.metadata)
-}
-
-/// Compile with configurable driver.
-///
-/// Deprecated: Use `compile` instead.
-#[deprecated(since = "0.7.0", note = "Use `compile` instead")]
-#[allow(deprecated)]
-pub fn compile_to_html_with_driver<D: crate::driver::BuildDriver>(
-    document: &typst_html::HtmlDocument,
-    label_name: &str,
-    driver: &D,
-) -> (VdomCompileResult, Option<serde_json::Value>) {
-    let result = compile(document, label_name, driver, None);
-    (VdomCompileResult { html: result.html, stats: result.stats }, result.metadata)
-}
-
 // =============================================================================
 // Unified Compilation API
 // =============================================================================
@@ -287,49 +260,3 @@ pub fn compile<D: crate::driver::BuildDriver>(
     }
 }
 
-// =============================================================================
-// Deprecated APIs (for backward compatibility)
-// =============================================================================
-
-/// Result of VDOM compilation with Indexed tree for diffing
-///
-/// Deprecated: Use `CompileOutput` instead.
-#[derive(Debug)]
-pub struct VdomDevResult {
-    /// Generated HTML bytes
-    pub html: Vec<u8>,
-    /// Indexed VDOM for diff comparison
-    pub indexed: Document<Indexed>,
-    /// Processing statistics
-    pub stats: ProcessedDocExt,
-    /// Extracted metadata (if any)
-    pub metadata: Option<serde_json::Value>,
-}
-
-/// Compile for development with both HTML and Indexed VDOM.
-///
-/// Deprecated: Use `compile` with Development driver instead.
-#[deprecated(since = "0.7.0", note = "Use `compile` with Development driver instead")]
-#[allow(deprecated)]
-pub fn compile_with_vdom_cache(
-    document: &typst_html::HtmlDocument,
-    label_name: &str,
-) -> VdomDevResult {
-    let result = compile(document, label_name, &crate::driver::Development, None);
-    VdomDevResult {
-        html: result.html,
-        indexed: result.indexed.expect("Development driver should cache VDOM"),
-        stats: result.stats,
-        metadata: result.metadata,
-    }
-}
-
-/// Deprecated: Use `compile` with Development driver instead.
-#[deprecated(since = "0.7.0", note = "Use `compile` with Development driver instead")]
-pub fn compile_for_dev(
-    document: &typst_html::HtmlDocument,
-    label_name: &str,
-) -> VdomDevResult {
-    #[allow(deprecated)]
-    compile_with_vdom_cache(document, label_name)
-}

@@ -8,11 +8,6 @@
 //! - **Clean shutdown**: Actors receive shutdown messages gracefully
 //! - **SyncTeX support**: Request-response for source location queries
 //!
-//! # Status
-//!
-//! This module is under development. The actors are fully implemented but
-//! not yet integrated into the main watch loop. Enable with `--features actor`.
-//!
 //! # Architecture
 //!
 //! ```text
@@ -43,15 +38,6 @@
 //! | `VdomActor` | TTG conversion, Pipeline, Diff, Cache |
 //! | `WsActor` | WebSocket broadcast (pure relay) |
 //!
-//! # Feature Flag
-//!
-//! This module requires the `actor` feature:
-//!
-//! ```toml
-//! [dependencies]
-//! tola = { features = ["actor"] }
-//! ```
-//!
 //! # Watcher-First Pattern
 //!
 //! The `FsActor` implements the "Watcher-First" pattern from ds-store-killer:
@@ -61,36 +47,28 @@
 //!
 //! This eliminates the "vacuum period" where events could be lost.
 
-// Allow dead code during development - actors not yet integrated into runtime
-#[cfg(feature = "actor")]
 #[allow(dead_code)]
 pub mod messages;
 
-#[cfg(feature = "actor")]
 #[allow(dead_code)]
 pub mod fs;
 
-#[cfg(feature = "actor")]
 #[allow(dead_code)]
 pub mod compiler;
 
-#[cfg(feature = "actor")]
 #[allow(dead_code)]
 pub mod vdom;
 
-#[cfg(feature = "actor")]
 #[allow(dead_code)]
 pub mod ws;
 
-#[cfg(feature = "actor")]
 #[allow(dead_code)]
 pub mod coordinator;
 
 // Re-exports for convenience
-#[cfg(feature = "actor")]
 #[allow(unused_imports)]
 pub use coordinator::Coordinator;
 
-#[cfg(feature = "actor")]
 #[allow(unused_imports)]
 pub use messages::*;
+

@@ -281,7 +281,6 @@ pub fn cleanup_old_hotreload_js(output_dir: &std::path::Path, ws_port: u16) -> s
 ///
 /// This is an alternative to `HotReloadServer::start()` for actor-based systems.
 /// Instead of using the global `BROADCAST`, clients are sent through the channel.
-#[cfg(feature = "actor")]
 pub fn start_ws_server_with_channel(
     base_port: u16,
     ws_tx: tokio::sync::mpsc::Sender<crate::actor::messages::WsMsg>,

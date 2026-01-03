@@ -16,7 +16,7 @@
 # Part I: System Architecture (The Actor Model) � **WIP**
 
 > [!NOTE]
-> Actor 模块代码位于 `src/actor/`，需要 `actor` feature flag 启用。
+> Actor 模块代码位于 `src/actor/`，tokio 现为必需依赖。
 > 业务逻辑已提取到 `src/pipeline/` 模块，Actor 只是薄包装。
 > 当前主流程 (`watch.rs`) 仍使用直接函数调用，可复用 pipeline 逻辑。
 

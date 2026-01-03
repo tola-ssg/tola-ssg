@@ -78,8 +78,8 @@ hex = "0.4"
 # Fast cryptographic hashing for content-based freshness detection
 blake3 = "1.8"
 
-# Async runtime for Actor model (Phase 5)
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"], optional = true }
+# Async runtime for Actor model
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
 
 # Zero-copy serialization for VDOM diffing and caching
 rkyv = { version = "0.8", optional = true }
@@ -88,11 +88,9 @@ rkyv = { version = "0.8", optional = true }
 redb = { version = "2", optional = true }
 
 [features]
-default = ["actor"]
+default = []
 # Enable rkyv serialization for VDOM (Phase 2 of PLAN.md)
 rkyv = ["dep:rkyv"]
-# Enable Actor concurrency model - now default, will be mandatory in future
-actor = ["dep:tokio"]
 # Enable persistent VDOM cache with redb (Phase 6 of PLAN.md)
 cache = ["dep:redb"]
 
