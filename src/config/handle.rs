@@ -80,6 +80,7 @@ static CONFIG_HASH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64:
 /// # Errors
 ///
 /// Returns error if tola.toml parsing fails.
+#[allow(dead_code)]
 pub fn reload_config() -> anyhow::Result<bool> {
     use std::fs;
 

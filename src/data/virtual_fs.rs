@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use super::store::GLOBAL_SITE_DATA;
 
 /// Canonical virtual data directory path (used for dependency tracking).
+#[allow(dead_code)]
 pub const VIRTUAL_DATA_DIR: &str = "/_data";
 
 /// Known virtual files and their generators.
@@ -75,6 +76,7 @@ pub fn read_virtual_data(path: &Path) -> Option<Vec<u8>> {
 /// Get all virtual data file paths (for dependency graph queries).
 ///
 /// These paths match what Typst templates use when calling `json("/_data/*.json")`.
+#[allow(dead_code)]
 pub fn virtual_data_paths() -> Vec<PathBuf> {
     VIRTUAL_FILES
         .iter()

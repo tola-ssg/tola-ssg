@@ -26,7 +26,6 @@ pub mod pages;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use crate::freshness::{self, ContentHash};
 
 // ============================================================================
 // Public API

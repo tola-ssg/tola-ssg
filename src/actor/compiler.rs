@@ -22,6 +22,7 @@ use tokio::sync::mpsc;
 
 use super::messages::{CompilerMsg, VdomMsg};
 use crate::config::SiteConfig;
+use crate::logger::WatchStatus;
 use crate::pipeline::compile::{compile_page, CompileOutcome};
 
 /// Compiler Actor - handles Typst compilation
@@ -32,6 +33,8 @@ pub struct CompilerActor {
     vdom_tx: mpsc::Sender<VdomMsg>,
     /// Site configuration
     config: Arc<SiteConfig>,
+    /// Status display for watch mode
+    status: WatchStatus,
 }
 
 impl CompilerActor {
@@ -45,6 +48,7 @@ impl CompilerActor {
             rx,
             vdom_tx,
             config,
+            status: WatchStatus::new(),
         }
     }
 
@@ -56,6 +60,20 @@ impl CompilerActor {
                     self.handle_compile(paths).await;
                 }
 
+                CompilerMsg::CompileDependents(deps) => {
+                    // Find content files that depend on these deps and compile them
+                    let affected = Self::collect_dependents(&deps);
+                    if affected.is_empty() {
+                        crate::log!("compile"; "no dependents found for {} deps", deps.len());
+                    } else {
+                        self.handle_compile(affected).await;
+                    }
+                }
+
+                CompilerMsg::FullRebuild => {
+                    self.handle_full_rebuild().await;
+                }
+
                 CompilerMsg::Shutdown => {
                     crate::log!("compile"; "shutting down");
                     break;
@@ -64,8 +82,66 @@ impl CompilerActor {
         }
     }
 
+    /// Collect content files that depend on the given dependency files
+    fn collect_dependents(deps: &[PathBuf]) -> Vec<PathBuf> {
+        use crate::compiler::deps::DEPENDENCY_GRAPH;
+        use rustc_hash::FxHashSet;
+
+        let graph = DEPENDENCY_GRAPH.read();
+        let mut affected = FxHashSet::default();
+
+        for dep in deps {
+            if let Some(dependents) = graph.get_dependents(dep.as_path()) {
+                affected.extend(dependents.iter().cloned());
+            }
+        }
+
+        affected.into_iter().collect()
+    }
+
+    /// Handle full site rebuild (config changed)
+    async fn handle_full_rebuild(&self) {
+        use crate::compiler::deps::DEPENDENCY_GRAPH;
+        use crate::driver::Development;
+
+        crate::log!("compile"; "full rebuild triggered");
+
+        // Clear dependency graph
+        DEPENDENCY_GRAPH.write().clear();
+
+        // Clear VDOM cache
+        let _ = self.vdom_tx.send(VdomMsg::Clear).await;
+
+        // Perform full build
+        let config = Arc::clone(&self.config);
+        let result = tokio::task::spawn_blocking(move || {
+            crate::build::build_site(Development, &config, true)
+        }).await;
+
+        match result {
+            Ok(Ok(_)) => {
+                crate::log!("compile"; "full rebuild complete");
+                let _ = self.vdom_tx.send(VdomMsg::Reload {
+                    reason: "full rebuild".to_string(),
+                }).await;
+            }
+            Ok(Err(e)) => {
+                crate::log!("compile"; "full rebuild failed: {}", e);
+                let _ = self.vdom_tx.send(VdomMsg::Reload {
+                    reason: format!("rebuild failed: {}", e),
+                }).await;
+            }
+            Err(e) => {
+                crate::log!("compile"; "spawn_blocking error: {}", e);
+                let _ = self.vdom_tx.send(VdomMsg::Reload {
+                    reason: format!("internal error: {}", e),
+                }).await;
+            }
+        }
+    }
+
     /// Handle compilation request
-    async fn handle_compile(&self, paths: Vec<PathBuf>) {
+    async fn handle_compile(&mut self, paths: Vec<PathBuf>) {
         let start = Instant::now();
         let config = Arc::clone(&self.config);
 
@@ -78,7 +154,7 @@ impl CompilerActor {
             Ok(outcomes) => {
                 let duration = start.elapsed();
                 let count = outcomes.len();
-                crate::log!("compile"; "compiled {} files in {:?}", count, duration);
+                self.status.success(&format!("compiled {} files in {:?}", count, duration));
 
                 // Route ALL results to VdomActor (linear message flow)
                 for outcome in outcomes {
@@ -86,7 +162,7 @@ impl CompilerActor {
                 }
             }
             Err(e) => {
-                crate::log!("compile"; "spawn_blocking error: {}", e);
+                self.status.error("spawn_blocking error", &e.to_string());
                 // Forward error to VdomActor
                 let _ = self.vdom_tx.send(VdomMsg::Reload {
                     reason: format!("internal error: {}", e),
@@ -99,7 +175,7 @@ impl CompilerActor {
     ///
     /// All outcomes go through VdomActor to ensure linear message flow.
     /// VdomActor is the sole decision maker for what to send to WsActor.
-    async fn route_outcome(&self, outcome: CompileOutcome) {
+    async fn route_outcome(&mut self, outcome: CompileOutcome) {
         match outcome {
             CompileOutcome::Vdom { path, url_path, vdom } => {
                 let _ = self.vdom_tx.send(VdomMsg::Process {
@@ -115,7 +191,7 @@ impl CompilerActor {
                 let _ = self.vdom_tx.send(VdomMsg::Skip).await;
             }
             CompileOutcome::Error { path, error } => {
-                crate::log!("compile"; "error in {}: {}", path.display(), error);
+                self.status.error(&format!("compile error in {}", path.display()), &error);
                 let _ = self.vdom_tx.send(VdomMsg::Reload {
                     reason: format!("compile error in {}: {}", path.display(), error),
                 }).await;

@@ -8,6 +8,9 @@
 //! The server uses `Arc<Mutex<>>` for thread-safe client management.
 //! Messages are broadcast from the watcher thread to all connected clients.
 
+// All functions in this module are used for hot reload, which may not be active
+#![allow(dead_code)]
+
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;

@@ -39,7 +39,6 @@ pub fn set_verbose(v: bool) {
 }
 
 /// Check if verbose mode is enabled
-#[allow(dead_code)]
 pub fn is_verbose() -> bool {
     VERBOSE.load(Ordering::SeqCst)
 }
@@ -208,7 +207,6 @@ impl ProgressBars {
     ///     progress.inc("content");
     /// }
     /// ```
-    #[allow(dead_code)]
     pub fn new_filtered(modules: &[(&'static str, usize)]) -> Option<Self> {
         let filtered: Vec<_> = modules.iter().filter(|(_, count)| *count > 0).copied().collect();
         let total: usize = filtered.iter().map(|(_, c)| c).sum();

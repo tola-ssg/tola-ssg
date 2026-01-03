@@ -19,5 +19,3 @@ pub mod compile;
 pub mod diff;
 
 // Re-exports for convenience
-pub use compile::{compile_page, CompileOutcome};
-pub use diff::{compute_diff, DiffOutcome};

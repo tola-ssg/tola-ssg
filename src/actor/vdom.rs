@@ -14,6 +14,7 @@
 //! - Routing results to WsActor
 //!
 
+use crate::logger::WatchStatus;
 use crate::utils::path::normalize_url;
 
 
@@ -37,6 +38,8 @@ pub struct VdomActor {
     ws_tx: mpsc::Sender<WsMsg>,
     /// VDOM cache (owned by this actor, wrapped for spawn_blocking)
     cache: Arc<Mutex<VdomCache>>,
+    /// Status display for watch mode
+    status: WatchStatus,
 }
 
 impl VdomActor {
@@ -49,6 +52,7 @@ impl VdomActor {
             rx,
             ws_tx,
             cache: Arc::new(Mutex::new(VdomCache::new())),
+            status: WatchStatus::new(),
         }
     }
 
@@ -74,7 +78,7 @@ impl VdomActor {
 
                 VdomMsg::Reload { reason } => {
                     // Forward reload from CompilerActor to WsActor
-                    crate::log!("vdom"; "reload: {}", reason);
+                    self.status.success(&format!("reload: {}", reason));
                     let _ = self.ws_tx.send(WsMsg::Reload { reason }).await;
                 }
 
@@ -84,16 +88,16 @@ impl VdomActor {
 
                 VdomMsg::Invalidate { url_path } => {
                     self.cache.lock().remove(&url_path);
-                    crate::log!("vdom"; "invalidated cache for {}", url_path);
+                    self.status.success(&format!("invalidated cache for {}", url_path));
                 }
 
                 VdomMsg::Clear => {
                     self.cache.lock().clear();
-                    crate::log!("vdom"; "cleared all cache");
+                    self.status.success("cleared all cache");
                 }
 
                 VdomMsg::Shutdown => {
-                    crate::log!("vdom"; "shutting down");
+                    self.status.success("vdom actor shutting down");
                     break;
                 }
             }
@@ -104,7 +108,7 @@ impl VdomActor {
     ///
     /// Delegates to `pipeline::diff::compute_diff` for the actual work.
     async fn handle_process(
-        &self,
+        &mut self,
         _path: PathBuf,
         url_path: String,
         new_vdom: Document<Indexed>,
@@ -122,7 +126,7 @@ impl VdomActor {
         match result {
             Ok(outcome) => self.route_outcome(url_path, outcome).await,
             Err(e) => {
-                crate::log!("vdom"; "spawn_blocking error: {}", e);
+                self.status.error("spawn_blocking error", &e.to_string());
                 let _ = self.ws_tx.send(WsMsg::Reload {
                     reason: format!("internal error: {}", e),
                 }).await;
@@ -131,11 +135,11 @@ impl VdomActor {
     }
 
     /// Route a diff outcome to WsActor
-    async fn route_outcome(&self, url_path: String, outcome: DiffOutcome) {
+    async fn route_outcome(&mut self, url_path: String, outcome: DiffOutcome) {
         match outcome {
             DiffOutcome::Patches(patches, new_vdom) => {
                 let count = patches.len();
-                crate::log!("vdom"; "patch {} ({} ops)", url_path, count);
+                self.status.success(&format!("patch {} ({} ops)", url_path, count));
 
                 // Send patches to WsActor
                 if self.ws_tx.send(WsMsg::Patch { url_path: url_path.clone(), patches }).await.is_ok() {
@@ -148,16 +152,16 @@ impl VdomActor {
                 // First compile after server start - cache was empty.
                 // Browser already has HTML loaded, but we have no old VDOM to diff against.
                 // Trigger reload to ensure browser shows latest content.
-                crate::log!("vdom"; "initial {} (reload)", url_path);
+                self.status.success(&format!("initial {}", url_path));
                 let _ = self.ws_tx.send(WsMsg::Reload {
                     reason: "initial compile".to_string(),
                 }).await;
             }
             DiffOutcome::Unchanged => {
-                crate::log!("vdom"; "unchanged {}", url_path);
+                self.status.unchanged(&url_path);
             }
             DiffOutcome::NeedsReload { reason } => {
-                crate::log!("vdom"; "reload {}: {}", url_path, reason);
+                self.status.success(&format!("reload {}: {}", url_path, reason));
                 let _ = self.ws_tx.send(WsMsg::Reload { reason }).await;
             }
         }

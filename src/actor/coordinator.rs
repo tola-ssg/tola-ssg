@@ -115,7 +115,7 @@ impl Coordinator {
         let watch_paths = self.get_watch_paths();
 
         // FsActor with Watcher-First pattern (starts buffering immediately)
-        let fs_actor = FsActor::new(watch_paths, compiler_tx.clone())
+        let fs_actor = FsActor::new(watch_paths, compiler_tx.clone(), self.config.clone())
             .map_err(|e| anyhow::anyhow!("failed to create file watcher: {}", e))?;
 
         // Clone vdom_tx for initial build (before it's moved to CompilerActor)

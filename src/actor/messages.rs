@@ -34,6 +34,10 @@ pub enum FsMsg {
 pub enum CompilerMsg {
     /// Compile the specified files
     Compile(Vec<PathBuf>),
+    /// Compile content files that depend on changed deps
+    CompileDependents(Vec<PathBuf>),
+    /// Full site rebuild (config changed)
+    FullRebuild,
     /// Shutdown the actor
     Shutdown,
 }

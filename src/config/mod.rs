@@ -49,7 +49,7 @@ pub use path::PathResolver;
 pub use build::{BuildConfig, ExtractSvgType, SlugCase, SlugMode, SlugSeparator};
 pub use deploy::DeployConfig;
 pub use error::ConfigError;
-pub use handle::{cfg, clear_clean_flag, init_config, reload_config};
+pub use handle::{cfg, clear_clean_flag, init_config};
 
 // Internal imports used in this module
 use base::BaseConfig;

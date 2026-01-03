@@ -124,6 +124,7 @@ pub fn hash_strs(strs: &[&str]) -> u64 {
 }
 
 /// Compute hash from a reader (streaming, for large files).
+#[allow(dead_code)]
 pub fn compute_reader(mut reader: impl Read) -> io::Result<u64> {
     let mut hasher = blake3::Hasher::new();
     let mut buffer = [0u8; 8192];

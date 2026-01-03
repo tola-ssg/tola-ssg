@@ -47,5 +47,3 @@ pub mod message;
 pub mod server;
 
 // Public API
-pub use message::HotReloadMessage;
-pub use server::{broadcast_patches, broadcast_reload, HotReloadServer};
