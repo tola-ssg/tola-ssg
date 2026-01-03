@@ -85,15 +85,12 @@ fn categorize_path(path: &Path, config: &SiteConfig) -> FileCategory {
 ///
 /// Uses the global DEPENDENCY_GRAPH to find reverse dependencies.
 fn collect_affected_content(changed_files: &[PathBuf]) -> Vec<PathBuf> {
-    use crate::compiler::deps::DEPENDENCY_GRAPH;
+    use crate::compiler::deps::get_dependents;
 
-    let graph = DEPENDENCY_GRAPH.read();
     let mut affected = FxHashSet::default();
 
     for path in changed_files {
-        if let Some(dependents) = graph.get_dependents(path.as_path()) {
-            affected.extend(dependents.iter().cloned());
-        }
+        affected.extend(get_dependents(path.as_path()));
     }
 
     affected.into_iter().collect()

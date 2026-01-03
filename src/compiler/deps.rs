@@ -31,6 +31,29 @@ pub static DEPENDENCY_GRAPH: LazyLock<RwLock<DependencyGraph>> =
     LazyLock::new(|| RwLock::new(DependencyGraph::new()));
 
 // =============================================================================
+// Convenience Functions (isolate global state access)
+// =============================================================================
+
+/// Get content files that depend on a given file.
+///
+/// This is a convenience wrapper around `DEPENDENCY_GRAPH.read().get_dependents()`.
+/// Prefer this over direct access for clearer dependency tracking.
+pub fn get_dependents(dependency: &Path) -> Vec<PathBuf> {
+    DEPENDENCY_GRAPH
+        .read()
+        .get_dependents(dependency)
+        .map(|set| set.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Clear the global dependency graph.
+///
+/// Called during full rebuild to reset tracking state.
+pub fn clear_graph() {
+    DEPENDENCY_GRAPH.write().clear();
+}
+
+// =============================================================================
 // DependencyGraph
 // =============================================================================
 

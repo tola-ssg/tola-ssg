@@ -1,7 +1,14 @@
 //! Compilation Pipeline - Typst to VDOM
 //!
 //! Pure functions for compiling Typst files to VDOM.
-//! No Actor machinery, no global state.
+//! No Actor machinery, minimal side effects.
+//!
+//! # Side Effect Isolation
+//!
+//! `compile_page` has ONE side effect: writing HTML to disk.
+//! This is intentional - we want compilation to be atomic (compile + write).
+//! The alternative (returning HTML string) would require callers to handle writes,
+//! complicating error handling and atomicity.
 
 use std::path::{Path, PathBuf};
 

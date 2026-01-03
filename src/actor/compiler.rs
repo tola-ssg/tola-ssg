@@ -84,16 +84,13 @@ impl CompilerActor {
 
     /// Collect content files that depend on the given dependency files
     fn collect_dependents(deps: &[PathBuf]) -> Vec<PathBuf> {
-        use crate::compiler::deps::DEPENDENCY_GRAPH;
+        use crate::compiler::deps::get_dependents;
         use rustc_hash::FxHashSet;
 
-        let graph = DEPENDENCY_GRAPH.read();
         let mut affected = FxHashSet::default();
 
         for dep in deps {
-            if let Some(dependents) = graph.get_dependents(dep.as_path()) {
-                affected.extend(dependents.iter().cloned());
-            }
+            affected.extend(get_dependents(dep.as_path()));
         }
 
         affected.into_iter().collect()
@@ -101,13 +98,13 @@ impl CompilerActor {
 
     /// Handle full site rebuild (config changed)
     async fn handle_full_rebuild(&self) {
-        use crate::compiler::deps::DEPENDENCY_GRAPH;
+        use crate::compiler::deps::clear_graph;
         use crate::driver::Development;
 
         crate::log!("compile"; "full rebuild triggered");
 
         // Clear dependency graph
-        DEPENDENCY_GRAPH.write().clear();
+        clear_graph();
 
         // Clear VDOM cache
         let _ = self.vdom_tx.send(VdomMsg::Clear).await;
