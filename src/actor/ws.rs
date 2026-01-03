@@ -91,11 +91,6 @@ impl WsActor {
         }
     }
 
-    /// Add a new client connection
-    pub fn add_client(&mut self, client: WebSocket<TcpStream>) {
-        self.clients.push(client);
-    }
-
     /// Broadcast a message to all connected clients
     fn broadcast(&mut self, msg: Message) {
         self.clients.retain_mut(|client| {

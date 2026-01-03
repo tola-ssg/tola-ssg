@@ -359,10 +359,10 @@ pub fn serve_site() -> Result<()> {
     let ws_port = if c.serve.watch {
         // Generate hotreload JS file in output directory
         let port = DEFAULT_WS_PORT;
-        if let Err(e) = hotreload::server::generate_hotreload_js(&c.build.output, port) {
+        if let Err(e) = hotreload::ws::generate_hotreload_js(&c.build.output, port) {
             log!("hotreload"; "failed to generate JS: {}", e);
         }
-        let _ = hotreload::server::cleanup_old_hotreload_js(&c.build.output, port);
+        let _ = hotreload::ws::cleanup_old_hotreload_js(&c.build.output, port);
         log!("hotreload"; "ws://localhost:{}", port);
         Some(port)
     } else {

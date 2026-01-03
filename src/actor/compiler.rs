@@ -1,18 +1,11 @@
 //! Compiler Actor - Typst Compilation Wrapper
 //!
-//! This actor is responsible for:
-//! 1. Receiving file change notifications
-//! 2. Dispatching to `pipeline::compile` for actual compilation
-//! 3. Forwarding ALL results to VdomActor (linear message flow)
+//! This actor is a **thin wrapper** that:
+//! 1. Receives file change notifications
+//! 2. Dispatches to `pipeline::compile` for actual compilation
+//! 3. Forwards ALL results to VdomActor (linear message flow)
 //!
-//! # Design
-//!
-//! This is a **thin wrapper** around `pipeline::compile`. The actor only handles:
-//! - Async message loop
-//! - spawn_blocking for CPU work
-//! - Routing results to VdomActor (NEVER directly to WsActor)
-//!
-//! All business logic lives in `pipeline::compile`.
+//! All business logic lives in `pipeline/`.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,6 +16,7 @@ use tokio::sync::mpsc;
 use super::messages::{CompilerMsg, VdomMsg};
 use crate::config::SiteConfig;
 use crate::logger::WatchStatus;
+use crate::pipeline::classify::collect_dependents;
 use crate::pipeline::compile::{compile_page, CompileOutcome};
 
 /// Compiler Actor - handles Typst compilation
@@ -62,7 +56,7 @@ impl CompilerActor {
 
                 CompilerMsg::CompileDependents(deps) => {
                     // Find content files that depend on these deps and compile them
-                    let affected = Self::collect_dependents(&deps);
+                    let affected = collect_dependents(&deps);
                     if affected.is_empty() {
                         crate::log!("compile"; "no dependents found for {} deps", deps.len());
                     } else {
@@ -80,20 +74,6 @@ impl CompilerActor {
                 }
             }
         }
-    }
-
-    /// Collect content files that depend on the given dependency files
-    fn collect_dependents(deps: &[PathBuf]) -> Vec<PathBuf> {
-        use crate::compiler::deps::get_dependents;
-        use rustc_hash::FxHashSet;
-
-        let mut affected = FxHashSet::default();
-
-        for dep in deps {
-            affected.extend(get_dependents(dep.as_path()));
-        }
-
-        affected.into_iter().collect()
     }
 
     /// Handle full site rebuild (config changed)

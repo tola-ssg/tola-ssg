@@ -3,26 +3,25 @@
 //! Watches for file changes and sends debounced events to the CompilerActor.
 //! Implements the "Watcher-First" pattern for zero event loss.
 //!
-//! # File Classification
+//! # Responsibility
 //!
-//! Files are categorized to determine the appropriate rebuild strategy:
-//! - **Content**: Incremental rebuild of single file
-//! - **Deps**: Rebuild all content files that depend on it
-//! - **Config**: Full site rebuild
-//! - **Asset**: Copy/process single file
-//! - **Unknown**: Ignored
+//! This actor is a **thin wrapper** that:
+//! 1. Receives file system events from notify
+//! 2. Debounces rapid changes
+//! 3. Delegates classification to `pipeline::classify`
+//! 4. Routes messages to CompilerActor
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use rustc_hash::FxHashSet;
 use tokio::sync::mpsc;
 
 use super::messages::CompilerMsg;
 use crate::config::SiteConfig;
 use crate::logger::WatchStatus;
+use crate::pipeline::classify::{classify_changes, ClassifyResult};
 use crate::utils::path::normalize_path;
 
 /// Debounce configuration
@@ -30,78 +29,11 @@ const DEBOUNCE_MS: u64 = 300;
 const REBUILD_COOLDOWN_MS: u64 = 800;
 
 // =============================================================================
-// File Category (inline - only used in this module)
-// =============================================================================
-
-/// Category of a changed file, determines rebuild strategy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FileCategory {
-    /// Content file (.typ) - rebuild individually
-    Content,
-    /// Asset file - copy individually (currently triggers reload)
-    Asset,
-    /// Site config (tola.toml) - full rebuild
-    Config,
-    /// Dependency (templates, utils) - rebuild dependents
-    Deps,
-    /// Outside watched dirs - ignored
-    Unknown,
-}
-
-impl FileCategory {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Content => "content",
-            Self::Asset => "asset",
-            Self::Config => "config",
-            Self::Deps => "deps",
-            Self::Unknown => "unknown",
-        }
-    }
-}
-
-/// Categorize a path based on config directories.
-fn categorize_path(path: &Path, config: &SiteConfig) -> FileCategory {
-    let path = normalize_path(path);
-
-    if path == config.config_path {
-        FileCategory::Config
-    } else if config.build.deps.iter().any(|dep| path.starts_with(dep)) {
-        FileCategory::Deps
-    } else if path.starts_with(&config.build.content) {
-        FileCategory::Content
-    } else if path.starts_with(&config.build.assets) {
-        FileCategory::Asset
-    } else {
-        FileCategory::Unknown
-    }
-}
-
-// =============================================================================
-// Dependency Resolution
-// =============================================================================
-
-/// Collect all content files that depend on the changed files.
-///
-/// Uses the global DEPENDENCY_GRAPH to find reverse dependencies.
-fn collect_affected_content(changed_files: &[PathBuf]) -> Vec<PathBuf> {
-    use crate::compiler::deps::get_dependents;
-
-    let mut affected = FxHashSet::default();
-
-    for path in changed_files {
-        affected.extend(get_dependents(path.as_path()));
-    }
-
-    affected.into_iter().collect()
-}
-
-// =============================================================================
 // Helper Functions
 // =============================================================================
 
 /// Check if path is a temp/backup file (editor artifacts).
-fn is_temp_file(path: &std::path::Path) -> bool {
+fn is_temp_file(path: &Path) -> bool {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
@@ -112,8 +44,6 @@ fn is_temp_file(path: &std::path::Path) -> bool {
 
 /// FileSystem Actor - watches for file changes
 pub struct FsActor {
-    /// Paths to watch
-    paths: Vec<PathBuf>,
     /// Channel to receive notify events (sync -> async bridge)
     notify_rx: std::sync::mpsc::Receiver<notify::Result<notify::Event>>,
     /// Watcher handle (must be kept alive)
@@ -154,7 +84,6 @@ impl FsActor {
         // Events are now buffering in notify_rx while caller does initial build
 
         Ok(Self {
-            paths,
             notify_rx,
             _watcher: watcher,
             compiler_tx,
@@ -162,11 +91,6 @@ impl FsActor {
             config,
             status: WatchStatus::new(),
         })
-    }
-
-    /// Get the watched paths
-    pub fn paths(&self) -> &[PathBuf] {
-        &self.paths
     }
 
     /// Run the actor event loop
@@ -217,7 +141,7 @@ impl FsActor {
                             }
 
                             // Route to appropriate handler
-                            let msg = result.to_message();
+                            let msg = result_to_message(&result);
                             if let Some(note) = &result.note {
                                 status.success(note);
                             }
@@ -234,92 +158,20 @@ impl FsActor {
     }
 }
 
-// =============================================================================
-// Classification Result (pure data, no side effects)
-// =============================================================================
-
-/// Result of classifying changed files.
-struct ClassifyResult {
-    /// Files grouped by category (for logging)
-    classified: Vec<(PathBuf, FileCategory)>,
-    /// Config changed - requires full rebuild
-    config_changed: bool,
-    /// Deps that changed
-    deps_changed: Vec<PathBuf>,
-    /// Content files to compile (direct changes + affected by deps)
-    content_to_compile: Vec<PathBuf>,
-    /// Optional note (e.g., "deps changed but no dependents")
-    note: Option<String>,
-}
-
-impl ClassifyResult {
-    /// Convert to CompilerMsg
-    fn to_message(&self) -> CompilerMsg {
-        if self.config_changed {
-            CompilerMsg::FullRebuild
-        } else if !self.content_to_compile.is_empty() {
-            CompilerMsg::Compile(self.content_to_compile.clone())
-        } else {
-            // No actionable changes
-            CompilerMsg::Compile(vec![])
-        }
-    }
-}
-
-/// Classify changed files (pure function, no side effects).
-fn classify_changes(paths: &[PathBuf], config: &SiteConfig) -> ClassifyResult {
-    let mut classified = Vec::new();
-    let mut config_changed = false;
-    let mut deps_changed = Vec::new();
-    let mut content_changed = Vec::new();
-
-    for path in paths {
-        let category = categorize_path(path, config);
-        classified.push((path.clone(), category));
-
-        match category {
-            FileCategory::Config => config_changed = true,
-            FileCategory::Deps => deps_changed.push(path.clone()),
-            FileCategory::Content => content_changed.push(path.clone()),
-            FileCategory::Asset => content_changed.push(path.clone()),
-            FileCategory::Unknown => {}
-        }
-    }
-
-    // Resolve deps → affected content
-    let mut note = None;
-    let content_to_compile = if config_changed {
-        vec![] // Full rebuild, no need to list files
-    } else if !deps_changed.is_empty() {
-        let affected = collect_affected_content(&deps_changed);
-        if affected.is_empty() {
-            note = Some("deps changed but no dependents found".to_string());
-            // Will trigger full rebuild via config_changed fallback below
-            vec![]
-        } else {
-            // Merge affected with direct content changes
-            affected
-                .into_iter()
-                .chain(content_changed)
-                .collect::<FxHashSet<_>>()
-                .into_iter()
-                .collect()
-        }
+/// Convert ClassifyResult to CompilerMsg
+fn result_to_message(result: &ClassifyResult) -> CompilerMsg {
+    if result.config_changed {
+        CompilerMsg::FullRebuild
+    } else if !result.content_to_compile.is_empty() {
+        CompilerMsg::Compile(result.content_to_compile.clone())
     } else {
-        content_changed
-    };
-
-    // If deps changed but no dependents, treat as config change
-    let config_changed = config_changed || (!deps_changed.is_empty() && content_to_compile.is_empty() && note.is_some());
-
-    ClassifyResult {
-        classified,
-        config_changed,
-        deps_changed,
-        content_to_compile,
-        note,
+        CompilerMsg::Compile(vec![])
     }
 }
+
+// =============================================================================
+// Debouncer
+// =============================================================================
 
 /// Simple debouncer for file events
 struct Debouncer {

@@ -1,11 +1,9 @@
 //! Actor Message Definitions
 //!
-//! Defines the message types exchanged between actors in the hot reload system.
-//!
-//! # Message Flow
+//! Message types for inter-actor communication.
 //!
 //! ```text
-//! FsMsg::FileChanged → CompilerMsg::Compile → VdomMsg::Process → WsMsg::Patch
+//! FsActor ──Compile──► CompilerActor ──Process──► VdomActor ──Patch──► WsActor
 //! ```
 
 use std::path::PathBuf;
@@ -13,32 +11,19 @@ use std::path::PathBuf;
 use crate::vdom::{diff::Patch, Document, Indexed};
 
 // =============================================================================
-// FsActor Messages
-// =============================================================================
-
-/// Messages sent to/from the FileSystem Actor
-#[derive(Debug)]
-pub enum FsMsg {
-    /// Files have changed and need recompilation
-    FileChanged(Vec<PathBuf>),
-    /// Shutdown the actor
-    Shutdown,
-}
-
-// =============================================================================
 // CompilerActor Messages
 // =============================================================================
 
-/// Messages sent to the Compiler Actor
+/// Messages to Compiler Actor
 #[derive(Debug)]
 pub enum CompilerMsg {
-    /// Compile the specified files
+    /// Compile files
     Compile(Vec<PathBuf>),
     /// Compile content files that depend on changed deps
     CompileDependents(Vec<PathBuf>),
-    /// Full site rebuild (config changed)
+    /// Full rebuild (config changed)
     FullRebuild,
-    /// Shutdown the actor
+    /// Shutdown
     Shutdown,
 }
 
@@ -46,34 +31,28 @@ pub enum CompilerMsg {
 // VdomActor Messages
 // =============================================================================
 
-/// Messages sent to the VDOM Actor (the Bridge)
+/// Messages to VDOM Actor
 #[derive(Debug)]
 pub enum VdomMsg {
-    /// Populate cache with initial build results (called once at startup)
-    /// This ensures first file change can diff against cached state.
+    /// Populate cache (initial build)
     Populate {
-        /// Pre-built VDOM entries: (url_path, vdom)
         entries: Vec<(String, Document<Indexed>)>,
     },
-    /// Process a compiled VDOM (diff against cache)
+    /// Process compiled VDOM
     Process {
-        /// Source file path
         path: PathBuf,
-        /// URL path for the page (e.g., "/blog/post")
         url_path: String,
-        /// New VDOM document
         vdom: Document<Indexed>,
     },
-    /// Trigger reload (for non-VDOM changes or errors)
-    /// Forwarded from CompilerActor to ensure linear message flow.
+    /// Trigger reload
     Reload { reason: String },
-    /// File was skipped (draft, etc.) - no action needed
+    /// File skipped
     Skip,
-    /// Invalidate cache for a specific URL path
+    /// Invalidate cache for URL path
     Invalidate { url_path: String },
-    /// Clear all cached VDOM
+    /// Clear cache
     Clear,
-    /// Shutdown the actor
+    /// Shutdown
     Shutdown,
 }
 
@@ -81,37 +60,19 @@ pub enum VdomMsg {
 // WsActor Messages
 // =============================================================================
 
-/// Messages sent to the WebSocket Actor
+/// Messages to WebSocket Actor
 pub enum WsMsg {
-    /// Send patch operations to all clients for a specific page
+    /// Send patches
     Patch {
         url_path: String,
         patches: Vec<Patch>,
     },
-    /// Trigger full page reload
+    /// Full reload
     Reload { reason: String },
-    /// Add a new WebSocket client connection
+    /// Add client
     AddClient(std::net::TcpStream),
-    /// A new client has connected (notification only)
+    /// Client connected notification
     ClientConnected,
-    /// Shutdown the actor
+    /// Shutdown
     Shutdown,
-}
-
-// =============================================================================
-// System Messages
-// =============================================================================
-
-/// Top-level system messages for coordinating actors
-#[derive(Debug)]
-pub enum SystemMsg {
-    /// Initial build completed
-    InitialBuildComplete,
-    /// A compile cycle completed
-    CompileComplete {
-        changed_files: usize,
-        duration_ms: u64,
-    },
-    /// An error occurred
-    Error(String),
 }
