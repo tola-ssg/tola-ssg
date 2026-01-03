@@ -21,10 +21,7 @@
 //! 2. Any dependency (config/templates/utils) is newer than output
 
 use crate::config::SiteConfig;
-use std::{
-    env,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 /// Category of a changed file, used to determine rebuild strategy in watch mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,20 +90,9 @@ pub fn categorize_path(path: &Path, config: &SiteConfig) -> FileCategory {
     }
 }
 
-/// Normalize a path to absolute form for reliable comparison.
-///
-/// Config paths are already canonicalized, so we need to canonicalize
-/// incoming paths (e.g., from file watcher) before comparison.
-pub fn normalize_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| {
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            env::current_dir()
-                .map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
-        }
-    })
-}
+// normalize_path is now in crate::utils::path
+use super::path::normalize_path;
+
 
 #[cfg(test)]
 mod tests {

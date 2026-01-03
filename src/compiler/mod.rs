@@ -57,11 +57,7 @@ pub fn collect_all_files(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Canonicalize a path, returning original if canonicalization fails.
-#[inline]
-pub fn canonicalize(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
+
 
 /// Check if destination is up-to-date compared to source and dependencies.
 ///

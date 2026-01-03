@@ -59,7 +59,7 @@ impl DependencyGraph {
     /// Paths are canonicalized for consistent matching with VDOM_CACHE.
     pub fn record_dependencies(&mut self, content_file: &Path, accessed_files: &[PathBuf]) {
         // Canonicalize content file path for consistent key matching
-        let content_file = super::canonicalize(content_file);
+        let content_file = crate::utils::path::normalize_path(content_file);
 
         // Remove old mappings first
         self.remove_forward_entry(&content_file);
@@ -69,7 +69,7 @@ impl DependencyGraph {
         let deps: FxHashSet<PathBuf> = accessed_files
             .iter()
             .filter(|p| p.as_path() != content_file.as_path())
-            .map(|p| super::canonicalize(p))
+            .map(|p| crate::utils::path::normalize_path(p))
             .collect();
 
         // Update reverse mapping

@@ -14,33 +14,8 @@
 //! - Routing results to WsActor
 //!
 
-/// Normalize URL path for consistent cache keys.
-/// Must match the normalization in `pipeline::diff::normalize_url_path`.
-fn normalize_url_path(url_path: &str) -> String {
-    // Remove fragment (#...) and query string (?...)
-    let path = url_path
-        .split('#').next().unwrap_or(url_path)
-        .split('?').next().unwrap_or(url_path);
+use crate::utils::path::normalize_url;
 
-    let mut path = path.to_string();
-
-    // Collapse multiple slashes
-    while path.contains("//") {
-        path = path.replace("//", "/");
-    }
-
-    // Ensure starts with /
-    if !path.starts_with('/') {
-        path = format!("/{}", path);
-    }
-
-    // Remove trailing slash (except for root)
-    if path.len() > 1 && path.ends_with('/') {
-        path.pop();
-    }
-
-    path
-}
 
 
 use std::path::PathBuf;
@@ -87,7 +62,7 @@ impl VdomActor {
                     let count = entries.len();
                     let mut cache = self.cache.lock();
                     for (url_path, vdom) in entries {
-                        let normalized = normalize_url_path(&url_path);
+                        let normalized = normalize_url(&url_path);
                         cache.insert(normalized, vdom);
                     }
                     crate::log!("vdom"; "populated cache with {} entries", count);

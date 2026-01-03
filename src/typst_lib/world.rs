@@ -103,10 +103,9 @@ pub struct SystemWorld {
     now: LazyNow,
 }
 
-/// Normalize a path by canonicalizing it if possible, or returning it as-is.
-fn normalize_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
+// Use unified path normalization
+use crate::utils::path::normalize_path;
+
 
 impl SystemWorld {
     /// Create a new world for compiling a specific file.

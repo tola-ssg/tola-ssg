@@ -241,7 +241,7 @@ impl PageMeta {
     pub fn from_paths(source: PathBuf, config: &SiteConfig) -> Result<Self> {
         // Canonicalize source path to ensure consistency with content_dir
         // This fixes path mismatches like /var vs /private/var on macOS
-        let source = super::canonicalize(&source);
+        let source = crate::utils::path::normalize_path(&source);
 
         let content_dir = &config.build.content;
         let paths = config.paths();

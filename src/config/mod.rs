@@ -462,21 +462,21 @@ impl SiteConfig {
         Self::update_option(&mut self.build.output, cli.output.as_ref());
 
         // Normalize root to absolute path
-        let root = Self::normalize_path(root);
+        let root = crate::utils::path::normalize_path(root);
         self.set_root(&root);
 
         // Normalize config path (already set in main.rs, just canonicalize)
-        self.config_path = Self::normalize_path(&self.config_path);
+        self.config_path = crate::utils::path::normalize_path(&self.config_path);
 
         // Normalize build directories
-        self.build.content = Self::normalize_path(&root.join(&self.build.content));
-        self.build.assets = Self::normalize_path(&root.join(&self.build.assets));
-        self.build.output = Self::normalize_path(&root.join(&self.build.output));
+        self.build.content = crate::utils::path::normalize_path(&root.join(&self.build.content));
+        self.build.assets = crate::utils::path::normalize_path(&root.join(&self.build.assets));
+        self.build.output = crate::utils::path::normalize_path(&root.join(&self.build.output));
         self.build.deps = self
             .build
             .deps
             .iter()
-            .map(|p| Self::normalize_path(&root.join(p)))
+            .map(|p| crate::utils::path::normalize_path(&root.join(p)))
             .collect();
         // Note: rss.path and sitemap.path are kept as relative filenames.
         // They are resolved to output_dir() at write time to include path_prefix.
@@ -491,7 +491,7 @@ impl SiteConfig {
     /// Normalize optional paths (tailwind input, deploy token).
     fn normalize_optional_paths(&mut self, root: &Path) {
         if let Some(input) = self.build.css.tailwind.input.take() {
-            self.build.css.tailwind.input = Some(Self::normalize_path(&root.join(input)));
+            self.build.css.tailwind.input = Some(crate::utils::path::normalize_path(&root.join(input)));
         }
 
         if let Some(token_path) = self.deploy.github.token_path.take() {
@@ -504,20 +504,11 @@ impl SiteConfig {
         let expanded = shellexpand::tilde(path.to_str().unwrap_or_default()).into_owned();
         let path = PathBuf::from(expanded);
         let full_path = if path.is_relative() { root.join(&path) } else { path };
-        Self::normalize_path(&full_path)
+        crate::utils::path::normalize_path(&full_path)
     }
 
-    /// Normalize a path to absolute, using canonicalize if the path exists.
-    fn normalize_path(path: &Path) -> PathBuf {
-        path.canonicalize().unwrap_or_else(|_| {
-            if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                std::env::current_dir()
-                    .map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
-            }
-        })
-    }
+
+
 
     // ========================================================================
     // validation
