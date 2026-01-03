@@ -30,7 +30,7 @@ use super::messages::{CompilerMsg, VdomMsg, WsMsg};
 use super::vdom::VdomActor;
 use super::ws::WsActor;
 use crate::config::SiteConfig;
-use crate::pipeline::init::build_initial_cache;
+use crate::hotreload::logic::init::build_initial_cache;
 
 /// Channel buffer size
 const CHANNEL_BUFFER: usize = 32;

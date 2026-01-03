@@ -15,9 +15,9 @@ use tokio::sync::mpsc;
 
 use super::messages::{CompilerMsg, VdomMsg};
 use crate::config::SiteConfig;
+use crate::hotreload::logic::classify::collect_dependents;
+use crate::hotreload::logic::compile::{compile_page, CompileOutcome};
 use crate::logger::WatchStatus;
-use crate::pipeline::classify::collect_dependents;
-use crate::pipeline::compile::{compile_page, CompileOutcome};
 
 /// Compiler Actor - handles Typst compilation
 pub struct CompilerActor {

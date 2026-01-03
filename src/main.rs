@@ -15,7 +15,6 @@ mod generator;
 mod hotreload;
 mod init;
 mod logger;
-mod pipeline;
 mod serve;
 mod typst_lib;
 mod utils;

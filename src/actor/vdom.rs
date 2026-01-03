@@ -23,7 +23,7 @@ use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
 use super::messages::{VdomMsg, WsMsg};
-use crate::pipeline::diff::{compute_diff, DiffOutcome};
+use crate::hotreload::logic::diff::{compute_diff, DiffOutcome};
 use crate::vdom::{CacheKey, VdomCache};
 use crate::vdom::{Document, Indexed};
 

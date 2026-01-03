@@ -20,8 +20,8 @@ use tokio::sync::mpsc;
 
 use super::messages::CompilerMsg;
 use crate::config::SiteConfig;
+use crate::hotreload::logic::classify::{classify_changes, ClassifyResult};
 use crate::logger::WatchStatus;
-use crate::pipeline::classify::{classify_changes, ClassifyResult};
 use crate::utils::path::normalize_path;
 
 /// Debounce configuration

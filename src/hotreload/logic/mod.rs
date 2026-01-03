@@ -1,4 +1,4 @@
-//! Hot Reload Pipeline
+//! Hot Reload Business Logic
 //!
 //! Business logic for the hot reload system, separate from Actor concurrency.
 //!
@@ -12,7 +12,7 @@
 //! # Design
 //!
 //! - `actor/` → Concurrency (message loops, channels)
-//! - `pipeline/` → Business logic (pure functions)
+//! - `hotreload/logic/` → Business logic (pure functions)
 
 pub mod classify;
 pub mod compile;

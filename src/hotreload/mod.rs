@@ -21,6 +21,7 @@
 //! The diff algorithm lives in `crate::vdom::diff`.
 //! This module handles WebSocket transport and message serialization.
 
+pub mod logic;
 pub mod message;
 pub mod ws;
 
