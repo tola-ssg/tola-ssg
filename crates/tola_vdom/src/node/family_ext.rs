@@ -173,6 +173,41 @@ impl<P: PhaseData> FamilyExt<P> {
 // Rationale: Silently defaulting to `Other` family hides errors.
 // Users must explicitly specify the family when creating elements.
 
+// =============================================================================
+// Phase-specific implementations
+// =============================================================================
+
+use crate::id::StableId;
+use crate::phase::{Indexed, Processed};
+
+/// Indexed phase: access StableId from any family variant.
+impl FamilyExt<Indexed> {
+    /// Get the StableId from any family variant.
+    pub fn stable_id(&self) -> StableId {
+        match self {
+            Self::Svg(ext) => ext.stable_id,
+            Self::Link(ext) => ext.stable_id,
+            Self::Heading(ext) => ext.stable_id,
+            Self::Media(ext) => ext.stable_id,
+            Self::Other(ext) => ext.stable_id,
+        }
+    }
+}
+
+/// Processed phase: access StableId from any family variant.
+impl FamilyExt<Processed> {
+    /// Get the StableId from any family variant (preserved from Indexed phase).
+    pub fn stable_id(&self) -> StableId {
+        match self {
+            Self::Svg(ext) => ext.stable_id,
+            Self::Link(ext) => ext.stable_id,
+            Self::Heading(ext) => ext.stable_id,
+            Self::Media(ext) => ext.stable_id,
+            Self::Other(ext) => ext.stable_id,
+        }
+    }
+}
+
 /// Trait for types that have family data.
 pub trait HasFamilyData<P: PhaseData> {
     /// Get family extension reference.

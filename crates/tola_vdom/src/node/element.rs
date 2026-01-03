@@ -144,6 +144,44 @@ impl<P: PhaseData> Element<P> {
     pub fn is_empty(&self) -> bool {
         self.children.is_empty()
     }
+
+    // =========================================================================
+    // Attribute methods
+    // =========================================================================
+
+    /// Get attribute value by name.
+    pub fn get_attr(&self, name: &str) -> Option<&str> {
+        self.attrs
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Set attribute value (update if exists, add if not).
+    pub fn set_attr(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        let name = name.into();
+        let value = value.into();
+        if let Some(attr) = self.attrs.iter_mut().find(|(k, _)| k == &name) {
+            attr.1 = value;
+        } else {
+            self.attrs.push((name, value));
+        }
+    }
+
+    /// Remove attribute by name, returning the old value if it existed.
+    pub fn remove_attr(&mut self, name: &str) -> Option<String> {
+        if let Some(pos) = self.attrs.iter().position(|(k, _)| k == name) {
+            let (_, value) = self.attrs.remove(pos);
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    /// Check if element has a specific attribute.
+    pub fn has_attr(&self, name: &str) -> bool {
+        self.attrs.iter().any(|(k, _)| k == name)
+    }
 }
 
 impl<P: PhaseData> HasFamilyData<P> for Element<P> {

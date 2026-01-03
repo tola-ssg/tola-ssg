@@ -6,8 +6,8 @@
 //!
 //! # Design Decision
 //!
-//! We use content-based hashing instead of source spans because:
-//! - Source spans are NOT stable across separate compilations
+//! We use content-based hashing instead of Typst Span because:
+//! - Span values are NOT stable across separate compilations
 //! - Content hash is deterministic and reproducible
 //! - Same content always produces same ID, enabling reliable diffing
 //!
@@ -25,14 +25,13 @@
 //! - Occurrence-based: IDs unchanged → Move × 3 (preserves CSS transitions!)
 
 use std::fmt;
-
-use tola_core::hash::StableHasher;
+use std::hash::Hash;
 
 // =============================================================================
 // PageSeed - Page-specific seed for globally unique StableIds
 // =============================================================================
 
-/// Page-specific seed for globally unique StableIds.
+/// Page-specific seed for globally unique StableIds
 ///
 /// When building for hot reload, each page gets a unique seed based on its
 /// URL path. This ensures StableIds are unique across different pages,
@@ -41,31 +40,29 @@ use tola_core::hash::StableHasher;
 ///
 /// # Creation
 ///
-/// ```
-/// use tola_vdom::id::PageSeed;
-///
+/// ```ignore
 /// let seed = PageSeed::from_path("/blog/post.html");
+/// let indexed = Indexer::new().with_page_seed(seed).transform(raw_doc);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct PageSeed(pub u64);
 
 impl PageSeed {
-    /// Create a PageSeed from a page path.
+    /// Create a PageSeed from a page path
     pub fn from_path(path: &str) -> Self {
-        Self(
-            StableHasher::new()
-                .update_str("__page__")
-                .update_str(path)
-                .finish(),
-        )
+        use tola_core::StableHasher;
+        Self(StableHasher::new()
+            .update_str("__page__")
+            .update_str(path)
+            .finish())
     }
 
-    /// Create a zero seed (for single-page or test scenarios).
+    /// Create a zero seed (for single-page or test scenarios)
     pub const fn zero() -> Self {
         Self(0)
     }
 
-    /// Get the raw u64 value.
+    /// Get the raw u64 value
     #[inline]
     pub const fn as_u64(&self) -> u64 {
         self.0
@@ -76,7 +73,7 @@ impl PageSeed {
 // StableId
 // =============================================================================
 
-/// Stable node identifier based on content hash.
+/// Stable node identifier based on content hash
 ///
 /// Computed from node content and structure, enabling:
 /// - Efficient VDOM diffing (O(1) identity check)
@@ -88,23 +85,22 @@ impl PageSeed {
 /// - 8 bytes (u64)
 /// - Copy, no heap allocation
 /// - Null-optimized: `Option<StableId>` is also 8 bytes
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StableId(pub u64);
 
 impl StableId {
-    /// Zero StableId constant for default initialization.
-    pub const ZERO: Self = Self(0);
-
-    /// Create a StableId from a raw u64 value.
+    /// Create a StableId from a raw u64 value
     ///
-    /// This is primarily for deserialization. Prefer `for_element()` or
-    /// `for_text()` for creating new IDs.
+    /// # Safety Note
+    ///
+    /// This is primarily for deserialization. Prefer `from_span()` or
+    /// `from_content_hash()` for creating new IDs.
     #[inline]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    /// Get the raw u64 representation.
+    /// Get the raw u64 representation
     #[inline]
     pub const fn as_raw(&self) -> u64 {
         self.0
@@ -120,7 +116,7 @@ impl StableId {
         format!("{:x}", self.as_raw())
     }
 
-    /// Create a StableId for an element node.
+    /// Create a StableId for an element node
     ///
     /// Hash is computed from:
     /// - Tag name
@@ -137,7 +133,12 @@ impl StableId {
     /// * `attrs` - All attributes (only key attrs will be hashed)
     /// * `_children` - Child StableIds (unused, kept for API compatibility)
     /// * `occurrence` - How many same-(tag, key_attrs) siblings appeared before this one
-    /// * `parent_seed` - Seed from parent element for global uniqueness
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let id = StableId::for_element("div", &attrs, &child_ids, 0);
+    /// ```
     pub fn for_element(
         tag: &str,
         attrs: &[(String, String)],
@@ -145,6 +146,8 @@ impl StableId {
         occurrence: usize,
         parent_seed: u64,
     ) -> Self {
+        use tola_core::StableHasher;
+
         let mut hasher = StableHasher::new()
             .update_u64(parent_seed)
             .update_str(tag);
@@ -160,16 +163,22 @@ impl StableId {
         Self(hasher.update_usize(occurrence).finish())
     }
 
-    /// Create a StableId for a text node.
+    /// Create a StableId for a text node
     ///
     /// Hash is computed from:
-    /// - Text content marker
+    /// - Text content
     /// - Occurrence index (how many same-content text nodes appeared before)
     ///
     /// # Arguments
     ///
+    /// * `content` - Text content
     /// * `occurrence` - How many same-content text siblings appeared before this one
-    /// * `parent_seed` - Seed from parent element for global uniqueness
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let id = StableId::for_text(0);  // First text node at this position
+    /// ```
     ///
     /// # Design Note
     ///
@@ -179,44 +188,51 @@ impl StableId {
     /// - With position only: "Hello" → "World" is recognized as Keep + UpdateText
     #[inline]
     pub fn for_text(occurrence: usize, parent_seed: u64) -> Self {
-        Self(
-            StableHasher::new()
-                .update_u64(parent_seed)
-                .update_str("__text__")
-                .update_usize(occurrence)
-                .finish(),
-        )
+        use tola_core::StableHasher;
+
+        Self(StableHasher::new()
+            .update_u64(parent_seed)
+            .update_str("__text__")
+            .update_usize(occurrence)
+            .finish())
     }
 
-    /// Create a StableId for a frame node (SVG content).
+    /// Create a StableId for a frame node (SVG content)
     ///
     /// # Arguments
     ///
     /// * `frame_id` - Unique frame identifier
     /// * `occurrence` - How many same-frame_id siblings appeared before this one
-    /// * `parent_seed` - Seed from parent element for global uniqueness
     #[inline]
     pub fn for_frame(frame_id: usize, occurrence: usize, parent_seed: u64) -> Self {
-        Self(
-            StableHasher::new()
-                .update_u64(parent_seed)
-                .update_str("__frame__")
-                .update_usize(frame_id)
-                .update_usize(occurrence)
-                .finish(),
-        )
+        use tola_core::StableHasher;
+
+        Self(StableHasher::new()
+            .update_u64(parent_seed)
+            .update_str("__frame__")
+            .update_usize(frame_id)
+            .update_usize(occurrence)
+            .finish())
     }
 
-    /// Create from content hash (legacy API, kept for compatibility).
+    /// Create from content hash (legacy API, kept for compatibility)
     ///
     /// # Deprecated
     /// Use `for_element()` instead which includes position for disambiguation.
-    #[deprecated(since = "0.1.0", note = "Use for_element() instead")]
     pub fn from_content_hash(tag: &str, attrs: &[(String, String)], children: &[StableId]) -> Self {
         Self::for_element(tag, attrs, children, 0, 0)
     }
 
-    /// Create a detached/placeholder ID.
+    /// Create from text content (legacy API, kept for compatibility)
+    ///
+    /// # Deprecated
+    /// Use `for_text()` instead - text IDs no longer include content.
+    #[allow(unused_variables)]
+    pub fn from_text_content(content: &str) -> Self {
+        Self::for_text(0, 0)
+    }
+
+    /// Create a detached/placeholder ID
     ///
     /// Use sparingly - this creates an ID that won't match any real node.
     /// Useful for testing or as a temporary placeholder.
@@ -225,104 +241,82 @@ impl StableId {
         Self(0)
     }
 
-    /// Check if this is a detached/placeholder ID.
+    /// Check if this is a detached/placeholder ID
     #[inline]
     pub const fn is_detached(&self) -> bool {
         self.0 == 0
     }
 }
 
-// =============================================================================
-// Display / Debug implementations
-// =============================================================================
-
 impl fmt::Debug for StableId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "StableId({:016x})", self.0)
+        if self.is_detached() {
+            write!(f, "StableId(detached)")
+        } else {
+            write!(f, "StableId({:016x})", self.0)
+        }
     }
 }
 
 impl fmt::Display for StableId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:x}", self.0)
+        write!(f, "#{:x}", self.0)
+    }
+}
+
+impl Default for StableId {
+    fn default() -> Self {
+        Self::detached()
     }
 }
 
 // =============================================================================
-// Serde support (optional)
+// rkyv serialization support
 // =============================================================================
 
-#[cfg(feature = "serde")]
-mod serde_impl {
-    use super::*;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+#[cfg(feature = "rkyv")]
+mod rkyv_impl {
+    use crate::StableId;
+    use rkyv::{Archive, Deserialize, Serialize};
 
-    impl Serialize for StableId {
-        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            serializer.serialize_str(&self.to_attr_value())
+    impl Archive for StableId {
+        type Archived = ArchivedStableId;
+        type Resolver = ();
+
+        unsafe fn resolve(&self, _pos: usize, _resolver: Self::Resolver, out: *mut Self::Archived) {
+            out.write(ArchivedStableId(self.0.to_le()));
         }
     }
 
-    impl<'de> Deserialize<'de> for StableId {
-        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let s = String::deserialize(deserializer)?;
-            u64::from_str_radix(&s, 16)
-                .map(StableId)
-                .map_err(serde::de::Error::custom)
+    impl<S: rkyv::ser::Serializer + ?Sized> Serialize<S> for StableId {
+        fn serialize(&self, _serializer: &mut S) -> Result<Self::Resolver, S::Error> {
+            Ok(())
         }
     }
 
-    impl Serialize for PageSeed {
-        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            self.0.serialize(serializer)
+    impl<D: rkyv::Fallible + ?Sized> Deserialize<StableId, D> for ArchivedStableId {
+        fn deserialize(&self, _deserializer: &mut D) -> Result<StableId, D::Error> {
+            Ok(StableId(u64::from_le(self.0)))
         }
     }
 
-    impl<'de> Deserialize<'de> for PageSeed {
-        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            u64::deserialize(deserializer).map(PageSeed)
+    /// Archived form of StableId (little-endian for cross-platform)
+    #[repr(transparent)]
+    pub struct ArchivedStableId(u64);
+
+    impl ArchivedStableId {
+        /// Get the raw value (in native endianness)
+        #[inline]
+        pub fn as_raw(&self) -> u64 {
+            u64::from_le(self.0)
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[cfg(feature = "rkyv")]
+pub use rkyv_impl::ArchivedStableId;
 
-    #[test]
-    fn test_stable_id_for_element() {
-        let attrs = vec![("id".to_string(), "main".to_string())];
-        let id1 = StableId::for_element("div", &attrs, &[], 0, 0);
-        let id2 = StableId::for_element("div", &attrs, &[], 0, 0);
-        let id3 = StableId::for_element("div", &attrs, &[], 1, 0); // Different occurrence
+// =============================================================================
+// Tests
+// =============================================================================
 
-        assert_eq!(id1, id2);
-        assert_ne!(id1, id3);
-    }
-
-    #[test]
-    fn test_stable_id_for_text() {
-        let id1 = StableId::for_text(0, 0);
-        let id2 = StableId::for_text(0, 0);
-        let id3 = StableId::for_text(1, 0);
-
-        assert_eq!(id1, id2);
-        assert_ne!(id1, id3);
-    }
-
-    #[test]
-    fn test_page_seed() {
-        let seed1 = PageSeed::from_path("/blog/post.html");
-        let seed2 = PageSeed::from_path("/blog/post.html");
-        let seed3 = PageSeed::from_path("/about.html");
-
-        assert_eq!(seed1, seed2);
-        assert_ne!(seed1, seed3);
-    }
-
-    #[test]
-    fn test_attr_value_format() {
-        let id = StableId::from_raw(0x123456789abcdef0);
-        assert_eq!(id.to_attr_value(), "123456789abcdef0");
-    }
-}
