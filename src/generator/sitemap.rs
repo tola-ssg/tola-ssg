@@ -105,7 +105,7 @@ impl Sitemap {
         // Resolve sitemap path relative to output_dir (with path_prefix)
         let sitemap_path = config.paths().output_dir().join(&config.build.sitemap.path);
         let xml = self.into_xml();
-        let xml = minify(MinifyType::Xml(xml.as_bytes()), config);
+        let xml = minify(MinifyType::Xml(xml.as_bytes()), config.build.minify);
 
         fs::write(&sitemap_path, &*xml)
             .with_context(|| format!("Failed to write sitemap to {}", sitemap_path.display()))?;

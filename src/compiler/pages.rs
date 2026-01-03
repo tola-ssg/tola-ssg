@@ -206,7 +206,7 @@ fn write_page(
         .file_stem()
         .is_some_and(|stem| stem == "index");
     let html_content = process_html(&page.paths.html, &html_content, config, is_source_index)?;
-    let html_content = minify(MinifyType::Html(&html_content), config);
+    let html_content = minify(MinifyType::Html(&html_content), config.build.minify);
 
     // Compute source hash and embed marker for freshness detection
     let source_hash = freshness::compute_file_hash(&page.paths.source);

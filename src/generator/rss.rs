@@ -77,7 +77,7 @@ impl<'a> RssFeed<'a> {
     /// Write rss feed to file
     fn write(self, config: &SiteConfig) -> Result<()> {
         let xml = self.into_xml()?;
-        let xml = minify(MinifyType::Xml(xml.as_bytes()), config);
+        let xml = minify(MinifyType::Xml(xml.as_bytes()), config.build.minify);
         // Resolve RSS path relative to output_dir (with path_prefix)
         let rss_path = config.paths().output_dir().join(&config.build.rss.path);
 

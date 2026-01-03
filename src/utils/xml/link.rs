@@ -70,7 +70,7 @@ pub fn process_absolute_link(value: &str, config: &SiteConfig) -> Result<String>
     // Append slugified fragment if present
     if !fragment.is_empty() {
         result.push('#');
-        result.push_str(&slugify_fragment(fragment, config));
+        result.push_str(&slugify_fragment(fragment, &config.build.slug));
     }
 
     Ok(result)
@@ -100,7 +100,7 @@ pub fn process_absolute_link(value: &str, config: &SiteConfig) -> Result<String>
 /// - `blog/post-1` → `/blog/post-1` (already has prefix, skip)
 fn build_prefixed_url(path: &str, config: &SiteConfig) -> String {
     let paths = config.paths();
-    let slugified = slugify_path(path, config);
+    let slugified = slugify_path(path, &config.build.slug);
     let slugified_str = slugified.to_string_lossy();
 
     if has_path_prefix(path, config) {
@@ -173,7 +173,7 @@ fn split_path_fragment(url: &str) -> (&str, &str) {
 /// Process fragment links (starting with `#`).
 #[allow(clippy::unnecessary_wraps)] // Result for API consistency
 pub fn process_fragment_link(value: &str, config: &SiteConfig) -> Result<String> {
-    Ok(format!("#{}", slugify_fragment(&value[1..], config)))
+    Ok(format!("#{}", slugify_fragment(&value[1..], &config.build.slug)))
 }
 
 /// Process relative links (starting with `./`, `../`, or no prefix).

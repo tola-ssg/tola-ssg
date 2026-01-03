@@ -1,9 +1,8 @@
 //! Minification utilities for HTML and XML.
 //!
-//! Provides a unified `minify` function that handles both HTML and XML,
-//! with automatic enable/disable based on `SiteConfig`.
+//! Provides pure functions for minification.
+//! Decoupled from config - callers pass the `minify` flag directly.
 
-use crate::config::SiteConfig;
 use std::borrow::Cow;
 
 // ============================================================================
@@ -23,11 +22,15 @@ pub enum MinifyType<'a> {
 // Unified Minify Function
 // ============================================================================
 
-/// Minify content based on type and config.
+/// Minify content based on type and enable flag.
 ///
 /// Returns `Cow::Borrowed` if minify disabled, `Cow::Owned` if minified.
-pub fn minify<'a>(content: MinifyType<'a>, config: &SiteConfig) -> Cow<'a, [u8]> {
-    if config.build.minify {
+///
+/// # Arguments
+/// * `content` - Content to minify (HTML or XML)
+/// * `enabled` - Whether minification is enabled
+pub fn minify<'a>(content: MinifyType<'a>, enabled: bool) -> Cow<'a, [u8]> {
+    if enabled {
         match content {
             MinifyType::Html(html) => Cow::Owned(minify_html_inner(html)),
             MinifyType::Xml(xml) => Cow::Owned(minify_xml_inner(xml)),
@@ -76,21 +79,13 @@ fn minify_xml_inner(xml: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::SiteConfig;
-
-    fn config_with_minify(enabled: bool) -> SiteConfig {
-        let mut config = SiteConfig::default();
-        config.build.minify = enabled;
-        config
-    }
 
     // HTML minification tests
 
     #[test]
     fn test_minify_html_basic() {
         let html = b"<html>\n  <head>\n  </head>\n  <body>\n    <p>Hello</p>\n  </body>\n</html>";
-        let config = config_with_minify(true);
-        let result = minify(MinifyType::Html(html), &config);
+        let result = minify(MinifyType::Html(html), true);
         let result_str = String::from_utf8_lossy(&result);
 
         // Should remove unnecessary whitespace
@@ -101,8 +96,7 @@ mod tests {
     #[test]
     fn test_minify_html_preserves_content() {
         let html = b"<p>Hello World</p>";
-        let config = config_with_minify(true);
-        let result = minify(MinifyType::Html(html), &config);
+        let result = minify(MinifyType::Html(html), true);
         let result_str = String::from_utf8_lossy(&result);
 
         assert!(result_str.contains("Hello World"));
@@ -112,8 +106,8 @@ mod tests {
     fn test_minify_html_enabled() {
         let html = b"<html>\n  <body>\n  </body>\n</html>";
 
-        let minified = minify(MinifyType::Html(html), &config_with_minify(true));
-        let not_minified = minify(MinifyType::Html(html), &config_with_minify(false));
+        let minified = minify(MinifyType::Html(html), true);
+        let not_minified = minify(MinifyType::Html(html), false);
 
         assert!(minified.len() < not_minified.len());
         assert_eq!(&*not_minified, html);
@@ -122,7 +116,7 @@ mod tests {
     #[test]
     fn test_minify_html_disabled() {
         let html = b"<html>\n  <body>\n  </body>\n</html>";
-        let result = minify(MinifyType::Html(html), &config_with_minify(false));
+        let result = minify(MinifyType::Html(html), false);
 
         assert_eq!(&*result, html);
     }
@@ -135,7 +129,7 @@ mod tests {
 <root>
   <item>Hello</item>
 </root>"#;
-        let result = minify(MinifyType::Xml(xml), &config_with_minify(true));
+        let result = minify(MinifyType::Xml(xml), true);
 
         assert_eq!(
             &*result,
@@ -146,7 +140,7 @@ mod tests {
     #[test]
     fn test_minify_xml_removes_indentation() {
         let xml = b"  <tag>  content  </tag>  ";
-        let result = minify(MinifyType::Xml(xml), &config_with_minify(true));
+        let result = minify(MinifyType::Xml(xml), true);
 
         assert_eq!(&*result, b"<tag>  content  </tag>");
     }
@@ -154,7 +148,7 @@ mod tests {
     #[test]
     fn test_minify_xml_removes_empty_lines() {
         let xml = b"<root>\n\n  <item/>\n\n</root>";
-        let result = minify(MinifyType::Xml(xml), &config_with_minify(true));
+        let result = minify(MinifyType::Xml(xml), true);
 
         assert_eq!(&*result, b"<root><item/></root>");
     }
@@ -163,8 +157,8 @@ mod tests {
     fn test_minify_xml_enabled() {
         let xml = b"<root>\n  <item/>\n</root>";
 
-        let minified = minify(MinifyType::Xml(xml), &config_with_minify(true));
-        let not_minified = minify(MinifyType::Xml(xml), &config_with_minify(false));
+        let minified = minify(MinifyType::Xml(xml), true);
+        let not_minified = minify(MinifyType::Xml(xml), false);
 
         assert_eq!(&*minified, b"<root><item/></root>");
         assert_eq!(&*not_minified, xml.as_slice());
@@ -179,7 +173,7 @@ mod tests {
     <lastmod>2025-01-01</lastmod>
   </url>
 </urlset>"#;
-        let result = minify(MinifyType::Xml(xml), &config_with_minify(true));
+        let result = minify(MinifyType::Xml(xml), true);
         let result_str = String::from_utf8_lossy(&result);
 
         assert!(!result_str.contains('\n'));
@@ -199,7 +193,7 @@ mod tests {
     </item>
   </channel>
 </rss>"#;
-        let result = minify(MinifyType::Xml(xml), &config_with_minify(true));
+        let result = minify(MinifyType::Xml(xml), true);
         let result_str = String::from_utf8_lossy(&result);
 
         assert!(!result_str.contains('\n'));

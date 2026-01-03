@@ -30,7 +30,7 @@
 //! slugify_on("München", '-')       // → "munchen"
 //! ```
 
-use crate::config::{SiteConfig, SlugCase, SlugMode};
+use crate::config::{SlugCase, SlugConfig, SlugMode};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
@@ -50,16 +50,15 @@ pub const FORBIDDEN_CHARS: &[char] = &[
 ///
 /// # Arguments
 /// * `text` - The text to slugify
-/// * `config` - Site configuration containing slug settings
+/// * `slug` - Slug configuration
 ///
 /// # Example
 /// ```ignore
 /// // With SlugMode::Safe, separator='-', case=Lower
-/// slugify_fragment("Hello World") // → "hello-world"
-/// slugify_fragment("Chapter:One") // → "Chapter-One"
+/// slugify_fragment("Hello World", &slug) // → "hello-world"
+/// slugify_fragment("Chapter:One", &slug) // → "Chapter-One"
 /// ```
-pub fn slugify_fragment(text: &str, config: &SiteConfig) -> String {
-    let slug = &config.build.slug;
+pub fn slugify_fragment(text: &str, slug: &SlugConfig) -> String {
     let sep = slug.separator.as_char();
 
     let result = match slug.fragment {
@@ -78,16 +77,15 @@ pub fn slugify_fragment(text: &str, config: &SiteConfig) -> String {
 ///
 /// # Arguments
 /// * `path` - The path to slugify
-/// * `config` - Site configuration containing slug settings
+/// * `slug` - Slug configuration
 ///
 /// # Example
 /// ```ignore
 /// // With SlugMode::Safe, separator='-', case=Lower
-/// slugify_path("content/My Posts/Hello World")
+/// slugify_path("content/My Posts/Hello World", &slug)
 /// // → "content/my-posts/hello-world"
 /// ```
-pub fn slugify_path(path: impl AsRef<Path>, config: &SiteConfig) -> PathBuf {
-    let slug = &config.build.slug;
+pub fn slugify_path(path: impl AsRef<Path>, slug: &SlugConfig) -> PathBuf {
     let sep = slug.separator.as_char();
 
     match slug.path {
@@ -652,22 +650,18 @@ mod tests {
     }
 
     // ========================================================================
-    // Integration tests with SiteConfig
+    // Integration tests with SlugConfig
     // ========================================================================
 
-    fn make_config(
+    fn make_slug_config(
         path_mode: &str,
         fragment_mode: &str,
         case: &str,
         sep: char,
-    ) -> SiteConfig {
+    ) -> SlugConfig {
         let sep_str = if sep == '-' { "dash" } else { "underscore" };
         let toml = format!(
             r#"
-            [base]
-            title = "Test"
-            description = "Test"
-            [build.slug]
             path = "{}"
             fragment = "{}"
             case = "{}"
@@ -681,50 +675,50 @@ mod tests {
     #[test]
     fn test_slugify_fragment_modes() {
         // Full mode
-        let config = make_config("safe", "full", "lower", SEP_DASH);
+        let config = make_slug_config("safe", "full", "lower", SEP_DASH);
         assert_eq!(slugify_fragment("Hello World", &config), "hello-world");
         assert_eq!(slugify_fragment("München", &config), "munchen");
 
         // Safe mode
-        let config = make_config("safe", "safe", "preserve", SEP_UNDERSCORE);
+        let config = make_slug_config("safe", "safe", "preserve", SEP_UNDERSCORE);
         assert_eq!(slugify_fragment("Hello World", &config), "Hello_World");
         assert_eq!(slugify_fragment("München", &config), "München");
 
         // Ascii mode
-        let config = make_config("safe", "ascii", "lower", SEP_DASH);
+        let config = make_slug_config("safe", "ascii", "lower", SEP_DASH);
         assert_eq!(slugify_fragment("Hello World", &config), "hello-world");
         assert_eq!(slugify_fragment("München", &config), "munchen");
 
         // No mode
-        let config = make_config("safe", "no", "preserve", SEP_DASH);
+        let config = make_slug_config("safe", "no", "preserve", SEP_DASH);
         assert_eq!(slugify_fragment("Hello World", &config), "Hello World");
     }
 
     #[test]
     fn test_slugify_path_modes() {
         // Full mode
-        let config = make_config("full", "safe", "lower", SEP_DASH);
+        let config = make_slug_config("full", "safe", "lower", SEP_DASH);
         assert_eq!(
             slugify_path("content/My Posts/Hello", &config),
             PathBuf::from("content/my-posts/hello")
         );
 
         // Safe mode
-        let config = make_config("safe", "safe", "preserve", SEP_UNDERSCORE);
+        let config = make_slug_config("safe", "safe", "preserve", SEP_UNDERSCORE);
         assert_eq!(
             slugify_path("content/My Posts/Hello", &config),
             PathBuf::from("content/My_Posts/Hello")
         );
 
         // Ascii mode
-        let config = make_config("ascii", "safe", "lower", SEP_DASH);
+        let config = make_slug_config("ascii", "safe", "lower", SEP_DASH);
         assert_eq!(
             slugify_path("content/My Posts/München", &config),
             PathBuf::from("content/my-posts/munchen")
         );
 
         // No mode
-        let config = make_config("no", "safe", "preserve", SEP_DASH);
+        let config = make_slug_config("no", "safe", "preserve", SEP_DASH);
         assert_eq!(
             slugify_path("content/My Posts/Hello", &config),
             PathBuf::from("content/My Posts/Hello")
@@ -733,7 +727,7 @@ mod tests {
 
     #[test]
     fn test_slugify_path_full_mode_preserves_structure() {
-        let config = make_config("full", "safe", "lower", SEP_DASH);
+        let config = make_slug_config("full", "safe", "lower", SEP_DASH);
 
         // Test 1: Unicode paths - each component slugified separately
         assert_eq!(

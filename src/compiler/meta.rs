@@ -271,7 +271,7 @@ impl PageMeta {
         let html = if is_root_index {
             output_dir.join("index.html")
         } else {
-            let slugified_relative = slugify_path(Path::new(&relative), config);
+            let slugified_relative = slugify_path(Path::new(&relative), &config.build.slug);
             output_dir.join(slugified_relative).join("index.html")
         };
 

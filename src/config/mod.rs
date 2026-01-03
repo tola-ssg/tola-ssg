@@ -46,7 +46,7 @@ mod serve;
 pub use path::PathResolver;
 
 // Re-export public types used by other modules
-pub use build::{BuildConfig, ExtractSvgType, SlugCase, SlugMode, SlugSeparator};
+pub use build::{BuildConfig, ExtractSvgType, SlugCase, SlugConfig, SlugMode, SlugSeparator};
 pub use deploy::DeployConfig;
 pub use error::ConfigError;
 pub use handle::{cfg, clear_clean_flag, init_config};

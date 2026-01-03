@@ -111,7 +111,7 @@ pub fn write_heading_with_slugified_id(
     let new_elem = rebuild_elem(elem, |key, value| {
         if key == b"id" {
             let v = str::from_utf8(value.as_ref()).unwrap_or_default();
-            slugify_fragment(v, config).into_bytes().into()
+            slugify_fragment(v, &config.build.slug).into_bytes().into()
         } else {
             value.into_owned().into()
         }
