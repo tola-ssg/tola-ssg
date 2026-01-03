@@ -1,275 +1,245 @@
-# VDOM 多阶段处理架构设计 (v2.0)
+# VDOM 多阶段处理架构设计 (v3.0 - Final)
 
 > TTG (Trees That Grow) + GATs 实现类型安全、语义化、架构分离的多阶段文档处理
 >
-> **设计目标**：构建一个工业级、零开销、类型安全的 SSG 文档处理流水线。作为独立 crate 发布。
+> **设计目标**：构建一个工业级、零开销、类型安全的 SSG 文档处理流水线。
+> **核心原则**：默认安全 (Correctness)，极致性能 (Performance)，易于扩展 (Extensibility)。
 
 ## 目录
 
-1. [问题分析](#1-问题分析)
-2. [核心理念与目标](#2-核心理念与目标)
-3. [架构总览](#3-架构总览)
-4. [关键设计决策 (Critical Decisions)](#4-关键设计决策)
-    - [决策 1: 三层状态模型](#决策-1-三层状态模型)
-    - [决策 2: 诊断与错误累积](#决策-2-诊断与错误累积)
-    - [决策 3: 基于 Capability 的扩展性](#决策-3-基于-capability-的扩展性)
-    - [决策 4: 同步核心与异步 IO 分离](#决策-4-同步核心与异步-io-分离)
-5. [详细实现方案](#5-详细实现方案)
+1. [架构总览](#1-架构总览)
+2. [类型系统设计 (Correctness)](#2-类型系统设计-correctness)
+3. [开发者体验与 API (Ease of Use)](#3-开发者体验与-api-ease-of-use)
+4. [扩展性设计 (Extensibility)](#4-扩展性设计-extensibility)
+5. [性能与内存布局 (Performance)](#5-性能与内存布局-performance)
 6. [迁移与落地](#6-迁移与落地)
 
 ---
 
-## 1. 问题分析
+## 1. 架构总览
 
-### 1.1 现状痛点
-
-当前 VDOM (`vdom/mod.rs`) 虽然引入了 Raw/Indexed/Processed 阶段，但中间过程仍然是一个黑盒：
-
-1.  **"超级转换器" (God Processor)**: `Processor` 结构体承载了太多职责（链接检查、SVG 优化、Heading 处理等），导致代码耦合，无法单独测试或复用。
-2.  **隐式依赖链**: 必须先进行 "Link Check" 才能进行 "Link Resolve"，但这种依赖关系仅存在于代码逻辑中，编译器无法感知。假如开发者调整了顺序，可能会在运行时才发现 Panic 或逻辑错误。
-3.  **状态丢失**: 元素从 `Indexed` 变到 `Processed` 是瞬间的。我们无法表达 "这个链接已经检查过是死链，但还没有解析最终路径" 这种中间状态。
-4.  **配置传递混乱**: 各种 Transform 需要不同的全局配置（asset map, config, routes），目前缺乏统一且优雅的注入方式。
-5.  **缺乏诊断信息**: 转换过程目前主要关注快乐路径，缺乏统一的 Warning/Error 收集机制。
-
-### 1.2 理想形态
-
-我们希望这一条流水线像工厂流水线一样：
-*   **每一步都被类型系统监控**: 如果你试图打包一个还没组装的产品，流水线应该拒绝运行（编译失败）。
-*   **自带质检报告**: 每个产品（Document）出来时都带着一份详细的质检报告（Diagnostics）。
-*   **模块化插槽**: 可以随意拆卸、替换某个工序（Transform），只要接口对得上。
-
----
-
-## 2. 核心理念与目标
-
-| 维度 | 目标 | 策略 |
-|------|------|------|
-| **Safety** | **编译时阻止逻辑错误** |利用 Rust 类型系统 (GATs, Newtypes, Marker Traits) 编码处理顺序。 |
-| **Observability** | **全链路诊断** | Document 携带 `Vec<Diagnostic>`，所有 Transform 只能追加不能丢弃诊断。 |
-| **Flexibility** | **可组合、可插拔** | Transform 是独立的，通过 Builder 或 Pipeline 组合。 |
-| **Performance** | **零抽象开销** | 大量使用 Zero-sized types (ZST) 和 phantom data，运行时无额外内存分配。 |
-
----
-
-## 3. 架构总览
-
-我们将架构分为三个层次，解决不同粒度的问题：
+我们将架构自底向上分为三层，层层递进解决不同维度的问题：
 
 ```mermaid
 graph TD
-    Level1[Level 1: Phase (生命周期)] --> Level2[Level 2: Progress (流水线编排)]
-    Level2 --> Level3[Level 3: Family State (微观状态)]
+    UserAPI[User Layer: Pipeline Builder] -->|Config & Compose| LogicLayer
+    LogicLayer[Logic Layer: Transforms] -->|Manipulate| DataLayer
+    DataLayer[Data Layer: TTG Nodes]
 
-    style Level1 fill:#e1f5fe,stroke:#01579b
-    style Level2 fill:#fff3e0,stroke:#ff6f00
-    style Level3 fill:#f3e5f5,stroke:#4a148c
+    style UserAPI fill:#e8f5e9,stroke:#2e7d32
+    style LogicLayer fill:#fff3e0,stroke:#ef6c00
+    style DataLayer fill:#e3f2fd,stroke:#1565c0
 ```
 
-1.  **Level 1: Phase (生命周期)**
-    *   控制 GATs (`ElemExt<F>`) 的具体类型。
-    *   阶段：`Raw` (纯数据) -> `Indexed` (有 ID) -> `Processed` (准备渲染) -> `Rendered` (HTML)。
-
-2.  **Level 2: Progress (流水线编排)**
-    *   控制 `Document<P>` 的外层包装，确保 Transform 顺序。
-    *   类型：`HeadProcessed<P>`, `LinksChecked<P>`, `SvgOptimized<P>`。
-
-3.  **Level 3: Family State (微观状态)**
-    *   `TagFamily` 内部的数据状态机。
-    *   例如 LinkFamily: `Initial` -> `Checked` -> `Resolved`。
+*   **Data Layer**: 纯数据结构，利用 GATs 极其紧凑地存储数据。
+*   **Logic Layer**: 独立的 `Transform` 单元，负责状态流转。
+*   **User Layer**: 傻瓜式 API，隐藏复杂的泛型参数。
 
 ---
 
-## 4. 关键设计决策
+## 2. 类型系统设计 (Correctness)
 
-### 决策 1: 三层状态模型
+为了保证**绝对正确性**（编译时拦截逻辑错误），我们采用 "三维状态定位"：
 
-这是本设计的核心。我们不应该用 Phase 去表达每一个微小的处理步骤（那会导致 Phase 爆炸）。也不应该完全依赖运行时状态（不安全）。
+1.  **Macro Phase (大阶段)**: `Raw` -> `Indexed` -> `Processed`
+    *   *作用*：决定内存布局（Struct 字段）。
+    *   *性能影响*：切换 Phase 需要 O(N) 的内存重排（Re-allocation）。
+2.  **Micro Progress (微进度)**: `LinksChecked` -> `LinksResolved`
+    *   *作用*：决定逻辑顺序。通过 Newtype Wrapper 实现。
+    *   *性能影响*：**零开销** (`#[repr(transparent)]`)。
+3.  **Family State (原子状态)**: `LinkState::Initial` -> `Checked`
+    *   *作用*：决定具体数据的有效性。
+    *   *性能影响*：Enum 判别开销（极小）。
 
-**方案**:
-*   `Phase` 依然只有 3-4 个大阶段。
-*   `Progress` (Newtype Wrapper) 用来在同一 Phase 内标记进度。
-*   `FamilyState` Enum 用来存储具体的数据演变。
+### 2.1 诊断优先 (Diagnostics First)
 
-### 决策 2: 诊断与错误累积
-
-SSG 构建不应因为发现一个死链就立即崩溃（Panic），而应该收集所有错误并在最后统一报告。
-
-**方案**:
-在 `Document` 结构体中内置诊断通道。
+为了保证鲁棒性，系统的 "血脉" 中必须流淌着诊断信息。
 
 ```rust
 pub struct Document<P: PhaseData> {
     pub root: Element<P>,
     pub ext: P::DocExt,
-    /// 累积的诊断信息（错误、警告、Lint 建议）
+    /// 任何步骤都不能丢弃已有的诊断信息
     pub diagnostics: Vec<Diagnostic>,
 }
-```
 
-任何 `Transform` 在处理过程中：
-1.  **必须** 接力传递现有的 `diagnostics`。
-2.  **可以** 向其中 push 新的 `Diagnostic`。
-3.  **不应** 随意清空它。
-
-### 决策 3: 基于 Capability 的扩展性
-
-为了让 crate 对外提供良好的扩展性，我们不能把 Progress Wrapper 写死。我们引入 "能力 (Capabilities)" 的概念。
-
-```rust
-// 标记 trait
-pub trait HeadProcessed: Capability {}
-pub trait LinksChecked: Capability {}
-
-// 携带能力的文档容器
-pub struct Doc<P: PhaseData, C: Capabilities> {
-    inner: Document<P>,
-    _cap: PhantomData<C>,
-}
-
-// Transform 声明：我需要 C1，我提供 C2
-impl<P, C> Transform<Doc<P, C>> for MyTransform
-where C: Has<OutputOf<MyTransform::Requires>>
-{ ... }
-```
-*(注：为了保持内部实现简单，初期可以使用具体的 Progress Newtype，但在对外 API 上可以预留 Adapter)*。
-
-**本次落地建议**: 优先使用 **Progress Newtype** 模式（方案 C），因为更直观且错误提示更友好。但在 `vdom` 库层面，可以通过 trait alias 暴露类似 Capability 的语义。
-
-### 决策 4: 同步核心与异步 IO 分离
-
-`LinkChecker` 检查外部链接通常也是异步的 (IO Bound)。如果强行塞入同步 Pipeline，会阻塞 CPU 密集型的转换。
-
-**方案**:
-*   **Core VDOM Pipeline**: 保持 **纯同步**。只做内存中的数据变换（URL 解析、SVG 优化、锚点生成）。
-*   **Linters / Side Effects**: 独立于 Pipeline 之外。
-    *   例如：`ExternalLinkChecker` 不修改 VDOM，只读取 links 并产生 `Diagnostics`。它应当是一个 `async` 任务，与 Pipeline 并行或在 Pipeline 之后运行。
-    *   对于必须在 Pipeline 中进行的 IO (如读取本地图片尺寸)，如果是本地 fs 操作，且有缓存，可以视为准同步操作接受；或者预先加载 AssetMetadata。
-
----
-
-## 5. 详细实现方案
-
-### 5.1 增强的 Document 定义
-
-```rust
-// src/vdom/node.rs
-
-#[derive(Debug, Clone)]
 pub struct Diagnostic {
-    pub level: DiagnosticLevel, // Error, Warning, Info
+    pub level: DiagnosticLevel,
     pub message: String,
-    pub span: Option<Span>,     // 关联源码位置
-    pub element_id: Option<StableId>, // 关联 DOM 节点
-}
-
-pub struct Document<P: PhaseData> {
-    pub root: Element<P>,
-    pub ext: P::DocExt,
-    pub diagnostics: Vec<Diagnostic>,
-}
-
-impl<P: PhaseData> Document<P> {
-    pub fn push_error(&mut self, msg: impl Into<String>) { ... }
-    pub fn push_warning(&mut self, msg: impl Into<String>) { ... }
-
-    // 转换 phase 时保留 diagnostics
-    pub fn map_phase<Q: PhaseData>(self, root: Element<Q>, ext: Q::DocExt) -> Document<Q> {
-        Document {
-            root,
-            ext,
-            diagnostics: self.diagnostics,
-        }
-    }
-}
-```
-
-### 5.2 改进的 Pipeline 与 Context
-
-Transform 不再是孤立的函数，它是 Configurable 的 Struct。
-
-```rust
-// src/vdom/transforms/mod.rs
-
-/// 链接解析器配置
-pub struct LinkResolverConfig {
-    pub base_url: String,
-    pub route_table: Arc<RouteTable>,
-}
-
-pub struct LinkResolver {
-    config: LinkResolverConfig,
-}
-
-impl LinkResolver {
-    pub fn new(config: LinkResolverConfig) -> Self { Self { config } }
-}
-
-impl Transform<LinksChecked<Indexed>> for LinkResolver {
-    type To = LinksResolved<Indexed>;
-
-    fn transform(self, mut doc: LinksChecked<Indexed>) -> Self::To {
-        let mut inner = doc.into_inner();
-
-        // 遍历并在原地修改 FamilyData
-        // 如果发现无法解析的链接，Push diagnostic，而不是 panic
-        self.resolve_recursive(&mut inner.root, &mut inner.diagnostics);
-
-        LinksResolved::new(inner)
-    }
-}
-```
-
-### 5.3 完整的 Progress Chain
-
-我们在 `src/vdom/pipeline.rs` (或 `progress.rs`) 中定义完整的流水线阶段。
-
-```rust
-define_progress!(RawDoc, "初始 Raw 状态");
-define_progress!(IndexedDoc, "已分配 StableID");
-define_progress!(HeadProcessed, "Head 元数据已处理");
-define_progress!(LinksChecked, "链接完整性已检查");
-define_progress!(LinksResolved, "路径已解析");
-define_progress!(MediaProcessed, "媒体资源已处理");
-define_progress!(ReadyToRender, "所有处理完成");
-```
-
-### 5.4 Family State Machine 示例
-
-```rust
-// src/vdom/family/link.rs
-
-#[derive(Debug, Clone)]
-pub enum LinkState {
-    Indexed(LinkRawData),
-    Checked(LinkCheckedData),
-    Resolved(LinkResolvedData),
-}
-
-// 辅助方法，用于在 transform 中安全地 switch state
-impl LinkIndexedData {
-    pub fn as_checked_mut(&mut self) -> Result<&mut LinkCheckedData, E> { ... }
+    pub source: Option<DiagnosticSource>, // 源码位置或 DOM ID
 }
 ```
 
 ---
 
-## 6. 迁移与落地路线图
+## 3. 开发者体验与 API (Ease of Use)
 
-### Phase 1: 基础设施 (Infrastructure)
-1.  **Diagnostic System**: 给 `Document` 加上 `diagnostics` 字段。
-    *   *影响*: 所有创建 `Document` 的地方都需要初始化这个字段 (很简单)。
-2.  **Progress Wrappers**: 创建 `src/vdom/progress.rs`，定义 Newtypes。
-    *   *影响*: 无，纯新增。
+类型系统很强大，但不能折磨用户。我们通过 **Prelude** 和 **Builder** 模式封装复杂性。
 
-### Phase 2: 拆解 Processor (Deconstruct)
-1.  **Extract Transforms**: 将 `Processor` 中的私有方法 (`process_links`, `process_svg` 等) 提取为独立的 Struct (`LinkProcessor`, `SvgOptimizer`)。
-2.  **Legacy Bridge**: `Processor` 暂时保留，但在内部调用这些新 Struct。
-    *   *此时尚不强制 Progress 类型检查，先保证逻辑拆分*。
+### 3.1 极简 API (End User)
 
-### Phase 3: 引入状态 (Stateify)
-1.  **Refactor FamilyData**: 将 `LinkIndexedData` 等结构体改为 Enum 状态机 (`LinkState`)。
-    *   *影响*: 这是一个**Breaking Change**。所有访问 `indexed.link_data` 的代码都需要修改为 pattern matching。这是最痛的一步，需要集中精力完成。
+```rust
+use vdom::prelude::*;
 
-### Phase 4: 强制流水线 (Enforce)
-1.  **Apply Progress Types**: 修改 Transform 的 `transform` 签名，使用 `HeadProcessed` 等 Wrapper 类型。
-2.  **Update Pipeline**: 在 `compile.rs` 中使用 `.pipe().pipe()` 链式调用构建正式流水线。
+let result = Pipeline::new()
+    .with_config(site_config)
+    .run(raw_doc)?; // 自动执行标准流程：Index -> Process -> Render
+
+// 获得结果
+println!("{}", result.html);
+// 查看问题
+for err in result.diagnostics {
+    eprintln!("{:?}", err);
+}
+```
+
+### 3.2 灵活配置 (Power User)
+
+```rust
+use vdom::prelude::*;
+use vdom::transforms::{LinkChecker, SvgOptimizer};
+
+let mut pipeline = Pipeline::builder();
+
+// 1. 配置标准步骤
+pipeline.configure::<LinkChecker>(|cfg| {
+    cfg.strict_mode = true;
+});
+
+// 2. 禁用不需要的步骤（灵活性）
+pipeline.disable::<SvgOptimizer>();
+
+// 3. 注入上下文（解决配置传递问题）
+pipeline.set_context(TransformContext {
+    base_url: "https://example.com".into(),
+    ..Default::default()
+});
+
+let output = pipeline.build().run(doc);
+```
+
+### 3.3 内部实现 (StandardPipeline)
+
+为了让类型错误可读，我们在内部定义标准别名：
+
+```rust
+// 避免让用户看到 Document<LinksChecked<Indexed>> 这种天书
+pub type IndexedDoc = Document<Indexed>;
+pub type CheckedDoc = LinksChecked<Indexed>;
+```
+
+---
+
+## 4. 扩展性设计 (Extensibility)
+
+如何让用户添加自定义逻辑（比如 "给所有 `<pre>` 标签添加 copy 按钮"）？
+
+### 4.1 插件接口 (The Plugin Trait)
+
+```rust
+/// 用户自定义转换器
+pub trait Plugin: Send + Sync {
+    fn name(&self) -> &str;
+    /// 在 Index 阶段之后、Process 阶段之前运行
+    fn run(&self, doc: &mut Document<Indexed>, ctx: &TransformContext);
+}
+
+// 示例：代码块高亮插件
+struct SyntaxHighlighter;
+impl Plugin for SyntaxHighlighter {
+    fn name(&self) -> &str { "SyntaxHighlighter" }
+    fn run(&self, doc: &mut Document<Indexed>, _ctx: &TransformContext) {
+        // 1. Visit 遍历所有 Node
+        // 2. 找到 Family = Other(CodeBlock) 的节点
+        // 3. 修改其内容
+    }
+}
+```
+
+### 4.2 注册插件
+
+```rust
+pipeline.add_plugin(SyntaxHighlighter::new());
+```
+
+*设计考量*：为什么 Plugin 只能在 `Indexed` 阶段操作？
+*   因为这是 DOM 结构最稳定、信息最全（有 StableId）、且未被破坏性优化（如 SVG 路径烘焙）的时刻。
+*   允许用户在任意 Phase 插入逻辑会导致 API 指数级复杂。约定优于配置。
+
+---
+
+## 5. 性能与内存布局 (Performance)
+
+性能是 Rust 的底色。本架构在以下方面做了极致优化：
+
+### 5.1 内存紧凑性 (Compact Layout)
+
+利用 GATs，我们确保每个阶段的 Node 只包含该阶段必要的数据。
+
+*   **Raw Phase**: `Link { href: String }` -> 只有字符串堆分配。
+*   **Processed Phase**: `Link { resolved: SmallString<32>, is_external: bool }` -> 甚至可能内联存储，无堆分配。
+
+**对比**: 传统 `Box<dyn Any>` 或 `HashMap` 扩展字段方案，每个节点都有巨大的指针开销和内存碎片。TTG 方案是**Flat Memory**。
+
+### 5.2 阶段转换极其昂贵？(The Phase Shift Cost)
+
+是的，`Raw` -> `Indexed` 需要重新分配整个树。
+
+*   **缓解策略**:
+    *   **Vector Arena**: 探索将所有 Node 存储在一个扁平的 `Vec<NodeData>` Arena 中，树结构仅存储 `u32` 索引。这样 Phase Shift 只是生成一个新的 Arena，具有极佳的缓存局部性 (Cache Locality)。
+    *   *(当前版本先保持 Box 树结构，Arena 可作为后续内部优化，不影响 API)*。
+
+### 5.3 并行化潜力 (Parallelism)
+
+Pipeline 本身是串行的（逻辑依赖），但**单个 Transform 内部**可以并行。
+
+```rust
+impl Transform<Indexed> for ImageOptimizer {
+    fn transform(self, mut doc: Document<Indexed>) -> Document<Indexed> {
+        // 使用 Rayon 并行遍历树
+        doc.root.par_visit_mut(|node| {
+            if let Node::Image(img) = node {
+                self.optimize(img);
+            }
+        });
+        doc
+    }
+}
+```
+
+由于 `Document` 拥有所有权，且 `Send`，这种并行化是 Rust 借用检查器天然支持的。
+
+---
+
+## 6. 迁移与落地
+
+为了平滑过渡，我们采取 "Legacy Wrapper" 策略。
+
+### Phase 0: The Facade (门面模式)
+不改变现有调用代码，只替换内部实现。
+
+```rust
+// 旧接口
+pub struct Processor;
+impl Transform for Processor {
+    fn transform(self, doc: Doc) -> Doc {
+        // 内部转发给新 Pipeline
+        Pipeline::input(doc).standard().run()
+    }
+}
+```
+
+### Phase 1: Core Types
+实现 GATs 和 Family State Enums。这是工作量最大的部分。
+
+### Phase 2: Pipeline Implementation
+实现 `vdom/pipeline.rs` 和 `vdom/progress.rs`。
+
+### Phase 3: Plugin System
+最后实现插件系统开放给用户。
+
+---
+
+## 总结
+
+v3.0 设计在保持类型安全（Correctness）的基础上，通过 **Pipeline Builder** 和 **Plugin System** 解决了易用性和扩展性问题。通过 **Diagnostic System** 提供了工业级的可观测性。这就完成了从 "学术性设计" 到 "工程化产品" 的跨越。
