@@ -22,7 +22,8 @@ pub struct CompileOutput {
     pub html: Vec<u8>,
     /// Indexed VDOM for diff comparison (only when driver.cache_vdom() is true)
     pub indexed: Option<Document<Indexed>>,
-    /// Processing statistics
+    /// Processing statistics (reserved for future use)
+    #[allow(dead_code)]
     pub stats: ProcessedDocExt,
     /// Extracted metadata (if any)
     pub metadata: Option<JsonValue>,

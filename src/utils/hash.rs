@@ -63,12 +63,14 @@ impl StableHasher {
 
     /// Update with a u64 value (little-endian)
     #[inline]
+    #[allow(dead_code)]
     pub fn update_u64(self, v: u64) -> Self {
         self.update(&v.to_le_bytes())
     }
 
     /// Update with a usize value (little-endian)
     #[inline]
+    #[allow(dead_code)]
     pub fn update_usize(self, v: usize) -> Self {
         self.update(&v.to_le_bytes())
     }

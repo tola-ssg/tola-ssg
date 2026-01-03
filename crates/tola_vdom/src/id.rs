@@ -274,47 +274,41 @@ impl Default for StableId {
 // rkyv serialization support
 // =============================================================================
 
+// rkyv 0.8 requires derive macros for proper trait implementation.
+// We use a simple newtype wrapper that derives all necessary traits.
 #[cfg(feature = "rkyv")]
 mod rkyv_impl {
     use super::StableId;
-    use rkyv::{Archive, Deserialize, Serialize};
 
-    impl Archive for StableId {
-        type Archived = ArchivedStableId;
-        type Resolver = ();
+    // Re-export for use in parent module
+    pub use rkyv::{Archive, Deserialize, Serialize};
 
-        unsafe fn resolve(&self, _pos: usize, _resolver: Self::Resolver, out: *mut Self::Archived) {
-            out.write(ArchivedStableId(self.0.to_le()));
+    /// Wrapper type for rkyv serialization
+    #[derive(Archive, Serialize, Deserialize)]
+    #[rkyv(compare(PartialEq))]
+    pub struct StableIdWrapper(pub u64);
+
+    impl From<StableId> for StableIdWrapper {
+        fn from(id: StableId) -> Self {
+            StableIdWrapper(id.0)
         }
     }
 
-    impl<S: rkyv::ser::Serializer + ?Sized> Serialize<S> for StableId {
-        fn serialize(&self, _serializer: &mut S) -> Result<Self::Resolver, S::Error> {
-            Ok(())
+    impl From<StableIdWrapper> for StableId {
+        fn from(wrapper: StableIdWrapper) -> Self {
+            StableId(wrapper.0)
         }
     }
 
-    impl<D: rkyv::Fallible + ?Sized> Deserialize<StableId, D> for ArchivedStableId {
-        fn deserialize(&self, _deserializer: &mut D) -> Result<StableId, D::Error> {
-            Ok(StableId(u64::from_le(self.0)))
-        }
-    }
-
-    /// Archived form of StableId (little-endian for cross-platform)
-    #[repr(transparent)]
-    pub struct ArchivedStableId(u64);
-
-    impl ArchivedStableId {
-        /// Get the raw value (in native endianness)
-        #[inline]
-        pub fn as_raw(&self) -> u64 {
-            u64::from_le(self.0)
+    impl From<&ArchivedStableIdWrapper> for StableId {
+        fn from(archived: &ArchivedStableIdWrapper) -> Self {
+            StableId(archived.0.into())
         }
     }
 }
 
 #[cfg(feature = "rkyv")]
-pub use rkyv_impl::ArchivedStableId;
+pub use rkyv_impl::{ArchivedStableIdWrapper, StableIdWrapper};
 
 // =============================================================================
 // Tests
