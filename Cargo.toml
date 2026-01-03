@@ -93,7 +93,6 @@ redb = { version = "2", optional = true }
 # Workspace crates
 tola_typst = { path = "crates/tola_typst" }
 tola_vdom = { path = "crates/tola_vdom" }
-tola_core = { path = "crates/tola_core" }
 
 [features]
 default = []

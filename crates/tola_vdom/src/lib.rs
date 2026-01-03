@@ -57,9 +57,6 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-// Re-export core traits
-pub use tola_core::{Cache, HashMapCache, StableHasher, Transform};
-
 // Core modules
 pub mod attr;
 pub mod cache;
@@ -93,5 +90,4 @@ pub mod prelude {
     pub use crate::node::{Document, Element, FamilyExt, HasFamilyData, Node, Text};
     pub use crate::phase::{Indexed, Phase, PhaseData, Processed, Raw, Rendered};
     pub use crate::transform::*;
-    pub use tola_core::Transform;
 }

@@ -12,12 +12,12 @@ repository = "https://github.com/aspect-rs/tola"
 [features]
 default = ["std"]
 std = []
-serde = ["dep:serde", "tola_core/serde"]
-parallel = ["dep:rayon", "tola_core/parallel"]
+serde = ["dep:serde"]
+parallel = ["dep:rayon"]
 hotreload = ["dep:tokio", "dep:tungstenite"]
 
 [dependencies]
-tola_core = { version = "0.1", path = "../tola_core" }
+blake3 = "1.8"
 smallvec = { version = "1.13", features = ["union", "const_generics"] }
 compact_str = "0.8"
 paste = "1.0"

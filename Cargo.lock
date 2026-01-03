@@ -5044,7 +5044,6 @@ dependencies = [
  "thiserror 2.0.17",
  "tiny_http",
  "tokio",
- "tola_core",
  "tola_typst",
  "tola_vdom",
  "toml",
@@ -5091,6 +5090,7 @@ dependencies = [
 name = "tola_vdom"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "compact_str",
  "paste",
  "rayon",
@@ -5098,7 +5098,6 @@ dependencies = [
  "serde",
  "smallvec",
  "tokio",
- "tola_core",
  "tungstenite",
 ]
 
