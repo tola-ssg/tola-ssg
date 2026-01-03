@@ -136,29 +136,29 @@ mod tests {
 
     #[test]
     fn test_output_format() {
-        let config = Box::leak(Box::new(SiteConfig::default()));
+        let config = SiteConfig::default();
         let inline_max = config.get_inline_max_size();
 
         // Small SVG -> Svg format
         let small = Svg::new(vec![0; inline_max - 1], (10.0, 10.0), 0);
-        assert_eq!(small.output_format(config), OutputFormat::Svg);
+        assert_eq!(small.output_format(&config), OutputFormat::Svg);
 
         // Large SVG -> Avif format (when not JustSvg mode)
         let large = Svg::new(vec![0; inline_max + 1], (100.0, 100.0), 1);
-        assert_eq!(large.output_format(config), OutputFormat::Avif);
+        assert_eq!(large.output_format(&config), OutputFormat::Avif);
     }
 
     #[test]
     fn test_svg_filename() {
-        let config = Box::leak(Box::new(SiteConfig::default()));
+        let config = SiteConfig::default();
 
         // Small SVG gets .svg extension
         let small = Svg::new(vec![0; 10], (10.0, 10.0), 5);
-        assert_eq!(small.filename(config), "svg-5.svg");
+        assert_eq!(small.filename(&config), "svg-5.svg");
 
         // Large SVG gets .avif extension
         let large = Svg::new(vec![0; 100_000], (100.0, 100.0), 3);
-        assert_eq!(large.filename(config), "svg-3.avif");
+        assert_eq!(large.filename(&config), "svg-3.avif");
     }
 
     #[test]
@@ -177,8 +177,7 @@ mod tests {
 
         // Embedded mode: don't extract
         config.build.typst.svg.extract_type = ExtractSvgType::Embedded;
-        let config = Box::leak(Box::new(config));
-        let ctx = HtmlContext::new(config, Path::new("/test.html"), true);
+        let ctx = HtmlContext::new(&config, Path::new("/test.html"), true);
         assert!(!ctx.extract_svg);
     }
 }

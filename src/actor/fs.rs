@@ -10,6 +10,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 
 use super::messages::CompilerMsg;
+use crate::utils::path::normalize_path;
 
 /// Debounce configuration
 const DEBOUNCE_MS: u64 = 300;
@@ -151,8 +152,12 @@ impl Debouncer {
                 continue;
             }
 
-            if !self.changed.contains(path) {
-                self.changed.push(path.clone());
+            // Normalize path to ensure consistent keys with VDOM cache
+            // Fixes macOS /var vs /private/var symlink issues
+            let path = normalize_path(path);
+
+            if !self.changed.contains(&path) {
+                self.changed.push(path);
             }
         }
     }
