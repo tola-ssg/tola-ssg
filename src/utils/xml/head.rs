@@ -1,5 +1,5 @@
 use crate::config::SiteConfig;
-use crate::utils::css;
+use crate::embed::ENHANCE_CSS;
 use anyhow::Result;
 use quick_xml::events::{BytesEnd, Event};
 use std::io::Write;
@@ -52,7 +52,7 @@ pub fn write_head_content(writer: &mut XmlWriter, config: &SiteConfig) -> Result
 
     // Auto-enhance CSS (SVG theme adaptation)
     if config.build.css.auto_enhance {
-        let filename = css::enhance_css_filename();
+        let filename = ENHANCE_CSS.filename();
         let href = config.paths().url_for_filename(&filename);
         write_empty_elem(writer, "link", &[("rel", "stylesheet"), ("href", &href)])?;
     }

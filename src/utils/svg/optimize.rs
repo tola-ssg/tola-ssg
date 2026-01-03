@@ -1,10 +1,9 @@
 use anyhow::{Context, Result};
-use crate::config::SiteConfig;
 
 /// Optimize SVG using usvg, returning optimized bytes and dimensions.
-pub fn optimize_svg(content: &[u8], config: &SiteConfig) -> Result<(Vec<u8>, (f32, f32))> {
+pub fn optimize_svg(content: &[u8], dpi: f32) -> Result<(Vec<u8>, (f32, f32))> {
     let options = usvg::Options {
-        dpi: config.build.typst.svg.dpi,
+        dpi,
         ..Default::default()
     };
 

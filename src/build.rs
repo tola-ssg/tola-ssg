@@ -34,10 +34,7 @@ use crate::{
     log,
     logger::ProgressBars,
     typst_lib,
-    utils::{
-        css,
-        git,
-    },
+    utils::git,
 };
 use anyhow::{Context, Result, anyhow};
 use gix::ThreadSafeRepository;
@@ -257,9 +254,10 @@ pub fn build_site<D: BuildDriver + Copy>(
 
     // Generate auto-enhance CSS if enabled
     if config.build.css.auto_enhance {
+        use crate::embed::ENHANCE_CSS;
         let enhance_output_dir = config.paths().output_dir();
-        css::cleanup_old_enhance_css(&enhance_output_dir)?;
-        css::generate_enhance_css(&enhance_output_dir)?;
+        ENHANCE_CSS.cleanup_old(&enhance_output_dir, &[])?;
+        ENHANCE_CSS.write_to(&enhance_output_dir)?;
     }
 
     // Print collected warnings after build completes

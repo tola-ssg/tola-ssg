@@ -42,7 +42,7 @@ fn process_svg_data(
     let raw_svg = capture_svg_content(reader, &attrs)?;
 
     // Optimize with usvg
-    optimize_svg(&raw_svg, config)
+    optimize_svg(&raw_svg, config.build.typst.svg.dpi)
 }
 
 /// Capture complete SVG element content from reader.
