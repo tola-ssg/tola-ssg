@@ -57,18 +57,3 @@ pub fn collect_all_files(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-
-
-/// Check if destination is up-to-date compared to source and dependencies.
-///
-/// Uses content-based hashing (blake3) instead of mtime for reliable detection
-/// with version control systems like jujutsu that may not update timestamps.
-///
-/// # Arguments
-///
-/// * `src` - Source file path
-/// * `dst` - Destination/output file path
-/// * `deps_hash` - Optional hash of dependencies (templates, config, etc.)
-pub fn is_up_to_date(src: &Path, dst: &Path, deps_hash: Option<ContentHash>) -> bool {
-    freshness::is_fresh(src, dst, deps_hash)
-}

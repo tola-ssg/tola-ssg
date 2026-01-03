@@ -1,6 +1,6 @@
 use crate::config::SiteConfig;
 use crate::compiler::meta::AssetMeta;
-use crate::compiler::is_up_to_date;
+use crate::freshness::is_fresh;
 use crate::utils::css;
 use crate::log;
 use anyhow::{Result, anyhow};
@@ -17,7 +17,7 @@ pub fn process_asset(
     let meta = AssetMeta::from_source(asset_path.to_path_buf(), config)?;
 
     // Skip if up-to-date (assets don't depend on templates)
-    if !clean && is_up_to_date(asset_path, &meta.paths.dest, None) {
+    if !clean && is_fresh(asset_path, &meta.paths.dest, None) {
         return Ok(());
     }
 
@@ -62,7 +62,7 @@ pub fn process_rel_asset(
     let output_path = output.join(rel_path);
 
     // Relative assets don't depend on templates/config, just check source vs dest
-    if !clean && is_up_to_date(path, &output_path, None) {
+    if !clean && is_fresh(path, &output_path, None) {
         return Ok(());
     }
 

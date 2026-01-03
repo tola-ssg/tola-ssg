@@ -39,11 +39,11 @@ pub mod defaults;
 mod deploy;
 mod error;
 pub mod handle;
-mod paths;
+mod path;
 mod serve;
 
 // Re-export PathResolver for external use
-pub use paths::PathResolver;
+pub use path::PathResolver;
 
 // Re-export public types used by other modules
 pub use build::{BuildConfig, ExtractSvgType, SlugCase, SlugMode, SlugSeparator};

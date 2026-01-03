@@ -1,5 +1,6 @@
 use crate::compiler::meta::{PageMeta, ContentMeta, Pages, TOLA_META_LABEL};
-use crate::compiler::{collect_all_files, is_up_to_date};
+use crate::compiler::collect_all_files;
+use crate::freshness::is_fresh;
 use crate::data::{PageData, GLOBAL_SITE_DATA};
 use crate::freshness::{self, ContentHash};
 use crate::utils::minify::{minify, MinifyType};
@@ -181,7 +182,7 @@ fn write_page(
     log_file: bool,
 ) -> Result<()> {
     // Check if up-to-date (only for batch mode, process_page already checked)
-    if !clean && is_up_to_date(&page.paths.source, &page.paths.html, deps_hash) {
+    if !clean && is_fresh(&page.paths.source, &page.paths.html, deps_hash) {
         return Ok(());
     }
 
