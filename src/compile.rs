@@ -30,12 +30,24 @@
 //!     println!("Title: {:?}", meta.get("title"));
 //! }
 //! ```
+//!
+//! # sys.inputs Support
+//!
+//! For documents that need `sys.inputs`, use [`compile_html_with_inputs`]:
+//!
+//! ```ignore
+//! let result = compile_html_with_inputs(
+//!     Path::new("doc.typ"),
+//!     Path::new("."),
+//!     [("title", "Hello"), ("author", "Alice")],
+//! )?;
+//! ```
 
 use std::path::{Path, PathBuf};
 
 use serde_json::Value as JsonValue;
 use typst::diag::SourceDiagnostic;
-use typst::foundations::{Label, Selector};
+use typst::foundations::{Dict, Label, Selector};
 use typst::introspection::MetadataElem;
 use typst::utils::PicoStr;
 use typst::Document;
@@ -293,6 +305,108 @@ pub fn query_metadata_map<'a>(
 }
 
 // =============================================================================
+// Compilation with sys.inputs
+// =============================================================================
+
+/// Compile a Typst file to HTML bytes with custom `sys.inputs`.
+///
+/// This allows passing document-specific data accessible via `sys.inputs`
+/// in the Typst document.
+///
+/// # Arguments
+///
+/// * `path` - Path to the .typ file to compile
+/// * `root` - Project root directory
+/// * `inputs` - Key-value pairs accessible as `sys.inputs`
+///
+/// # Example
+///
+/// ```ignore
+/// let result = compile_html_with_inputs(
+///     Path::new("doc.typ"),
+///     Path::new("."),
+///     [("title", "Hello"), ("author", "Alice")],
+/// )?;
+/// ```
+///
+/// In your Typst document:
+/// ```typst
+/// #let title = sys.inputs.at("title", default: "Untitled")
+/// = #title
+/// ```
+///
+/// # Performance Note
+///
+/// This creates a new library instance per compilation. For batch compilation
+/// without inputs, use [`compile_html`] which shares the global library.
+pub fn compile_html_with_inputs<I, K, V>(
+    path: &Path,
+    root: &Path,
+    inputs: I,
+) -> Result<HtmlResult, CompileError>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: Into<typst::foundations::Str>,
+    V: typst::foundations::IntoValue,
+{
+    let (document, accessed_files, diagnostics) =
+        compile_document_internal_with_inputs(path, root, inputs)?;
+
+    let html = typst_html::html(&document)
+        .map_err(|e| CompileError::html_export(format!("{e:?}")))?
+        .into_bytes();
+
+    Ok(HtmlResult {
+        html,
+        accessed_files,
+        diagnostics,
+    })
+}
+
+/// Compile a Typst file to HTML bytes with custom `sys.inputs` from a `Dict`.
+///
+/// This is useful when you already have a pre-built `Dict` of inputs.
+pub fn compile_html_with_inputs_dict(
+    path: &Path,
+    root: &Path,
+    inputs: Dict,
+) -> Result<HtmlResult, CompileError> {
+    let (document, accessed_files, diagnostics) =
+        compile_document_internal_with_inputs_dict(path, root, inputs)?;
+
+    let html = typst_html::html(&document)
+        .map_err(|e| CompileError::html_export(format!("{e:?}")))?
+        .into_bytes();
+
+    Ok(HtmlResult {
+        html,
+        accessed_files,
+        diagnostics,
+    })
+}
+
+/// Compile to HtmlDocument with custom `sys.inputs`.
+pub fn compile_document_with_inputs<I, K, V>(
+    path: &Path,
+    root: &Path,
+    inputs: I,
+) -> Result<DocumentResult, CompileError>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: Into<typst::foundations::Str>,
+    V: typst::foundations::IntoValue,
+{
+    let (document, accessed_files, diagnostics) =
+        compile_document_internal_with_inputs(path, root, inputs)?;
+
+    Ok(DocumentResult {
+        document,
+        accessed_files,
+        diagnostics,
+    })
+}
+
+// =============================================================================
 // Internal Helpers
 // =============================================================================
 
@@ -301,25 +415,57 @@ fn compile_document_internal(
     path: &Path,
     root: &Path,
 ) -> Result<(HtmlDocument, Vec<PathBuf>, Vec<SourceDiagnostic>), CompileError> {
+    let world = SystemWorld::new(path, root);
+    compile_with_world(&world)
+}
+
+/// Core compilation logic with custom inputs.
+fn compile_document_internal_with_inputs<I, K, V>(
+    path: &Path,
+    root: &Path,
+    inputs: I,
+) -> Result<(HtmlDocument, Vec<PathBuf>, Vec<SourceDiagnostic>), CompileError>
+where
+    I: IntoIterator<Item = (K, V)>,
+    K: Into<typst::foundations::Str>,
+    V: typst::foundations::IntoValue,
+{
+    let world = SystemWorld::new(path, root).with_inputs(inputs);
+    compile_with_world(&world)
+}
+
+/// Core compilation logic with Dict inputs.
+fn compile_document_internal_with_inputs_dict(
+    path: &Path,
+    root: &Path,
+    inputs: Dict,
+) -> Result<(HtmlDocument, Vec<PathBuf>, Vec<SourceDiagnostic>), CompileError> {
+    let world = SystemWorld::new(path, root).with_inputs_dict(inputs);
+    compile_with_world(&world)
+}
+
+/// Shared compilation logic.
+fn compile_with_world(
+    world: &SystemWorld,
+) -> Result<(HtmlDocument, Vec<PathBuf>, Vec<SourceDiagnostic>), CompileError> {
     reset_access_flags();
 
-    let world = SystemWorld::new(path, root);
-    let result = typst::compile(&world);
+    let result = typst::compile(world);
 
     // Check for errors in warnings (shouldn't happen, but handle it)
     if has_errors(&result.warnings) {
-        return Err(CompileError::compilation(&world, result.warnings.to_vec()));
+        return Err(CompileError::compilation(world, result.warnings.to_vec()));
     }
 
     // Extract document or return errors
     let document = result.output.map_err(|errors| {
         let all_diags: Vec<_> = errors.iter().chain(&result.warnings).cloned().collect();
         let filtered = filter_html_warnings(&all_diags);
-        CompileError::compilation(&world, filtered)
+        CompileError::compilation(world, filtered)
     })?;
 
     // Collect accessed files
-    let accessed_files = collect_accessed_files(root);
+    let accessed_files = collect_accessed_files(world.root());
 
     // Filter HTML development warnings
     let diagnostics = filter_html_warnings(&result.warnings);
@@ -338,8 +484,6 @@ fn collect_accessed_files(root: &Path) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_query_metadata_not_found() {
         // This would require a compiled document, skip for now

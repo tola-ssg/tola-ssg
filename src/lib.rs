@@ -88,11 +88,12 @@ pub mod world;
 /// - Diagnostics: `DiagnosticsExt`, `SourceDiagnostic`, `CompileError`
 /// - VFS: `VirtualFileSystem`, `MapVirtualFS`, `set_virtual_fs`
 /// - Fonts: `get_fonts`, `FontOptions`
-/// - Core types: `FileId`, `VirtualPath`, `SystemWorld`
+/// - Core types: `FileId`, `VirtualPath`, `SystemWorld`, `Dict`
 pub mod prelude {
     // Compilation
     pub use crate::compile::{
-        compile_document, compile_document_with_metadata, compile_html,
+        compile_document, compile_document_with_inputs, compile_document_with_metadata,
+        compile_html, compile_html_with_inputs, compile_html_with_inputs_dict,
         compile_html_with_metadata, query_metadata, query_metadata_map, DocumentResult,
         HtmlResult,
     };
@@ -112,12 +113,15 @@ pub mod prelude {
     // Fonts
     pub use crate::font::{get_fonts, init_fonts_with_options, FontOptions};
 
+    // Library
+    pub use crate::library::create_library_with_inputs;
+
     // World
     pub use crate::world::SystemWorld;
 
     // Core typst types
     pub use typst::diag::{FileError, FileResult};
-    pub use typst::foundations::Bytes;
+    pub use typst::foundations::{Bytes, Dict, IntoValue};
     pub use typst::syntax::{FileId, Source, VirtualPath};
     pub use typst::text::{Font, FontBook, FontInfo};
 }
@@ -127,9 +131,10 @@ pub mod prelude {
 // =============================================================================
 
 pub use compile::{
-    compile_document, compile_document_with_metadata, compile_html, compile_html_with_metadata,
-    query_metadata, query_metadata_map, DocumentResult, DocumentWithMetadataResult, HtmlResult,
-    HtmlWithMetadataResult,
+    compile_document, compile_document_with_inputs, compile_document_with_metadata,
+    compile_html, compile_html_with_inputs, compile_html_with_inputs_dict,
+    compile_html_with_metadata, query_metadata, query_metadata_map, DocumentResult,
+    DocumentWithMetadataResult, HtmlResult, HtmlWithMetadataResult,
 };
 
 // =============================================================================
@@ -166,7 +171,7 @@ pub use font::{
     font_count, font_family_count, fonts_initialized, get_fonts, init_fonts_with_options,
     FontOptions,
 };
-pub use library::GLOBAL_LIBRARY;
+pub use library::{create_library_with_inputs, GLOBAL_LIBRARY};
 pub use world::SystemWorld;
 
 // =============================================================================
@@ -239,6 +244,26 @@ pub use typst::syntax::package::PackageSpec;
 
 /// Raw bytes container used for binary files.
 pub use typst::foundations::Bytes;
+
+/// Dictionary type for `sys.inputs` and metadata.
+///
+/// Use this to build complex input dictionaries for [`compile_html_with_inputs_dict`].
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::{Dict, IntoValue};
+///
+/// let mut inputs = Dict::new();
+/// inputs.insert("title".into(), "Hello World".into_value());
+/// inputs.insert("count".into(), 42i64.into_value());
+/// ```
+pub use typst::foundations::Dict;
+
+/// Trait for converting values into Typst values.
+///
+/// Implemented for common Rust types like `&str`, `String`, `i64`, `f64`, `bool`.
+pub use typst::foundations::IntoValue;
 
 // =============================================================================
 // Font types

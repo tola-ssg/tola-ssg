@@ -8,6 +8,9 @@
 //! Creating the standard library is relatively cheap, but we still share it
 //! globally for consistency and to enable comemo caching (via `LazyHash`).
 //!
+//! For documents that need `sys.inputs`, use [`create_library_with_inputs`] to
+//! create a custom library instance with the specified inputs.
+//!
 //! # HTML Feature
 //!
 //! The library is initialized with the `Html` feature enabled, which adds
@@ -16,6 +19,7 @@
 
 use std::sync::LazyLock;
 
+use typst::foundations::Dict;
 use typst::utils::LazyHash;
 use typst::{Feature, Features, Library, LibraryExt};
 
@@ -35,6 +39,56 @@ pub static GLOBAL_LIBRARY: LazyLock<LazyHash<Library>> = LazyLock::new(|| {
     // Wrap in LazyHash for comemo caching
     LazyHash::new(library)
 });
+
+/// Create a library with custom `sys.inputs`.
+///
+/// This creates a new `Library` instance with the specified inputs accessible
+/// via `sys.inputs` in Typst documents. Use this when you need to pass
+/// document-specific data that can be accessed within the Typst document.
+///
+/// # When to Use
+///
+/// - **Single document compilation**: Pass document-specific metadata (title, date, etc.)
+/// - **Custom build variables**: Environment-specific settings
+///
+/// # Performance Note
+///
+/// Unlike [`GLOBAL_LIBRARY`], this creates a new library instance each time.
+/// For batch compilation where all documents share the same inputs (or no inputs),
+/// use the global library via standard [`compile_html`](crate::compile_html).
+///
+/// # Example
+///
+/// ```ignore
+/// use typst::foundations::{Dict, IntoValue};
+///
+/// // Create inputs dictionary
+/// let mut inputs = Dict::new();
+/// inputs.insert("title".into(), "My Document".into_value());
+/// inputs.insert("author".into(), "Alice".into_value());
+///
+/// // Create library with inputs
+/// let library = create_library_with_inputs(inputs);
+///
+/// // Use with SystemWorld::with_library()
+/// let world = SystemWorld::new(path, root).with_library(library);
+/// ```
+///
+/// In your Typst document:
+/// ```typst
+/// #let title = sys.inputs.at("title", default: "Untitled")
+/// #let author = sys.inputs.at("author", default: "Unknown")
+///
+/// = #title
+/// by #author
+/// ```
+pub fn create_library_with_inputs(inputs: Dict) -> LazyHash<Library> {
+    let library = Library::builder()
+        .with_inputs(inputs)
+        .with_features(Features::from_iter([Feature::Html]))
+        .build();
+    LazyHash::new(library)
+}
 
 #[cfg(test)]
 mod tests {

@@ -2,11 +2,9 @@
 
 A Typst → HTML batch compilation library with shared global resources.
 
-## ⚠️ Scope Note
-
 This library was extracted from [tola-ssg](https://github.com/tola-ssg/tola-ssg), a Typst-based static site generator. It is specifically designed for **Typst → HTML** workflows and may not be generic enough for all use cases — but feel free to give it a try!
 
-Of course, it also works well for **single document compilation** when you need features like virtual file injection or shared font caching.
+Of course, it also works well for **single document compilation** when you need features like virtual file injection or friendly helper functions.
 
 If you need:
 - **PDF output** → Use [typst](https://crates.io/crates/typst) directly
@@ -131,6 +129,71 @@ if let Some(config) = metadata_map.get("site-config") {
 }
 ```
 
+### Document Inputs (sys.inputs)
+
+Pass runtime data to Typst documents via `sys.inputs`:
+
+**In Rust:**
+```rust
+use typst_batch::compile_html_with_inputs;
+use std::path::Path;
+
+// Simple key-value pairs
+let result = compile_html_with_inputs(
+    Path::new("doc.typ"),
+    Path::new("."),
+    [("title", "Hello World"), ("author", "Alice")],
+)?;
+```
+
+**In your `.typ` file:**
+```typst
+#let title = sys.inputs.at("title", default: "Untitled")
+#let author = sys.inputs.at("author", default: "Unknown")
+
+= #title
+by _#author_
+```
+
+**With complex values using `Dict`:**
+```rust
+use typst_batch::{compile_html_with_inputs_dict, Dict, IntoValue};
+
+let mut inputs = Dict::new();
+inputs.insert("title".into(), "My Post".into_value());
+inputs.insert("page".into(), 42i64.into_value());
+inputs.insert("draft".into(), true.into_value());
+
+let result = compile_html_with_inputs_dict(path, root, inputs)?;
+```
+
+**Low-level API with `SystemWorld`:**
+```rust
+use typst_batch::{SystemWorld, create_library_with_inputs, Dict, IntoValue};
+use typst::World;
+
+// Method 1: Builder pattern
+let world = SystemWorld::new(path, root)
+    .with_inputs([("key", "value")]);
+
+// Method 2: Pre-built Dict
+let mut inputs = Dict::new();
+inputs.insert("key".into(), "value".into_value());
+let world = SystemWorld::new(path, root)
+    .with_inputs_dict(inputs);
+
+// Method 3: Custom library (for advanced use)
+let library = create_library_with_inputs(inputs);
+let world = SystemWorld::new(path, root)
+    .with_library(library);
+
+// Then compile with typst::compile(&world)
+```
+
+**Performance Note:** Using `sys.inputs` creates a new library instance per
+compilation, bypassing the shared global library. For batch compilation without
+inputs, use the standard `compile_html()` which shares resources.
+
 ### Virtual File System
 
 The VFS allows you to inject dynamic content that doesn't exist on disk, enabling
@@ -142,7 +205,7 @@ flexibility and extensibility that would be difficult to achieve in Typst alone.
 - Implement template inheritance patterns
 - Share data between documents without file I/O
 
-**⚠️ Compatibility Note:** VFS is a non-standard extension. Documents using virtual
+**Compatibility Note:** VFS is a non-standard extension. Documents using virtual
 files won't compile with standard `typst-cli`. Consider this trade-off for your use case.
 
 Virtual files are accessible in Typst via `#json()`, `#read()`, `#yaml()`, etc.
