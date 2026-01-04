@@ -103,7 +103,7 @@ pub enum DisplayStyle {
 #[derive(Debug, Clone)]
 pub struct DiagnosticOptions {
     /// Whether to use ANSI colors in output.
-    pub color: bool,
+    pub colored: bool,
     /// Display style (rich with snippets or short).
     pub style: DisplayStyle,
     /// Whether to include source code snippets.
@@ -119,7 +119,7 @@ pub struct DiagnosticOptions {
 impl Default for DiagnosticOptions {
     fn default() -> Self {
         Self {
-            color: true,
+            colored: true,
             style: DisplayStyle::Rich,
             snippets: true,
             hints: true,
@@ -143,7 +143,7 @@ impl DiagnosticOptions {
     /// Create options for plain text output (no ANSI colors).
     pub fn plain() -> Self {
         Self {
-            color: false,
+            colored: false,
             ..Self::default()
         }
     }
@@ -159,8 +159,8 @@ impl DiagnosticOptions {
     }
 
     /// Set whether to use colors.
-    pub fn with_color(mut self, color: bool) -> Self {
-        self.color = color;
+    pub fn with_colored(mut self, colored: bool) -> Self {
+        self.colored = colored;
         self
     }
 
@@ -794,7 +794,7 @@ pub fn format_diagnostics_with_options<W: World>(
     options: &DiagnosticOptions,
 ) -> String {
     // Set color override based on options
-    if !options.color {
+    if !options.colored {
         colored::control::set_override(false);
     }
 
@@ -815,7 +815,7 @@ pub fn format_diagnostics_with_options<W: World>(
     }
 
     // Reset color override
-    if !options.color {
+    if !options.colored {
         colored::control::unset_override();
     }
 

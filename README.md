@@ -6,9 +6,11 @@ A Typst → HTML batch compilation library with shared global resources.
 
 This library was extracted from [tola-ssg](https://github.com/tola-ssg/tola-ssg), a Typst-based static site generator. It is specifically designed for **Typst → HTML** workflows and may not be generic enough for all use cases — but feel free to give it a try!
 
+Of course, it also works well for **single document compilation** when you need features like virtual file injection or shared font caching.
+
 If you need:
 - **PDF output** → Use [typst](https://crates.io/crates/typst) directly
-- **Single file compilation** → The official `typst-cli` is simpler
+- **Single file compilation** → The official `typst-cli` is simpler (unless you need VFS features)
 
 ## Features
 
@@ -131,8 +133,19 @@ if let Some(config) = metadata_map.get("site-config") {
 
 ### Virtual File System
 
-Inject dynamic content that doesn't exist on disk. Virtual files are accessible
-in Typst via `#json()`, `#read()`, `#yaml()`, etc.
+The VFS allows you to inject dynamic content that doesn't exist on disk, enabling
+flexibility and extensibility that would be difficult to achieve in Typst alone.
+
+**Use cases:**
+- Inject computed data (post lists, site config, build timestamps)
+- Provide per-document context without modifying source files
+- Implement template inheritance patterns
+- Share data between documents without file I/O
+
+**⚠️ Compatibility Note:** VFS is a non-standard extension. Documents using virtual
+files won't compile with standard `typst-cli`. Consider this trade-off for your use case.
+
+Virtual files are accessible in Typst via `#json()`, `#read()`, `#yaml()`, etc.
 
 **Simple usage with `MapVirtualFS`:**
 ```rust
@@ -168,25 +181,67 @@ set_virtual_fs(vfs);
 use typst_batch::{VirtualFileSystem, set_virtual_fs};
 use std::path::Path;
 
-struct DynamicVFS {
+struct BuildInfoVFS {
     build_time: String,
+    version: String,
 }
 
-impl VirtualFileSystem for DynamicVFS {
+impl VirtualFileSystem for BuildInfoVFS {
     fn read(&self, path: &Path) -> Option<Vec<u8>> {
         match path.to_str()? {
-            "/_data/build.json" => {
-                let json = format!(r#"{{"time":"{}"}}"#, self.build_time);
-                Some(json.into_bytes())
+            "/_meta/build.json" => {
+                let json = serde_json::json!({
+                    "time": self.build_time,
+                    "version": self.version,
+                });
+                Some(json.to_string().into_bytes())
             }
             _ => None, // Fall back to real filesystem
         }
     }
 }
 
-set_virtual_fs(DynamicVFS {
-    build_time: chrono::Utc::now().to_rfc3339()
+set_virtual_fs(BuildInfoVFS {
+    build_time: chrono::Utc::now().to_rfc3339(),
+    version: env!("CARGO_PKG_VERSION").into(),
 });
+```
+
+**Chained VFS - combine multiple providers:**
+```rust
+use typst_batch::{VirtualFileSystem, set_virtual_fs};
+use std::path::Path;
+
+/// A VFS that chains multiple providers, trying each in order.
+struct ChainedVFS {
+    providers: Vec<Box<dyn VirtualFileSystem>>,
+}
+
+impl ChainedVFS {
+    fn new() -> Self {
+        Self { providers: Vec::new() }
+    }
+
+    fn add<V: VirtualFileSystem + 'static>(mut self, vfs: V) -> Self {
+        self.providers.push(Box::new(vfs));
+        self
+    }
+}
+
+impl VirtualFileSystem for ChainedVFS {
+    fn read(&self, path: &Path) -> Option<Vec<u8>> {
+        // Try each provider in order, return first match
+        self.providers.iter().find_map(|p| p.read(path))
+    }
+}
+
+// Usage: combine site config + per-document data
+let vfs = ChainedVFS::new()
+    .add(site_config_vfs)
+    .add(post_metadata_vfs)
+    .add(build_info_vfs);
+
+set_virtual_fs(vfs);
 ```
 
 ### Diagnostics
@@ -219,7 +274,7 @@ let (errors, warnings) = result.diagnostics.counts();
 
 // Format with options
 let options = DiagnosticOptions {
-    color: true,                    // ANSI colors
+    colored: true,                  // ANSI colors
     style: DisplayStyle::Rich,      // Full source snippets
     hints: true,                    // Include hints
     ..Default::default()
