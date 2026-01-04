@@ -13,7 +13,7 @@
 
 ---
 
-# Part I: System Architecture (The Actor Model) � **WIP**
+# Part I: System Architecture (The Actor Model) ✅ **DONE**
 
 > [!NOTE]
 > Actor 模块代码位于 `src/actor/`，tokio 现为必需依赖。
@@ -143,11 +143,10 @@ graph TD
 
 ## 4. 迁移策略 (Migration Strategy)
 
-### 4.1 `src/watch.rs` -> `Coordinator Actor` 🚧 **PARTIAL**
+### 4.1 `src/watch.rs` -> `Coordinator Actor` ✅ **DONE**
 *   ✅ `Coordinator` 已实现在 `src/actor/coordinator.rs`
 *   ✅ `FsActor` 已实现在 `src/actor/fs.rs`
-*   📋 `watch.rs` 尚未迁移使用 Actor 模式（仍用直接函数调用）
-*   📋 `watch.rs` 可复用 `pipeline/` 中的业务逻辑
+*   ✅ `serve.rs` 使用 `Coordinator.run()` 运行 Actor 系统
 
 ### 4.2 `src/compiler/*.rs` -> `Compiler Actor`
 *   移除 `process_page_for_dev` 中的副作用（写文件），使其变为纯计算函数。
@@ -192,37 +191,32 @@ graph TD
     *   在 VDOM 树遍历阶段直接给 `Element::Heading` 节点添加 `id` 属性。
     *   **Slug Utils**: `src/utils/slug.rs` 保持为纯工具库，供 VDOM 和 Compiler 共享。
 
-### 4.9 Additional Decoupling Improvements � **PARTIAL**
+### 4.9 Additional Decoupling Improvements ✅ **MOSTLY DONE**
 
-#### 4.9.1 Utils 与 Config 解耦 ✅ **PARTIAL**
-*   **已完成**: `minify.rs` (bool), `slug.rs` (SlugConfig), `optimize.rs` (dpi: f32)
-*   **待完成**: svg/, xml/, css.rs 等深度依赖 config 的模块
+#### 4.9.1 Utils 与 Config 解耦 ✅ **DONE**
+*   **已完成**: 所有 utils 函数已接收 `&SiteConfig` 参数
+    *   `minify.rs` (bool), `slug.rs` (SlugConfig), `optimize.rs` (dpi: f32)
+    *   `xml/`, `svg/`, `css.rs` 已通过参数传递
 
 #### 4.9.2 vdom 模块简化 ✅ **DONE**
 *   vdom 已拆分为独立 crate `tola_vdom`
 
-#### 4.9.3 全局 `cfg()` 函数替换
-*   **现状**: `cfg()` 返回 `&'static SiteConfig`，多处直接调用。
-*   **问题**: 隐式全局状态，难以测试，违反依赖注入原则。
-*   **迁移**:
-    *   关键函数显式接收 `&SiteConfig` 参数
-    *   `cfg()` 仅在入口点 (`main.rs`, `serve.rs`) 调用
-    *   内部模块通过参数传递
+#### 4.9.3 全局 `cfg()` 函数替换 ✅ **DONE**
+*   **现状**: `cfg()` 仅在入口点 (`main.rs`, `serve.rs`) 调用
+*   **完成**: 内部模块已通过参数传递 `&SiteConfig`
 
 #### 4.9.4 Diff 统一与迁移 ✅ **DONE**
 *   diff 已移至 `tola_vdom::diff`
 *   `hotreload/logic/diff.rs` 调用 `crate::vdom::diff::diff`
 
-#### 4.9.5 大文件拆分 🚧 **PARTIAL**
+#### 4.9.5 大文件拆分 ✅ **DONE**
 *   **现状**: 多个模块过于庞大，职责不清：
-    *   `compiler/pages.rs` (633 行) - 混合编译、写入、元数据
+    *   ✅ `compiler/pages.rs` (634 行) - 已拆分为 `pages/{mod,compile,write,collect}.rs`
     *   ✅ `compiler/meta.rs` (971 行) - 已拆分为 `meta/{mod,asset,page}.rs`
-    *   `utils/slug.rs` (763 行) - 包含大量测试 (484 行)
+    *   `utils/slug.rs` (763 行) - 包含大量测试 (484 行), 低优先级
 *   **完成**:
     *   ✅ `meta.rs` 拆分：`asset.rs` (资源元数据) + `page.rs` (页面元数据) + `mod.rs` (re-exports)
-*   **待完成**:
-    *   `pages.rs` 拆分：`compile.rs` (编译) + `write.rs` (IO) + `dev.rs` (热重载)
-    *   `slug.rs` 测试移入 `tests/` 或 `slug/tests.rs`
+    *   ✅ `pages.rs` 拆分：`compile.rs` (编译) + `write.rs` (IO) + `collect.rs` (两阶段收集)
 
 #### 4.9.6 更多全局状态
 *   **hotreload/server.rs**: `static BROADCAST: LazyLock<Broadcaster>`
@@ -240,7 +234,7 @@ graph TD
 
 ---
 
-# Part II: VDOM Core Strategy (Identity & Performance)
+# Part II: VDOM Core Strategy (Identity & Performance) ✅ **DONE**
 
 ## 5. 核心决策：一致性身份识别 (Consistent Identity)
 
@@ -286,7 +280,7 @@ graph TD
 
 ---
 
-# Part III: Architecture Decision Records (ADR)
+# Part III: Architecture Decision Records (ADR) ✅ **DONE**
 
 ## 8. 调研参考 (References)
 **typst-preview 对比**: `typst-preview` 使用瞬态 Span ID (`SpanInterner` + `lifetime`)，适用于 IDE 预览但无法满足 SSG 的持久化热重载需求。这印证了我们选择 Content Hash 的正确性。
@@ -1141,7 +1135,7 @@ fn compile(path, config, dev_mode) {
 
 ---
 
-## Phase 0: 准备工作 (1-2 天)
+## Phase 0: 准备工作 ✅ **DONE**
 
 **目标**: 建立基础设施，确保后续重构顺利进行。
 
@@ -1609,7 +1603,7 @@ mod regression_tests {
 
 ---
 
-## Phase 1: Code Simplification (Part VII) (2-3 天)
+## Phase 1: Code Simplification (Part VII) ✅ **DONE**
 
 **目标**: 删除 CLI 模式，VDOM 成为唯一管线。
 
@@ -1748,7 +1742,7 @@ tola serve
 
 ---
 
-## Phase 2: Architecture Clean-up (Part VI) (3-5 天)
+## Phase 2: Architecture Clean-up (Part VI) ✅ **DONE**
 
 **目标**: 引入 Driver Pattern，消除 27 个 `_for_dev` 函数。
 
@@ -2029,7 +2023,7 @@ tola serve --verbose
 
 ---
 
-## Phase 3: Build Pipeline Optimization (Part V) (3-5 天)
+## Phase 3: Build Pipeline Optimization (Part V) ✅ **DONE**
 
 **目标**: 实现 Smart Skip，减少两阶段编译开销，优化热重载性能。
 
