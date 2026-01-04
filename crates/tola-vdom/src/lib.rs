@@ -9,9 +9,10 @@
 //! - `attr`: Attribute system (Attrs type alias)
 //!
 //! ## Transformation System
-//! - `transform`: `Transform` trait + `Pipeline` (unified API)
+//! - `transform`: Unified transformation module
+//!   - `Transform` trait: The only public API for phase transitions
+//!   - `Pipeline`: Fluent chain builder
 //!   - `Processor`: Indexed → Processed transformation
-//! - `transforms/`: Concrete transform implementations
 //!   - `indexer`: Raw → Indexed (StableId generation, family identification)
 //!   - `render`: Processed → HTML (rendering)
 //!
@@ -29,7 +30,7 @@
 //!
 //! ```ignore
 //! use vdom::{Document, Raw, Indexed, Processed, Transform, Processor};
-//! use vdom::transforms::Indexer;
+//! use vdom::transform::Indexer;
 //!
 //! // Pipeline: Raw → Indexed → Processed → HTML
 //! let indexed = raw_doc.pipe(Indexer::new());
@@ -55,7 +56,6 @@ pub mod node;
 pub mod phase;
 pub mod span;
 pub mod transform;
-pub mod transforms;
 
 // =============================================================================
 // Re-exports for public API
@@ -74,9 +74,7 @@ pub use family::{
 
 // Transform system (unified API)
 #[allow(unused_imports)]
-pub use transform::{
-    process_family_ext, IdentityTransform, Pipeline, Processor, Transform,
-};
+pub use transform::{process_family_ext, IdentityTransform, Pipeline, Processor, Transform};
 
 // Node types
 #[allow(unused_imports)]
@@ -120,7 +118,7 @@ pub use hash::StableHasher;
 // =============================================================================
 
 #[cfg(feature = "typst")]
-use transforms::{HtmlRenderer, Indexer};
+use transform::{HtmlRenderer, Indexer};
 
 /// Result of VDOM compilation
 #[derive(Debug)]

@@ -8,8 +8,7 @@ use serde_json::Value as JsonValue;
 
 use crate::driver::BuildDriver;
 use tola_vdom::{
-    transform::Transform,
-    transforms::{render::HtmlRendererConfig, HtmlRenderer, Indexer},
+    transform::{render::HtmlRendererConfig, HtmlRenderer, Indexer, Transform},
     Document, Indexed, PageSeed, ProcessedDocExt, Processor,
 };
 

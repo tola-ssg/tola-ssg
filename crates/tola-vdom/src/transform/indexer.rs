@@ -24,7 +24,7 @@ use crate::family::{
 use crate::id::StableId;
 use crate::node::{Document, Element, FamilyExt, Node, Text};
 use crate::phase::{Indexed, IndexedDocExt, IndexedElemExt, Raw};
-use crate::transform::Transform;
+use super::Transform;
 
 // =============================================================================
 // Indexer Transform

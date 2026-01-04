@@ -23,11 +23,11 @@
 
 use smallvec::SmallVec;
 
-use super::family::{
+use crate::family::{
     HeadingFamily, LinkFamily, MediaFamily, OtherFamily, SvgFamily, TagFamily,
 };
-use super::node::{Document, Element, FamilyExt, Node, Text};
-use super::phase::{
+use crate::node::{Document, Element, FamilyExt, Node, Text};
+use crate::phase::{
     Indexed, IndexedElemExt, PhaseData, Processed, ProcessedDocExt, ProcessedElemExt,
 };
 
