@@ -1,0 +1,32 @@
+[package]
+name = "typst-batch"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Typst compilation library with shared global resources for batch processing"
+keywords = ["typst", "compiler", "batch", "world"]
+categories = ["compilers", "text-processing", "typst"]
+repository = "https://github.com/tola-ssg/tola-ssg"
+
+[dependencies]
+# Typst core
+typst = "0.14.1"
+typst-kit = { version = "0.14.1", features = ["fonts", "packages"] }
+typst-html = "0.14.1"
+typst-svg = "0.14.1"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Concurrency
+parking_lot = "0.12"
+arc-swap = "1.7"
+
+# Utilities
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+colored = "3.0"
+rustc-hash = "2.1"
+
+[dev-dependencies]
+tempfile = "3.10"
