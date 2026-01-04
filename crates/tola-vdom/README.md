@@ -1,13 +1,19 @@
 # tola-vdom
 
-Type-safe multi-phase HTML/XML DOM with TTG (Trees That Grow) pattern.
+**Type-safe · Multi-phase · Extensible**
 
-## Overview
+A virtual DOM library that leverages Rust's type system to guarantee correctness at compile time.  \
+(WIP)
 
-A virtual DOM library designed for **compile-time safety**. Uses GATs (Generic Associated Types) to ensure:
+> Extracted from [tola-ssg](https://github.com/tola-ssg/tola-ssg), a Typst-basedv static site generator written in Rust.
 
-1. **Phase Safety**: DOM nodes carry phase-appropriate data, preventing invalid state transitions
-2. **Capability Safety**: Transform dependencies are checked at compile time via the capability system
+## Why tola-vdom?
+
+| Feature | Description |
+|---------|-------------|
+| **Type-safe** | Phase transitions and transform dependencies are checked at compile time. Invalid pipeline order = compile error. |
+| **Multi-phase** | Documents progress through `Raw → Indexed → Processed → Rendered` with phase-specific data attached. |
+| **Extensible** | TTG (Trees That Grow) pattern allows custom phases, capabilities, and family data without forking. |
 
 ## Architecture
 
@@ -207,11 +213,6 @@ impl UserCapability for MyCustomCap {
 #[requires(C: MyCustomCap)]
 fn needs_custom<C>(doc: Doc<Indexed, C>) { ... }
 ```
-
-## Requirements
-
-- Rust 1.85+ (edition 2024)
-- Typst 0.14+ (for convert module, optional)
 
 ## License
 

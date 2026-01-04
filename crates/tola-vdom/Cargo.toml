@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-description = "Type-safe multi-phase HTML/XML DOM with TTG pattern"
-keywords = ["vdom", "html", "dom", "diff", "transform"]
+description = "Virtual DOM for HTML/XML: type-safe, multi-phase, extensible"
+keywords = ["vdom", "html", "type-safe", "extensible", "transform"]
 categories = ["parsing", "web-programming"]
 repository = "https://github.com/aspect-rs/tola-vdom"
 
