@@ -4,21 +4,20 @@ A Typst → HTML batch compilation library with shared global resources.
 
 ## ⚠️ Scope Note
 
-This library was created for [tola](https://github.com/tola-ssg/tola-ssg), a Typst-based static site generator. It is specifically designed for **Typst → HTML** workflows and may not suit all use cases.
+This library was extracted from [tola-ssg](https://github.com/tola-ssg/tola-ssg), a Typst-based static site generator. It is specifically designed for **Typst → HTML** workflows and may not be generic enough for all use cases — but feel free to give it a try!
 
 If you need:
-- **PDF output** → Use [typst](https://crates.io/crates/typst) directly or the official `typst-cli`
+- **PDF output** → Use [typst](https://crates.io/crates/typst) directly
 - **Single file compilation** → The official `typst-cli` is simpler
-- **Custom output formats** → Use the typst crate directly
 
-## Overview
+## Features
 
-`typst-batch` optimizes batch compilation by sharing expensive resources:
-
-- **Fonts**: Loaded once (~100ms saved per compilation)
-- **Packages**: Downloaded once from Typst registry and cached
-- **File cache**: Fingerprint-based invalidation for incremental builds
-- **Standard library**: Shared instance with HTML feature enabled
+- **Shared fonts**: Loaded once (~100ms saved per compilation)
+- **Cached packages**: Downloaded once from Typst registry
+- **Incremental builds**: Fingerprint-based file cache invalidation
+- **Structured diagnostics**: Rich error messages with source locations
+- **Virtual file system**: Inject dynamic content without physical files
+- **Metadata extraction**: Query labeled values from compiled documents
 
 ## Installation
 
@@ -36,123 +35,92 @@ use std::path::Path;
 // Initialize fonts once at startup
 get_fonts(&[]);
 
-// Compile a single file
+// Compile a Typst file to HTML
 let result = compile_html(Path::new("doc.typ"), Path::new("."))?;
 std::fs::write("output.html", &result.html)?;
+
+// Handle diagnostics
+for diag in &result.diagnostics {
+    eprintln!("{}: {}", diag.severity, diag.message);
+}
 ```
 
-## High-Level API
+## API Overview
 
-### Compile to HTML
+### Compilation
 
-```rust
-use typst_batch::compile_html;
+| Function | Description |
+|----------|-------------|
+| `compile_html` | Compile to HTML bytes |
+| `compile_html_with_metadata` | Compile with metadata extraction |
+| `compile_document` | Get `HtmlDocument` for further processing |
 
-let result = compile_html(Path::new("doc.typ"), Path::new("."))?;
-// result.html: Vec<u8>
-// result.accessed_files: Vec<PathBuf>
-// result.warnings: Option<String>
-```
+### Metadata Extraction
 
-### Compile with Metadata Extraction
-
-In your Typst file:
 ```typst
+// In your .typ file
 #metadata((title: "My Post", date: "2024-01-01")) <post-meta>
 ```
 
-Then extract it:
 ```rust
-use typst_batch::compile_html_with_metadata;
+let result = compile_html_with_metadata(path, root, "post-meta")?;
+println!("Title: {}", result.metadata.unwrap()["title"]);
 
-let result = compile_html_with_metadata(
-    Path::new("post.typ"),
-    Path::new("."),
-    "post-meta",  // label name (without angle brackets)
-)?;
-
-if let Some(meta) = &result.metadata {
-    println!("Title: {}", meta["title"]);
-}
+// Or query multiple labels at once
+let map = query_metadata_map(&document, &["meta", "config"]);
 ```
 
-### Get HtmlDocument for Further Processing
+### Virtual File System
+
+Inject dynamic content accessible via `#json()`, `#read()`, etc:
 
 ```rust
-use typst_batch::compile_document;
+use typst_batch::{MapVirtualFS, set_virtual_fs};
 
-let result = compile_document(Path::new("doc.typ"), Path::new("."))?;
-// result.document: typst_html::HtmlDocument
-// Process with tola-vdom or other libraries
+let mut vfs = MapVirtualFS::new();
+vfs.insert("/_data/site.json", r#"{"title":"My Blog"}"#);
+vfs.insert("/_data/posts.json", serde_json::to_string(&posts)?);
+set_virtual_fs(vfs);
 ```
 
-### Query Metadata from Existing Document
+### Diagnostics
 
 ```rust
-use typst_batch::query_metadata;
+use typst_batch::{DiagnosticOptions, DisplayStyle, format_diagnostics_with_options};
 
-let meta = query_metadata(&document, "post-meta");
+let options = DiagnosticOptions {
+    color: true,
+    style: DisplayStyle::Rich,  // or DisplayStyle::Short
+    ..Default::default()
+};
+
+let formatted = format_diagnostics_with_options(&world, &result.diagnostics, &options);
+eprintln!("{}", formatted);
 ```
 
-## Configuration (Optional)
+### Font Configuration
 
 ```rust
-use typst_batch::config::ConfigBuilder;
+use typst_batch::{FontOptions, init_fonts_with_options};
 
-// Custom User-Agent for package downloads (default: "typst-batch/{version}")
-ConfigBuilder::new()
-    .user_agent("my-app/1.0.0")
-    .init();
+let options = FontOptions::new()
+    .with_system_fonts(true)
+    .with_custom_paths(&[Path::new("assets/fonts")]);
+
+init_fonts_with_options(&options);
 ```
 
-## Virtual File System
+## Re-exported Types
 
-Inject dynamically generated files that don't exist on disk. This is the primary
-extension point for batch compilation scenarios like static site generators.
+For convenience, commonly used typst types are re-exported:
 
-```rust
-use typst_batch::{set_virtual_fs, VirtualFileSystem};
-use std::path::Path;
-
-struct SiteData {
-    config: String,
-    posts: Vec<Post>,
-}
-
-impl VirtualFileSystem for SiteData {
-    fn read(&self, path: &Path) -> Option<Vec<u8>> {
-        match path.to_str()? {
-            "/_data/site.json" => Some(self.config.as_bytes().to_vec()),
-            "/_data/posts.json" => Some(serde_json::to_vec(&self.posts).ok()?),
-            _ => None, // Fall back to real filesystem
-        }
-    }
-}
-
-// Register at startup
-set_virtual_fs(SiteData { config: "...", posts: vec![...] });
-```
-
-Use cases:
-- **Data injection**: Provide computed JSON data accessible via `#json("/_data/...")`
-- **Configuration**: Inject site-wide settings without physical files
-- **Asset manifests**: Generate file lists at compile time
-
-## Low-Level API
-
-For advanced use cases, access the underlying typst crates:
-
-```rust
-use typst_batch::{typst, typst_html, SystemWorld};
-
-let world = SystemWorld::new(path, root);
-let result = typst::compile(&world);
-let html_doc = typst_html::html(&result.output.unwrap())?;
-```
+- `FileId`, `VirtualPath`, `Source` — File identification
+- `SourceDiagnostic`, `DiagnosticSeverity` — Error handling
+- `FontBook`, `FontInfo`, `Font` — Font queries
+- `typst`, `typst_html`, `typst_kit` — Full crate access
 
 ## Requirements
 
-- Rust 1.85+ (edition 2024)
 - Typst 0.14.1
 
 ## License

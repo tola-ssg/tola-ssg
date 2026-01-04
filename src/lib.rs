@@ -111,7 +111,10 @@ pub use file::{
     virtual_file_id, MapVirtualFS, NoVirtualFS, VirtualFileSystem, EMPTY_ID, GLOBAL_FILE_CACHE,
     STDIN_ID,
 };
-pub use font::get_fonts;
+pub use font::{
+    font_count, font_family_count, fonts_initialized, get_fonts, init_fonts_with_options,
+    FontOptions,
+};
 pub use library::GLOBAL_LIBRARY;
 pub use world::SystemWorld;
 
@@ -185,6 +188,38 @@ pub use typst::syntax::package::PackageSpec;
 
 /// Raw bytes container used for binary files.
 pub use typst::foundations::Bytes;
+
+// =============================================================================
+// Font types
+// =============================================================================
+
+/// Font metadata and lookup index.
+///
+/// The `FontBook` indexes all available fonts and provides lookup by family
+/// name, variant, and other properties. Use this to query available fonts.
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::get_fonts;
+///
+/// let fonts = get_fonts(&[]);
+/// let book = &fonts.1;
+///
+/// // List all font families
+/// for family in book.families() {
+///     println!("Font family: {}", family);
+/// }
+/// ```
+pub use typst::text::FontBook;
+
+/// Information about a single font face.
+///
+/// Contains family name, variant (weight, style, stretch), and other metadata.
+pub use typst::text::FontInfo;
+
+/// Loaded font face ready for rendering.
+pub use typst::text::Font;
 
 // =============================================================================
 // Re-export typst crates for advanced use

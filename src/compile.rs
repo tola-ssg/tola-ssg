@@ -282,13 +282,13 @@ pub fn query_metadata_map<'a>(
     labels: impl IntoIterator<Item = &'a str>,
 ) -> serde_json::Map<String, JsonValue> {
     let mut result = serde_json::Map::new();
-    
+
     for label in labels {
         if let Some(value) = query_metadata(document, label) {
             result.insert(label.to_string(), value);
         }
     }
-    
+
     result
 }
 

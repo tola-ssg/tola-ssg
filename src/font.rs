@@ -35,6 +35,74 @@ use typst_kit::fonts::Fonts;
 /// subsequent compilations.
 static GLOBAL_FONTS: OnceLock<(Fonts, LazyHash<FontBook>)> = OnceLock::new();
 
+// =============================================================================
+// Font Configuration
+// =============================================================================
+
+/// Options for font initialization.
+///
+/// Use this to customize font loading behavior when calling [`init_fonts_with_options`].
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::{FontOptions, init_fonts_with_options};
+/// use std::path::Path;
+///
+/// let options = FontOptions::new()
+///     .with_system_fonts(true)
+///     .with_custom_paths(&[
+///         Path::new("assets/fonts"),
+///         Path::new("content/fonts"),
+///     ]);
+///
+/// init_fonts_with_options(&options);
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct FontOptions {
+    /// Whether to include system fonts.
+    pub include_system_fonts: bool,
+    /// Custom font directories to search.
+    pub custom_paths: Vec<PathBuf>,
+}
+
+impl FontOptions {
+    /// Create new font options with default settings.
+    ///
+    /// Default:
+    /// - System fonts: enabled
+    /// - Custom paths: empty
+    pub fn new() -> Self {
+        Self {
+            include_system_fonts: true,
+            custom_paths: Vec::new(),
+        }
+    }
+
+    /// Set whether to include system fonts.
+    ///
+    /// Disabling system fonts can speed up initialization in controlled
+    /// environments where only specific fonts are needed.
+    pub fn with_system_fonts(mut self, include: bool) -> Self {
+        self.include_system_fonts = include;
+        self
+    }
+
+    /// Set custom font paths to search.
+    ///
+    /// These directories are searched for `.ttf`, `.otf`, and other font files.
+    pub fn with_custom_paths(mut self, paths: &[&Path]) -> Self {
+        self.custom_paths = paths.iter().map(|p| p.to_path_buf()).collect();
+        self
+    }
+
+    /// Add a single custom font path.
+    pub fn add_path(mut self, path: impl AsRef<Path>) -> Self {
+        self.custom_paths.push(path.as_ref().to_path_buf());
+        self
+    }
+}
+
 /// Sorting key for deterministic font ordering.
 ///
 /// `fontdb` uses `std::fs::read_dir()` which does not guarantee order,
@@ -115,7 +183,7 @@ fn debug_dump_fonts(fonts: &Fonts) {
 // Font Initialization
 // =============================================================================
 
-/// Initialize fonts with custom font paths.
+/// Initialize fonts with custom font paths (legacy API).
 ///
 /// # Arguments
 ///
@@ -129,11 +197,26 @@ fn debug_dump_fonts(fonts: &Fonts) {
 /// - `Fonts`: The font collection with lazy-loaded font data
 /// - `LazyHash<FontBook>`: The font book index wrapped for comemo caching
 fn init_fonts(font_paths: &[&Path]) -> (Fonts, LazyHash<FontBook>) {
+    let options = FontOptions {
+        include_system_fonts: true,
+        custom_paths: font_paths.iter().map(|p| p.to_path_buf()).collect(),
+    };
+    init_fonts_impl(&options)
+}
+
+/// Initialize fonts with detailed options.
+///
+/// This is the implementation used by both [`init_fonts`] and [`init_fonts_with_options`].
+fn init_fonts_impl(options: &FontOptions) -> (Fonts, LazyHash<FontBook>) {
     let mut searcher = Fonts::searcher();
-    // Include system fonts (platform-specific locations)
-    searcher.include_system_fonts(true);
-    // Search custom paths and system fonts
-    let fonts = searcher.search_with(font_paths);
+    // Include system fonts if enabled
+    searcher.include_system_fonts(options.include_system_fonts);
+
+    // Convert PathBuf to &Path for the API
+    let paths: Vec<&Path> = options.custom_paths.iter().map(|p| p.as_path()).collect();
+
+    // Search custom paths and optionally system fonts
+    let fonts = searcher.search_with(&paths);
 
     // DEBUG: Uncomment to dump font list for debugging
     // debug_dump_fonts(&fonts);
@@ -145,6 +228,51 @@ fn init_fonts(font_paths: &[&Path]) -> (Fonts, LazyHash<FontBook>) {
     // Wrap font book in LazyHash for comemo caching
     let book = LazyHash::new(fonts.book.clone());
     (fonts, book)
+}
+
+/// Initialize fonts with detailed options.
+///
+/// Use this for more control over font loading. Unlike [`get_fonts`], this
+/// allows you to:
+/// - Disable system font loading
+/// - Specify exact font paths
+///
+/// # Arguments
+///
+/// * `options` - Font initialization options
+///
+/// # Returns
+///
+/// A static reference to the shared font collection and book.
+///
+/// # Note
+///
+/// Like [`get_fonts`], this function only initializes fonts once. Subsequent
+/// calls return the already-initialized fonts, ignoring the options parameter.
+pub fn init_fonts_with_options(options: &FontOptions) -> &'static (Fonts, LazyHash<FontBook>) {
+    GLOBAL_FONTS.get_or_init(|| init_fonts_impl(options))
+}
+
+/// Check if fonts have been initialized.
+///
+/// Returns `true` if fonts have already been loaded via [`get_fonts`] or
+/// [`init_fonts_with_options`].
+pub fn fonts_initialized() -> bool {
+    GLOBAL_FONTS.get().is_some()
+}
+
+/// Get the number of loaded fonts.
+///
+/// Returns `None` if fonts have not been initialized yet.
+pub fn font_count() -> Option<usize> {
+    GLOBAL_FONTS.get().map(|(fonts, _)| fonts.fonts.len())
+}
+
+/// Get the number of font families.
+///
+/// Returns `None` if fonts have not been initialized yet.
+pub fn font_family_count() -> Option<usize> {
+    GLOBAL_FONTS.get().map(|(_, book)| book.families().count())
 }
 
 // =============================================================================
