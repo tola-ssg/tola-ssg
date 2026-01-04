@@ -1,7 +1,7 @@
 //! Configuration for typst-batch.
 //!
-//! This module provides runtime configuration for package downloads and
-//! project defaults. Call [`init`] at application startup to configure.
+//! This module provides runtime configuration for package downloads.
+//! Call [`init`] at application startup to configure the User-Agent string.
 
 use std::sync::OnceLock;
 
@@ -14,25 +14,15 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 /// Runtime configuration for typst-batch.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// User-Agent string for package downloads.
+    /// User-Agent string for package downloads from the Typst registry.
     /// Example: "my-app/1.0.0"
     pub user_agent: String,
-
-    /// Default project name for generated typst.toml files.
-    /// Example: "my-project"
-    pub default_project_name: String,
-
-    /// Default entrypoint path for generated typst.toml files.
-    /// Example: "main.typ" or "content/index.typ"
-    pub default_entrypoint: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             user_agent: concat!("typst-batch/", env!("CARGO_PKG_VERSION")).to_string(),
-            default_project_name: "typst-project".to_string(),
-            default_entrypoint: "main.typ".to_string(),
         }
     }
 }
@@ -41,8 +31,6 @@ impl Default for Config {
 #[derive(Debug, Clone, Default)]
 pub struct ConfigBuilder {
     user_agent: Option<String>,
-    default_project_name: Option<String>,
-    default_entrypoint: Option<String>,
 }
 
 impl ConfigBuilder {
@@ -52,6 +40,8 @@ impl ConfigBuilder {
     }
 
     /// Set the User-Agent string for package downloads.
+    ///
+    /// Default: "typst-batch/{version}"
     ///
     /// # Example
     ///
@@ -67,18 +57,6 @@ impl ConfigBuilder {
         self
     }
 
-    /// Set the default project name for generated typst.toml.
-    pub fn default_project_name(mut self, name: impl Into<String>) -> Self {
-        self.default_project_name = Some(name.into());
-        self
-    }
-
-    /// Set the default entrypoint for generated typst.toml.
-    pub fn default_entrypoint(mut self, path: impl Into<String>) -> Self {
-        self.default_entrypoint = Some(path.into());
-        self
-    }
-
     /// Build and initialize the global configuration.
     ///
     /// This can only be called once. Subsequent calls are ignored.
@@ -88,12 +66,6 @@ impl ConfigBuilder {
             user_agent: self
                 .user_agent
                 .unwrap_or_else(|| Config::default().user_agent),
-            default_project_name: self
-                .default_project_name
-                .unwrap_or_else(|| Config::default().default_project_name),
-            default_entrypoint: self
-                .default_entrypoint
-                .unwrap_or_else(|| Config::default().default_entrypoint),
         };
         CONFIG.set(config).is_ok()
     }
@@ -128,16 +100,6 @@ pub fn package_storage() -> &'static PackageStorage {
     })
 }
 
-/// Generate default typst.toml content based on configuration.
-pub fn default_typst_toml() -> Vec<u8> {
-    let config = get();
-    format!(
-        "[package]\nname = \"{}\"\nversion = \"0.0.0\"\nentrypoint = \"{}\"",
-        config.default_project_name, config.default_entrypoint
-    )
-    .into_bytes()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,19 +108,11 @@ mod tests {
     fn test_default_config() {
         let config = Config::default();
         assert!(config.user_agent.starts_with("typst-batch/"));
-        assert_eq!(config.default_project_name, "typst-project");
-        assert_eq!(config.default_entrypoint, "main.typ");
     }
 
     #[test]
     fn test_builder() {
-        let builder = ConfigBuilder::new()
-            .user_agent("test/1.0")
-            .default_project_name("test-project")
-            .default_entrypoint("src/main.typ");
-
+        let builder = ConfigBuilder::new().user_agent("test/1.0");
         assert_eq!(builder.user_agent, Some("test/1.0".to_string()));
-        assert_eq!(builder.default_project_name, Some("test-project".to_string()));
-        assert_eq!(builder.default_entrypoint, Some("src/main.typ".to_string()));
     }
 }

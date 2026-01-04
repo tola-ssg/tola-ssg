@@ -13,14 +13,8 @@
 //! ## Quick Start
 //!
 //! ```ignore
-//! use typst_batch::{config::ConfigBuilder, SystemWorld, get_fonts};
+//! use typst_batch::{SystemWorld, get_fonts};
 //! use std::path::Path;
-//!
-//! // Configure at application startup (optional)
-//! ConfigBuilder::new()
-//!     .user_agent("my-app/1.0.0")
-//!     .default_project_name("my-project")
-//!     .init();
 //!
 //! // Initialize fonts (once at startup)
 //! let fonts = get_fonts(&[Path::new("assets/fonts")]);
@@ -37,7 +31,7 @@
 //!
 //! ## Modules
 //!
-//! - [`config`]: Runtime configuration (User-Agent, project defaults)
+//! - [`config`]: Runtime configuration (User-Agent for package downloads)
 //! - [`world`]: Typst World implementation
 //! - [`font`]: Font discovery and loading
 //! - [`package`]: Package resolution

@@ -39,7 +39,7 @@ use typst::foundations::Bytes;
 use typst::syntax::{FileId, Source, VirtualPath};
 use typst_kit::download::{DownloadState, Progress};
 
-use crate::config::{default_typst_toml, package_storage};
+use crate::config::package_storage;
 
 // =============================================================================
 // Constants
@@ -256,7 +256,6 @@ impl<T: Clone> SlotCell<T> {
 /// - `EMPTY_ID`: Returns empty bytes
 /// - `STDIN_ID`: Reads from stdin
 /// - Package files: Downloads package if needed
-/// - Missing `typst.toml`: Generates default
 pub fn read(id: FileId, project_root: &Path) -> FileResult<Vec<u8>> {
     read_with_virtual(id, project_root, &NoVirtualData)
 }
@@ -281,19 +280,8 @@ pub fn read_with_global_virtual(id: FileId, project_root: &Path) -> FileResult<V
         return read_virtual(vpath).ok_or_else(|| FileError::NotFound(vpath.to_path_buf()));
     }
 
-    // Resolve path with typst.toml fallback
-    let path = resolve_path(project_root, id).or_else(|e| {
-        id.vpath()
-            .resolve(project_root)
-            .filter(|p| p.ends_with("typst.toml") && !p.exists())
-            .ok_or(e)
-    })?;
-
-    // Generate default typst.toml if missing
-    if path.ends_with("typst.toml") && !path.exists() {
-        return Ok(default_typst_toml());
-    }
-
+    // Resolve path and read from disk
+    let path = resolve_path(project_root, id)?;
     read_disk(&path)
 }
 
@@ -322,19 +310,8 @@ pub fn read_with_virtual<V: VirtualDataProvider>(
             .ok_or_else(|| FileError::NotFound(vpath.to_path_buf()));
     }
 
-    // Resolve path with typst.toml fallback
-    let path = resolve_path(project_root, id).or_else(|e| {
-        id.vpath()
-            .resolve(project_root)
-            .filter(|p| p.ends_with("typst.toml") && !p.exists())
-            .ok_or(e)
-    })?;
-
-    // Generate default typst.toml if missing
-    if path.ends_with("typst.toml") && !path.exists() {
-        return Ok(default_typst_toml());
-    }
-
+    // Resolve path and read from disk
+    let path = resolve_path(project_root, id)?;
     read_disk(&path)
 }
 
