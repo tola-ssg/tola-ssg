@@ -7,7 +7,7 @@
 //! # Architecture
 //!
 //! ```text
-//! typst_lib::compile_base  →  typst_html::HtmlDocument
+//! compiler::typst::compile_base  →  typst_html::HtmlDocument
 //!                                      │
 //!                                      ▼
 //! bridge::compile_vdom    →  vdom::compile → VdomResult
@@ -104,7 +104,7 @@ pub fn compile_vdom<D: BuildDriver>(
     url_path: Option<&str>,
 ) -> anyhow::Result<VdomResult> {
     // Use typst_lib for raw compilation
-    let (document, accessed_files, warnings) = crate::typst_lib::compile_html(path, root)?;
+    let (document, accessed_files, warnings) = super::typst::compile_html(path, root)?;
 
     // Use VDOM pipeline for processing
     let output = crate::vdom_compile::compile(&document, label_name, driver, url_path);

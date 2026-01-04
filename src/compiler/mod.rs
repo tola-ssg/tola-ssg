@@ -22,6 +22,7 @@ pub mod bridge;
 pub mod deps;
 pub mod meta;
 pub mod pages;
+pub mod typst;
 
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
