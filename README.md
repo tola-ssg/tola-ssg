@@ -39,19 +39,23 @@ let world = SystemWorld::new(
 let result = typst::compile(&world);
 ```
 
-### Configuration
+### Configuration (Optional)
 
-Configure the library at application startup:
+Configuration is optional. Without any configuration, the library uses sensible defaults:
 
 ```rust
+// Option 1: Use defaults (recommended for most cases)
+// No configuration needed - just start using the library
+
+// Option 2: Custom User-Agent for package downloads
 use typst_batch::config::ConfigBuilder;
 
 ConfigBuilder::new()
-    .user_agent("my-app/1.0.0")           // User-Agent for package downloads
-    .default_project_name("my-project")   // Default typst.toml project name
-    .default_entrypoint("src/main.typ")   // Default typst.toml entrypoint
+    .user_agent("my-app/1.0.0")
     .init();
 ```
+
+The only configurable option is `user_agent`, which is used for HTTP requests when downloading packages from the Typst registry. Default: `"typst-batch/{version}"`.
 
 ### Virtual Files
 
