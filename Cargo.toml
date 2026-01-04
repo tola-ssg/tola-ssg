@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/*", "typst-batch"]
+members = ["crates/*", "crates/tola-vdom/macros", "typst-batch"]
 
 [package]
 name = "tola"

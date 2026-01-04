@@ -5062,8 +5062,18 @@ dependencies = [
  "serde",
  "smallvec",
  "tokio",
+ "tola-vdom-macros",
  "tungstenite",
  "typst-batch",
+]
+
+[[package]]
+name = "tola-vdom-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.113",
 ]
 
 [[package]]

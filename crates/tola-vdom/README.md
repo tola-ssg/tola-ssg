@@ -4,19 +4,31 @@ Type-safe multi-phase HTML/XML DOM with TTG (Trees That Grow) pattern.
 
 ## Overview
 
-A virtual DOM library designed for compile-time phase safety. Uses GATs (Generic Associated Types) to ensure DOM nodes carry phase-appropriate data, preventing invalid state transitions at compile time.
+A virtual DOM library designed for **compile-time safety**. Uses GATs (Generic Associated Types) to ensure:
+
+1. **Phase Safety**: DOM nodes carry phase-appropriate data, preventing invalid state transitions
+2. **Capability Safety**: Transform dependencies are checked at compile time via the capability system
 
 ## Architecture
+
+### Three-tier State Model
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Level 1: Phase (Memory Layout)                                 │
+│  Raw → Indexed → Processed → Rendered                           │
+├─────────────────────────────────────────────────────────────────┤
+│  Level 2: Capability (Processing Progress - Zero Overhead)      │
+│  LinksChecked, SvgOptimized, HeadingsProcessed, ...             │
+├─────────────────────────────────────────────────────────────────┤
+│  Level 3: Family State (Element-level Enum)                     │
+│  Link::Pending → Link::Resolved, Svg::Raw → Svg::Optimized      │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ### Phase System
 
 Documents progress through well-defined phases:
-
-```
-Raw -> Indexed -> Processed -> Rendered
-```
-
-Each phase adds computed metadata:
 
 | Phase | Description |
 |-------|-------------|
@@ -24,6 +36,50 @@ Each phase adds computed metadata:
 | `Indexed` | StableIds assigned, tag families identified |
 | `Processed` | Transforms applied, ready for rendering |
 | `Rendered` | Final output produced |
+
+### Capability System
+
+**Zero-cost compile-time dependency checking.** Wrong pipeline order = compile error.
+
+```rust
+use tola_vdom::capability::*;
+
+// Built-in capability markers (zero-sized types, no runtime cost)
+// LinksCheckedCap, LinksResolvedCap, SvgOptimizedCap,
+// HeadingsProcessedCap, MediaProcessedCap, MetadataExtractedCap
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #[requires] macro: declare what capabilities a function needs
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[requires(C: LinksCheckedCap)]              // "I need links to be checked first"
+fn resolve_links<C>(doc: Doc<Indexed, C>) {
+    // Compiler guarantees LinksCheckedCap is present - safe to resolve!
+}
+
+#[requires(C: LinksCheckedCap, SvgOptimizedCap)]   // Multiple requirements
+fn final_render<C>(doc: Doc<Indexed, C>) {
+    // Both capabilities guaranteed present
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline: capabilities accumulate as transforms run
+// ─────────────────────────────────────────────────────────────────────────────
+
+let doc = Doc::new(indexed_doc);             // EmptyCap
+let doc = check_links(doc);                  // caps![LinksCheckedCap]
+let doc = optimize_svg(doc);                 // caps![SvgOptimizedCap, LinksCheckedCap]
+let doc = resolve_links(doc);                // ✓ OK: LinksCheckedCap present
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wrong order? Compile error!
+// ─────────────────────────────────────────────────────────────────────────────
+
+let doc = Doc::new(indexed_doc);             // EmptyCap
+let doc = resolve_links(doc);                // ✗ ERROR!
+//        ^^^^^^^^^^^^^ capability `LinksCheckedCap` is required but not available
+//        note: try adding the appropriate Transform earlier in the pipeline
+```
 
 ### Tag Families
 
@@ -37,20 +93,9 @@ Elements are classified into families for specialized processing:
 | `Media` | `img`, `video`, `audio` | Asset processing |
 | `Other` | Everything else | Pass-through |
 
-### Transform Pipeline
-
-```rust
-use tola_vdom::{Document, Raw, Transform, Processor};
-use tola_vdom::transforms::Indexer;
-
-let raw: Document<Raw> = parse_html(source);
-let indexed = Indexer::new().transform(raw);
-let processed = Processor::new().transform(indexed);
-```
-
 ## Features
 
-- `std` (default): Standard library support
+- `typst` (default): Typst HTML document conversion
 - `serde`: Serialization support
 - `parallel`: Parallel processing with rayon
 - `hotreload`: WebSocket-based hot reload support
@@ -63,11 +108,13 @@ let processed = Processor::new().transform(indexed);
 | `phase` | Phase trait and type definitions |
 | `node` | Document, Element, Text, Node types |
 | `family` | TagFamily trait and implementations |
+| `capability` | Compile-time capability system |
 | `attr` | Attribute storage |
 | `transform` | Transform trait and Pipeline |
-| `transforms` | Indexer, Processor, HtmlRenderer |
 | `diff` | VDOM diff algorithm |
+| `lcs` | Longest Common Subsequence algorithm |
 | `id` | Content-hash based StableId |
+| `cache` | VDOM caching utilities |
 | `convert` | Typst HTML to Raw VDOM conversion |
 
 ## Usage
@@ -75,27 +122,57 @@ let processed = Processor::new().transform(indexed);
 ### Basic Pipeline
 
 ```rust
-use tola_vdom::{compile_to_html, from_typst_html};
+use tola_vdom::{Document, Raw, Transform, Processor};
+use tola_vdom::transform::Indexer;
 
-// From typst-html document
-let result = compile_to_html(&typst_document);
-std::fs::write("output.html", &result.html)?;
+let raw: Document<Raw> = parse_html(source);
+let indexed = Indexer::new().transform(raw);
+let processed = Processor::new().transform(indexed);
 ```
 
-### Custom Transforms
+### With Capabilities
 
 ```rust
-use tola_vdom::{Transform, Document, Indexed, Processed};
+use tola_vdom::capability::*;
+use tola_vdom::phase::Indexed;
 
-struct MyTransform;
+// Define a transform that provides a capability
+struct LinkChecker;
 
-impl Transform<Document<Indexed>> for MyTransform {
-    type Output = Document<Processed>;
+impl<C: Capabilities> CapTransform<Indexed, C> for LinkChecker {
+    type Provides = LinksCheckedCap;
+    type Output = <C as AddCapability<LinksCheckedCap>>::Output;
 
-    fn transform(&self, doc: Document<Indexed>) -> Self::Output {
-        // Custom transformation logic
+    fn cap_transform(self, doc: Doc<Indexed, C>) -> Doc<Indexed, Self::Output> {
+        // Check all links...
+        doc.add_capability::<LinksCheckedCap>()
     }
 }
+
+// Define a transform that requires a capability
+struct LinkResolver;
+
+impl<C, I> CapTransform<Indexed, C> for LinkResolver
+where
+    C: HasCapability<LinksCheckedCap, I>,  // Requires links to be checked first
+{
+    type Provides = LinksResolvedCap;
+    type Output = <C as AddCapability<LinksResolvedCap>>::Output;
+
+    fn cap_transform(self, doc: Doc<Indexed, C>) -> Doc<Indexed, Self::Output> {
+        // Resolve links (safe because they're already checked)
+        doc.add_capability::<LinksResolvedCap>()
+    }
+}
+
+// Usage: Pipeline with compile-time dependency checking
+let doc: Doc<Indexed, ()> = Doc::new(indexed_doc);
+let doc = LinkChecker.cap_transform(doc);     // Now has LinksCheckedCap
+let doc = LinkResolver.cap_transform(doc);    // OK: LinksCheckedCap is present
+
+// This would NOT compile:
+// let doc: Doc<Indexed, ()> = Doc::new(indexed_doc);
+// let doc = LinkResolver.cap_transform(doc);  // ERROR: missing LinksCheckedCap
 ```
 
 ### Diffing
@@ -114,10 +191,27 @@ for patch in patches {
 }
 ```
 
+### User-defined Capabilities
+
+```rust
+use tola_vdom::capability::UserCapability;
+
+// Define your own capability
+struct MyCustomCap;
+
+impl UserCapability for MyCustomCap {
+    const NAME: &'static str = "MyCustom";
+}
+
+// Now usable in capability bounds
+#[requires(C: MyCustomCap)]
+fn needs_custom<C>(doc: Doc<Indexed, C>) { ... }
+```
+
 ## Requirements
 
 - Rust 1.85+ (edition 2024)
-- Typst 0.14.1 (for convert module)
+- Typst 0.14+ (for convert module, optional)
 
 ## License
 

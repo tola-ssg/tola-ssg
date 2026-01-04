@@ -42,8 +42,12 @@
 // integrated when convert.rs is implemented
 #![allow(dead_code)]
 
+// Allow `::tola_vdom` to work inside the crate itself
+extern crate self as tola_vdom;
+
 pub mod attr;
 pub mod cache;
+pub mod capability;
 pub mod convert;
 pub mod diff;
 pub mod family;
