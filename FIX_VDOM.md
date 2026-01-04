@@ -1,11 +1,33 @@
 # VDOM Actor 重构问题与修复方案
 
+> ✅ **所有问题已修复** (2026-01-04)
+
 ## 1. 现状观察 (Current Observation)
 
 经过对代码库的深度审查（包括 `src/serve.rs`, `src/actor/*.rs`, `src/vdom`），确认了核心问题的根源。
 
-### A. 热重载闪烁 (The Flickering Issue) **[根源已确认]**
+### A. 热重载闪烁 (The Flickering Issue) ✅ **已修复**
 **表现**：每次编辑文件，浏览器都会进行全页刷新（Reload），而不是预期的增量更新（Patch）。即使是微小的修改也是如此。
+
+**修复方案**: `src/hotreload/logic/init.rs` 中的 `build_initial_cache()` 函数在 Actor 系统启动时预填充 VDOM 缓存。
+
+### C. 持续闪烁 (Persistent Flickering) ✅ **已修复**
+**表现**：即使在其后对同一文件进行编辑，浏览器依然触发刷新 (Reload)，而不是增量更新 (Patch)。
+
+**修复方案**: `src/actor/fs.rs` 中的 `Debouncer::add_event` 调用 `normalize_path()` 确保路径一致性。
+
+### D. 职责架构混乱 (Chaotic Architecture) ✅ **已修复**
+**表现**：数据流向不清晰，`CompilerActor` 越过 `VdomActor` 直接控制 WebSocket。
+
+**修复方案**: `CompilerActor` 不再持有 `ws_tx`，所有结果通过 `VdomActor` 路由。数据流已线性化：`Compiler → Vdom → Ws`。
+
+---
+
+## 历史记录 (Archive)
+
+以下是原始问题分析，保留供参考。
+
+### 原始问题分析
 
 **根本原因：缺少初始构建 (Missing Initial Build)**
 1. **启动流程缺陷**：

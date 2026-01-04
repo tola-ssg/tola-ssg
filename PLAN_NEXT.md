@@ -145,7 +145,7 @@ impl SiteDataHandle {
     pub fn read<R>(&self, f: impl FnOnce(&SiteData) -> R) -> R {
         GLOBAL_SITE_DATA.read().unwrap()(f)
     }
-    
+
     pub fn write<R>(&self, f: impl FnOnce(&mut SiteData) -> R) -> R {
         GLOBAL_SITE_DATA.write().unwrap()(f)
     }
@@ -337,7 +337,7 @@ pub trait BuildDriver {
 pub trait BuildDriver {
     fn emit_ids(&self) -> bool;
     fn cache_vdom(&self) -> bool;
-    
+
     // 新增
     fn minify_html(&self) -> bool;
     fn optimize_svg(&self) -> bool;
@@ -371,15 +371,15 @@ impl BuildDriver for Development {
 
 ## 实施优先级
 
-| 任务 | 优先级 | 复杂度 | 依赖 |
-|------|--------|--------|------|
-| pipeline/ → hotreload/logic/ | P0 | 低 | 无 |
-| CONFIG 封装 | P1 | 低 | 无 |
-| 构建系统统一 | P1 | 中 | Driver Pattern |
-| Actor 错误处理统一 | P2 | 中 | 无 |
-| GLOBAL_SITE_DATA 封装 | P2 | 中 | 无 |
-| GLOBAL_SITE_DATA 内部化 | P3 | 高 | Actor 重构 |
-| World 重构 | P4 | 高 | Typst 限制 |
+| 任务 | 优先级 | 复杂度 | 依赖 | 状态 |
+|------|--------|--------|------|------|
+| pipeline/ → hotreload/logic/ | P0 | 低 | 无 | ✅ 已完成 |
+| CONFIG 封装 | P1 | 低 | 无 | ✅ 已完成 (cfg() 仅入口调用) |
+| 构建系统统一 | P1 | 中 | Driver Pattern | 📋 进行中 |
+| Actor 错误处理统一 | P2 | 中 | 无 | 📋 待定 |
+| GLOBAL_SITE_DATA 封装 | P2 | 中 | 无 | 📋 待定 |
+| GLOBAL_SITE_DATA 内部化 | P3 | 高 | Actor 重构 | 📋 待定 |
+| World 重构 | P4 | 高 | Typst 限制 | 📋 待定 |
 
 ---
 
@@ -391,4 +391,4 @@ impl BuildDriver for Development {
 
 ---
 
-*文档版本: 2026-01-03*
+*文档版本: 2026-01-04*
