@@ -1,66 +1,10 @@
-//! Page metadata collection and caching.
+//! Page metadata collection and types.
 //!
-//! `PageMeta` is the **primary metadata structure** for content pages,
-//! containing all path and URL information needed across the build pipeline.
-//!
-//! # Constants
-//!
-//! - [`TOLA_META_LABEL`]: The typst label name for metadata queries (`"tola-meta"`)
-//!
-//! # Architecture
-//!
-//! ```text
-//! build_site()
-//!     │
-//!     └── process_content() ──► compile_typst_with_meta()
-//!                                       │
-//!                                       ├── HTML output (written to disk)
-//!                                       └── ContentMeta (optional, from <tola-meta>)
-//!                                               │
-//!                                               ▼
-//!                                         PageMeta::with_content()
-//!                                               │
-//!                                               ▼
-//!                                    Pages { items: Vec<PageMeta> }
-//!                                               │
-//!                          ┌────────────────────┴────────────────────┐
-//!                          ▼                                         ▼
-//!                    build_rss()                              build_sitemap()
-//!                    (uses page.content_meta)                 (uses page.paths)
-//! ```
-//!
-//! # Key Optimization
-//!
-//! Each `.typ` file is compiled **exactly once**. During compilation:
-//! - HTML is generated and written to disk
-//! - Metadata (from `<tola-meta>` label) is extracted from the same Document
-//!
-//! This avoids the previous architecture where files were compiled twice
-//! (once for HTML, once for metadata query).
-//!
-//! # Usage
-//!
-//! ```ignore
-//! // In build_site, pages are collected during compilation:
-//! let pages = content_files
-//!     .par_iter()
-//!     .filter_map(|path| process_content(path, config, ...)?)
-//!     .collect();
-//!
-//! for page in pages.iter() {
-//!     // Path info:
-//!     // - page.paths.html: output HTML path
-//!     // - page.paths.relative: for logging
-//!     // - page.paths.full_url: complete URL
-//!     //
-//!     // Content metadata (from <tola-meta>):
-//!     // - page.content_meta.title
-//!     // - page.content_meta.summary
-//!     // - page.content_meta.date
-//! }
-//! ```
+//! Contains `ContentMeta`, `PageMeta`, `PagePaths`, and `Pages` types
+//! for representing content page metadata.
 
-use crate::{config::SiteConfig, utils::slug::slugify_path};
+use crate::config::SiteConfig;
+use crate::utils::slug::slugify_path;
 use anyhow::{Result, anyhow};
 use serde::Deserialize;
 use std::{
@@ -70,95 +14,10 @@ use std::{
     time::SystemTime,
 };
 
-// ============================================================================
-// Constants
-// ============================================================================
-
-/// Label name for typst metadata queries.
-///
-/// Used to extract page metadata from `#metadata(...) <tola-meta>` in typst files.
-pub const TOLA_META_LABEL: &str = "tola-meta";
+use super::asset::url_from_output_path;
 
 // ============================================================================
-// Asset Metadata
-// ============================================================================
-
-/// Metadata for a static asset file.
-///
-/// Handles path resolution for assets, ensuring consistent URL generation
-/// and output path calculation.
-#[derive(Debug, Clone)]
-pub struct AssetMeta {
-    /// Path information
-    pub paths: AssetPaths,
-}
-
-/// Path information for an asset.
-#[derive(Debug, Clone)]
-pub struct AssetPaths {
-    /// Source file path
-    pub source: PathBuf,
-    /// Output file path (in public directory)
-    pub dest: PathBuf,
-    /// Relative path from assets root (for logging)
-    pub relative: String,
-    /// URL path (for linking)
-    pub url: String,
-}
-
-impl AssetMeta {
-    /// Create `AssetMeta` from a source path.
-    pub fn from_source(source: PathBuf, config: &SiteConfig) -> Result<Self> {
-        let assets_dir = &config.build.assets;
-        let output_dir = config.paths().output_dir();
-
-        let relative = source
-            .strip_prefix(assets_dir)
-            .map_err(|_| anyhow!("File is not in assets directory: {}", source.display()))?
-            .to_str()
-            .ok_or_else(|| anyhow!("Invalid path encoding"))?
-            .to_owned();
-
-        let dest = output_dir.join(&relative);
-        let url = url_from_output_path(&dest, config)?;
-
-        Ok(Self {
-            paths: AssetPaths {
-                source,
-                dest,
-                relative,
-                url,
-            },
-        })
-    }
-}
-
-/// Generate a URL path from an output file path.
-///
-/// Handles path prefix stripping and cross-platform separators.
-pub fn url_from_output_path(path: &Path, config: &SiteConfig) -> Result<String> {
-    let output_root = &config.build.output;
-
-    // Strip output root
-    let rel_to_output = path
-        .strip_prefix(output_root)
-        .map_err(|_| anyhow!("Path is not in output directory: {}", path.display()))?;
-
-    // Convert to string and ensure forward slashes
-    let path_str = rel_to_output.to_string_lossy().replace('\\', "/");
-
-    // Ensure it starts with /
-    let url = if path_str.starts_with('/') {
-        path_str
-    } else {
-        format!("/{path_str}")
-    };
-
-    Ok(url)
-}
-
-// ============================================================================
-// Page Metadata
+// Page Metadata Types
 // ============================================================================
 
 /// Content metadata from `#metadata(...) <tola-meta>` in typst files.
@@ -320,7 +179,7 @@ impl PageMeta {
         let duration = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
         #[allow(clippy::cast_possible_wrap)] // Safe: seconds/86400 fits in i64
         let days = duration.as_secs() as i64 / 86400;
-        let (year, month, day) = days_to_ymd(days);
+        let (year, month, day) = super::days_to_ymd(days);
         Some(format!("{year:04}-{month:02}-{day:02}"))
     }
 }
@@ -446,49 +305,6 @@ fn html_escape(s: &str) -> Cow<'_, str> {
 }
 
 // ============================================================================
-// Helper Functions
-// ============================================================================
-
-/// Convert days since UNIX epoch (1970-01-01) to (year, month, day).
-///
-/// Uses Howard Hinnant's date algorithms for efficient calendar calculations.
-/// See: <http://howardhinnant.github.io/date_algorithms.html>
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-const fn days_to_ymd(days: i64) -> (i32, u32, u32) {
-    // Shift epoch from 1970-01-01 to 0000-03-01
-    let z = days + 719_468;
-
-    // Calculate era (400-year period)
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-
-    // Day of era [0, 146096]
-    let doe = (z - era * 146_097) as u32;
-
-    // Year of era [0, 399]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-
-    // Year
-    let y = yoe as i64 + era * 400;
-
-    // Day of year [0, 365]
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-
-    // Month [0, 11] -> [3, 14]
-    let mp = (5 * doy + 2) / 153;
-
-    // Day [1, 31]
-    let d = doy - (153 * mp + 2) / 5 + 1;
-
-    // Month [1, 12]
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-
-    // Adjust year for Jan/Feb
-    let y = if m <= 2 { y + 1 } else { y };
-
-    (y as i32, m, d)
-}
-
-// ============================================================================
 // Tests
 // ============================================================================
 
@@ -496,42 +312,6 @@ const fn days_to_ymd(days: i64) -> (i32, u32, u32) {
 mod tests {
     use super::*;
     use std::time::{Duration, UNIX_EPOCH};
-
-    #[test]
-    fn test_days_to_ymd_unix_epoch() {
-        assert_eq!(days_to_ymd(0), (1970, 1, 1));
-    }
-
-    #[test]
-    fn test_days_to_ymd_one_year() {
-        assert_eq!(days_to_ymd(365), (1971, 1, 1));
-    }
-
-    #[test]
-    fn test_days_to_ymd_leap_year() {
-        assert_eq!(days_to_ymd(730), (1972, 1, 1));
-        assert_eq!(days_to_ymd(730 + 31 + 28), (1972, 2, 29));
-    }
-
-    #[test]
-    fn test_days_to_ymd_2025() {
-        assert_eq!(days_to_ymd(20089), (2025, 1, 1));
-    }
-
-    #[test]
-    fn test_days_to_ymd_negative() {
-        assert_eq!(days_to_ymd(-1), (1969, 12, 31));
-    }
-
-    #[test]
-    fn test_days_to_ymd_century_boundary() {
-        assert_eq!(days_to_ymd(10957), (2000, 1, 1));
-    }
-
-    #[test]
-    fn test_days_to_ymd_end_of_year() {
-        assert_eq!(days_to_ymd(364), (1970, 12, 31));
-    }
 
     #[test]
     fn test_lastmod_ymd_some() {

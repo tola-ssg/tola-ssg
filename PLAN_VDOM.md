@@ -192,23 +192,14 @@ graph TD
     *   在 VDOM 树遍历阶段直接给 `Element::Heading` 节点添加 `id` 属性。
     *   **Slug Utils**: `src/utils/slug.rs` 保持为纯工具库，供 VDOM 和 Compiler 共享。
 
-### 4.9 Additional Decoupling Improvements 📋 **PLANNED**
+### 4.9 Additional Decoupling Improvements � **PARTIAL**
 
-#### 4.9.1 Utils 与 Config 解耦
-*   **现状**: `src/utils/` 下 16+ 个模块通过 `use crate::config` 直接依赖配置。
-*   **问题**: 工具函数应该是纯函数，不应依赖全局状态。
-*   **迁移**:
-    *   工具函数接受**参数**而非读取全局配置。
-    *   例如 `minify(content, config)` → `minify(content, MinifyOptions { ... })`
+#### 4.9.1 Utils 与 Config 解耦 ✅ **PARTIAL**
+*   **已完成**: `minify.rs` (bool), `slug.rs` (SlugConfig), `optimize.rs` (dpi: f32)
+*   **待完成**: svg/, xml/, css.rs 等深度依赖 config 的模块
 
-#### 4.9.2 vdom 模块简化
-*   **folder.rs + transform.rs 合并**:
-    *   `Folder` trait (底层遍历) + `Transform` trait (高层 API) → 统一 `Transform`
-    *   `ProcessFolder` 移入 `transform.rs`
-    *   对外只暴露 `Transform` trait 和 `doc.pipe()` API
-*   **phase.rs 拆分** (可选):
-    *   当前 phase.rs 有 500+ 行，可拆分为每个 Phase 一个文件
-    *   `phase/raw.rs`, `phase/indexed.rs`, `phase/processed.rs`
+#### 4.9.2 vdom 模块简化 ✅ **DONE**
+*   vdom 已拆分为独立 crate `tola_vdom`
 
 #### 4.9.3 全局 `cfg()` 函数替换
 *   **现状**: `cfg()` 返回 `&'static SiteConfig`，多处直接调用。
@@ -218,23 +209,19 @@ graph TD
     *   `cfg()` 仅在入口点 (`main.rs`, `serve.rs`) 调用
     *   内部模块通过参数传递
 
-#### 4.9.4 Diff 统一与迁移
-*   **现状**: `src/hotreload/diff.rs` 存在两套实现：
-    *   `diff_documents(Processed, Processed)` - 旧版
-    *   `diff_indexed_documents(Indexed, Indexed)` - 新版
-*   **迁移**:
-    *   移动到 `src/vdom/diff.rs`
-    *   删除旧版 `diff_documents`
-    *   `hotreload` 只调用 vdom 的 diff API
+#### 4.9.4 Diff 统一与迁移 ✅ **DONE**
+*   diff 已移至 `tola_vdom::diff`
+*   `hotreload/logic/diff.rs` 调用 `crate::vdom::diff::diff`
 
-#### 4.9.5 大文件拆分
+#### 4.9.5 大文件拆分 🚧 **PARTIAL**
 *   **现状**: 多个模块过于庞大，职责不清：
-    *   `compiler/pages.rs` (764 行) - 混合编译、写入、元数据
-    *   `compiler/meta.rs` (961 行) - 混合类型定义、路径计算、缓存
-    *   `utils/slug.rs` (27KB) - 包含大量测试
-*   **迁移**:
+    *   `compiler/pages.rs` (633 行) - 混合编译、写入、元数据
+    *   ✅ `compiler/meta.rs` (971 行) - 已拆分为 `meta/{mod,asset,page}.rs`
+    *   `utils/slug.rs` (763 行) - 包含大量测试 (484 行)
+*   **完成**:
+    *   ✅ `meta.rs` 拆分：`asset.rs` (资源元数据) + `page.rs` (页面元数据) + `mod.rs` (re-exports)
+*   **待完成**:
     *   `pages.rs` 拆分：`compile.rs` (编译) + `write.rs` (IO) + `dev.rs` (热重载)
-    *   `meta.rs` 拆分：`types.rs` (类型) + `paths.rs` (路径计算) + `cache.rs`
     *   `slug.rs` 测试移入 `tests/` 或 `slug/tests.rs`
 
 #### 4.9.6 更多全局状态
@@ -568,7 +555,7 @@ pub fn vdom_indexed(db: &dyn TolaDb, file: File) -> Document<Indexed> {
 
 ---
 
-# Part V: Build Pipeline Optimization 📋 **PLANNED**
+# Part V: Build Pipeline Optimization ✅ **DONE**
 
 > [!IMPORTANT]
 > 当前两阶段编译导致 **2x 编译开销**。此章节规划如何实现单遍编译。
@@ -1054,7 +1041,7 @@ fn on_metadata_changed(path: &Path) {
 
 ---
 
-# Part VII: Code Simplification 📋 **PLANNED**
+# Part VII: Code Simplification ✅ **DONE**
 
 > [!NOTE]
 > 此章节与 Part VI (Driver Pattern) 互补：
