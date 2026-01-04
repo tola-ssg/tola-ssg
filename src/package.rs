@@ -37,7 +37,7 @@ pub use crate::config::{package_storage, PACKAGE_STORAGE};
 /// Backwards-compatible alias for global package storage.
 #[deprecated(since = "0.2.0", note = "Use package_storage() instead")]
 pub static GLOBAL_PACKAGE_STORAGE: std::sync::LazyLock<&'static typst_kit::package::PackageStorage> =
-    std::sync::LazyLock::new(|| package_storage());
+    std::sync::LazyLock::new(package_storage);
 
 #[cfg(test)]
 mod tests {

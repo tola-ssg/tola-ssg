@@ -70,7 +70,7 @@ pub struct HtmlResult {
     pub accessed_files: Vec<PathBuf>,
     /// Compilation diagnostics (warnings only - errors cause Err return).
     ///
-    /// Use [`crate::diagnostic::format_diagnostics`] to format for display.
+    /// Use [`crate::DiagnosticsExt::format`] to format for display.
     pub diagnostics: Vec<SourceDiagnostic>,
 }
 

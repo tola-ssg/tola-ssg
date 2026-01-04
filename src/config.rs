@@ -1,7 +1,7 @@
 //! Configuration for typst-batch.
 //!
 //! This module provides runtime configuration for package downloads.
-//! Call [`init`] at application startup to configure the User-Agent string.
+//! Use [`ConfigBuilder`] at application startup to configure the User-Agent string.
 
 use std::sync::OnceLock;
 

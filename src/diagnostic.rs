@@ -1,21 +1,35 @@
 //! Diagnostic formatting for Typst compilation errors and warnings.
 //!
 //! This module provides human-readable formatting for [`SourceDiagnostic`] similar
-//! to the official `typst-cli` output, including:
+//! to the official `typst-cli` output.
 //!
-//! - File path, line number, and column information
-//! - Source code snippets with error location markers
-//! - Colored output with theme support (error=red, warning=yellow, help=cyan)
-//! - Hints and trace information
+//! # Two-Layer API
 //!
-//! # Architecture
+//! This module provides two levels of API via [`DiagnosticsExt`] trait:
 //!
-//! The module is organized into several layers:
-//! - **[`DiagnosticOptions`]**: Configuration for formatting behavior
-//! - **Theme**: Color styling for different diagnostic severities
-//! - **Gutter**: Box-drawing characters for source display
-//! - **`SpanLocation`**: Resolved source location information
-//! - **`SnippetWriter`**: Handles formatted output generation
+//! ## Simple: Ready-to-Use Formatting
+//!
+//! ```ignore
+//! use typst_batch::DiagnosticsExt;
+//!
+//! let output = result.diagnostics.format(&world);
+//! eprintln!("{}", output);
+//! ```
+//!
+//! ## Advanced: Full Customization
+//!
+//! Use `.resolve()` to get structured [`DiagnosticInfo`] and render
+//! it however you want:
+//!
+//! ```ignore
+//! use typst_batch::DiagnosticsExt;
+//!
+//! for info in result.diagnostics.resolve(&world) {
+//!     // Custom rendering: JSON, HTML, IDE integration, etc.
+//!     println!("{}: {} at {}:{}",
+//!         info.severity, info.message, info.path, info.line);
+//! }
+//! ```
 //!
 //! # Example Output
 //!
@@ -26,36 +40,9 @@
 //! 1 │ #import "@invalid:meta.typ" as meta
 //!   │         ^^^^^^^^^^^^^^^^
 //! ```
-//!
-//! # Structured vs Formatted
-//!
-//! This module provides two levels of API:
-//!
-//! - **Structured**: Access raw [`SourceDiagnostic`] for programmatic analysis
-//! - **Formatted**: Human-readable string output via [`format_diagnostics`]
-//!
-//! ```ignore
-//! // Structured access for analysis
-//! let result = compile_html(path, root)?;
-//! for diag in &result.diagnostics {
-//!     match diag.severity {
-//!         Severity::Error => eprintln!("Error: {}", diag.message),
-//!         Severity::Warning => eprintln!("Warning: {}", diag.message),
-//!     }
-//! }
-//!
-//! // Formatted output for display
-//! let formatted = format_diagnostics_with_options(
-//!     &world,
-//!     &result.diagnostics,
-//!     &DiagnosticOptions::colored(),
-//! );
-//! eprintln!("{formatted}");
-//! ```
 
 use std::fmt::{self, Write};
 
-use colored::{ColoredString, Colorize};
 use thiserror::Error;
 use typst::diag::Severity;
 use typst::syntax::Span;
@@ -367,10 +354,19 @@ impl fmt::Display for DiagnosticSummary {
 ///
 /// let summary = result.diagnostics.summary();
 /// println!("{}", summary);  // "2 errors, 1 warning"
+///
+/// // Format for display
+/// let formatted = result.diagnostics.format(&world);
+///
+/// // Or get structured data for custom rendering
+/// let infos = result.diagnostics.resolve(&world);
 /// ```
 pub trait DiagnosticsExt {
     /// Check if there are any errors in the diagnostics.
     fn has_errors(&self) -> bool;
+
+    /// Check if there are any warnings in the diagnostics.
+    fn has_warnings(&self) -> bool;
 
     /// Check if the diagnostic list is empty.
     fn is_empty(&self) -> bool;
@@ -390,13 +386,100 @@ pub trait DiagnosticsExt {
     /// Get a summary of the diagnostics.
     fn summary(&self) -> DiagnosticSummary;
 
+    /// Filter out diagnostics matching any of the given filters.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use typst_batch::{DiagnosticsExt, DiagnosticFilter};
+    ///
+    /// // Filter out HTML export warnings and external package warnings
+    /// let filtered = diagnostics.filter_out(&[
+    ///     DiagnosticFilter::HtmlExport,
+    ///     DiagnosticFilter::ExternalPackages,
+    /// ]);
+    /// ```
+    fn filter_out(&self, filters: &[DiagnosticFilter]) -> Vec<SourceDiagnostic>;
+
     /// Filter out known HTML export development warnings.
-    fn filter_html_warnings(&self) -> Vec<SourceDiagnostic>;
+    ///
+    /// Shorthand for `filter_out(&[DiagnosticFilter::HtmlExport])`.
+    fn filter_html_warnings(&self) -> Vec<SourceDiagnostic> {
+        self.filter_out(&[DiagnosticFilter::HtmlExport])
+    }
+
+    /// Format diagnostics into a human-readable string.
+    ///
+    /// Uses default options (colored, rich format with snippets).
+    fn format<W: World>(&self, world: &W) -> String;
+
+    /// Format diagnostics with custom options.
+    fn format_with<W: World>(&self, world: &W, options: &DiagnosticOptions) -> String;
+
+    /// Resolve diagnostics to structured data for custom rendering.
+    ///
+    /// Use this when you need full control over output format (JSON, HTML, IDE integration, etc.)
+    fn resolve<W: World>(&self, world: &W) -> Vec<DiagnosticInfo>;
+}
+
+/// Filters for excluding diagnostics.
+///
+/// Used with [`DiagnosticsExt::filter_out`] to remove unwanted diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiagnosticFilter {
+    /// Filter out HTML export development warnings.
+    ///
+    /// Matches: "html export is under active development"
+    HtmlExport,
+
+    /// Filter out warnings from external packages (not user code).
+    ///
+    /// Keeps diagnostics from paths that don't start with `@` (packages).
+    ExternalPackages,
+
+    /// Filter out all warnings (keep only errors).
+    AllWarnings,
+
+    /// Filter out diagnostics containing specific text in message.
+    MessageContains(String),
+}
+
+impl DiagnosticFilter {
+    /// Check if a diagnostic should be filtered out.
+    fn matches(&self, diag: &SourceDiagnostic) -> bool {
+        match self {
+            DiagnosticFilter::HtmlExport => {
+                diag.severity == Severity::Warning
+                    && diag.message.contains("html export is under active development")
+            }
+            DiagnosticFilter::ExternalPackages => {
+                diag.severity == Severity::Warning && is_external_package(diag)
+            }
+            DiagnosticFilter::AllWarnings => diag.severity == Severity::Warning,
+            DiagnosticFilter::MessageContains(text) => diag.message.contains(text.as_str()),
+        }
+    }
+}
+
+/// Check if a diagnostic originates from an external package.
+fn is_external_package(diag: &SourceDiagnostic) -> bool {
+    // Check span's file id for package path
+    if let Some(id) = diag.span.id() {
+        let path = id.vpath().as_rootless_path();
+        // External packages have paths like "@preview/..." or "@local/..."
+        path.to_string_lossy().starts_with('@')
+    } else {
+        false
+    }
 }
 
 impl DiagnosticsExt for [SourceDiagnostic] {
     fn has_errors(&self) -> bool {
         self.iter().any(|d| d.severity == Severity::Error)
+    }
+
+    fn has_warnings(&self) -> bool {
+        self.iter().any(|d| d.severity == Severity::Warning)
     }
 
     fn is_empty(&self) -> bool {
@@ -431,24 +514,33 @@ impl DiagnosticsExt for [SourceDiagnostic] {
         DiagnosticSummary { errors, warnings }
     }
 
-    fn filter_html_warnings(&self) -> Vec<SourceDiagnostic> {
+    fn filter_out(&self, filters: &[DiagnosticFilter]) -> Vec<SourceDiagnostic> {
         self.iter()
-            .filter(|d| {
-                // Keep all errors
-                if d.severity == Severity::Error {
-                    return true;
-                }
-                // Filter out HTML export warning
-                !d.message.contains("html export is under active development")
-            })
+            .filter(|d| !filters.iter().any(|f| f.matches(d)))
             .cloned()
             .collect()
+    }
+
+    fn format<W: World>(&self, world: &W) -> String {
+        format_diagnostics(world, self)
+    }
+
+    fn format_with<W: World>(&self, world: &W, options: &DiagnosticOptions) -> String {
+        format_diagnostics_with_options(world, self, options)
+    }
+
+    fn resolve<W: World>(&self, world: &W) -> Vec<DiagnosticInfo> {
+        self.iter().map(|d| resolve_diagnostic(world, d)).collect()
     }
 }
 
 impl DiagnosticsExt for Vec<SourceDiagnostic> {
     fn has_errors(&self) -> bool {
         self.as_slice().has_errors()
+    }
+
+    fn has_warnings(&self) -> bool {
+        self.as_slice().has_warnings()
     }
 
     fn is_empty(&self) -> bool {
@@ -475,8 +567,20 @@ impl DiagnosticsExt for Vec<SourceDiagnostic> {
         self.as_slice().summary()
     }
 
-    fn filter_html_warnings(&self) -> Vec<SourceDiagnostic> {
-        self.as_slice().filter_html_warnings()
+    fn filter_out(&self, filters: &[DiagnosticFilter]) -> Vec<SourceDiagnostic> {
+        self.as_slice().filter_out(filters)
+    }
+
+    fn format<W: World>(&self, world: &W) -> String {
+        self.as_slice().format(world)
+    }
+
+    fn format_with<W: World>(&self, world: &W, options: &DiagnosticOptions) -> String {
+        self.as_slice().format_with(world, options)
+    }
+
+    fn resolve<W: World>(&self, world: &W) -> Vec<DiagnosticInfo> {
+        self.as_slice().resolve(world)
     }
 }
 
@@ -495,35 +599,184 @@ mod gutter {
 }
 
 // ============================================================================
-// Color Theme
+// Diagnostic Info - Structured data for custom rendering
 // ============================================================================
 
-/// Color theme for diagnostic output.
+/// Structured diagnostic information for custom rendering.
 ///
-/// Provides consistent coloring for different diagnostic severities:
-/// - Error: Red
-/// - Warning: Yellow
-/// - Help: Cyan
-#[derive(Clone, Copy)]
-struct DiagnosticTheme {
-    colorize: fn(&str) -> ColoredString,
+/// This struct contains all the information needed to render a diagnostic
+/// in any format (terminal, HTML, JSON, etc.).
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::diagnostic::{DiagnosticInfo, resolve_diagnostic};
+///
+/// let info = resolve_diagnostic(&world, &diag);
+///
+/// // Now you have full control over formatting
+/// println!("Error at {}:{}", info.path.unwrap_or("?"), info.line.unwrap_or(0));
+/// for line in &info.source_lines {
+///     println!("{}: {}", line.line_num, line.text);
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct DiagnosticInfo {
+    /// Error severity (error or warning).
+    pub severity: Severity,
+    /// The error message.
+    pub message: String,
+    /// File path (if available).
+    pub path: Option<String>,
+    /// Line number (1-indexed, if available).
+    pub line: Option<usize>,
+    /// Column number (1-indexed, if available).
+    pub column: Option<usize>,
+    /// Source code lines with highlighting info.
+    pub source_lines: Vec<SourceLine>,
+    /// Hint messages.
+    pub hints: Vec<String>,
+    /// Stack trace entries.
+    pub traces: Vec<TraceInfo>,
 }
 
-impl DiagnosticTheme {
-    const ERROR: Self = Self {
-        colorize: |s| s.red(),
-    };
-    const WARNING: Self = Self {
-        colorize: |s| s.yellow(),
-    };
-    const HELP: Self = Self {
-        colorize: |s| s.cyan(),
+/// A source code line with optional highlighting.
+#[derive(Debug, Clone)]
+pub struct SourceLine {
+    /// Line number (1-indexed).
+    pub line_num: usize,
+    /// The source text.
+    pub text: String,
+    /// Highlight range (start_col, end_col), 0-indexed.
+    pub highlight: Option<(usize, usize)>,
+}
+
+/// Stack trace entry.
+#[derive(Debug, Clone)]
+pub struct TraceInfo {
+    /// Description of the trace point (from Typst's Tracepoint::Display).
+    pub message: String,
+    /// File path (if available).
+    pub path: Option<String>,
+    /// Line number (1-indexed, if available).
+    pub line: Option<usize>,
+    /// Column number (1-indexed, if available).
+    pub column: Option<usize>,
+    /// Source code lines at this trace point.
+    pub source_lines: Vec<SourceLine>,
+}
+
+/// Resolve a diagnostic to structured info for custom rendering.
+/// (Internal - use `diagnostics.resolve(&world)` instead)
+pub(crate) fn resolve_diagnostic<W: World>(world: &W, diag: &SourceDiagnostic) -> DiagnosticInfo {
+    let location = SpanLocation::from_span(world, diag.span);
+
+    let (path, line, column, source_lines) = match &location {
+        Some(loc) => (
+            Some(loc.path.clone()),
+            Some(loc.start_line),
+            Some(loc.start_col + 1), // 1-indexed for display
+            loc.to_source_lines(),
+        ),
+        None => (None, None, None, vec![]),
     };
 
-    /// Apply theme color to any text element.
-    #[inline]
-    fn paint(self, text: &str) -> ColoredString {
-        (self.colorize)(text)
+    let hints = diag.hints.iter().map(|h| h.to_string()).collect();
+
+    let traces = diag
+        .trace
+        .iter()
+        .filter_map(|t| {
+            use typst::diag::Tracepoint;
+
+            // Skip import traces - they just show content importing template
+            if matches!(t.v, Tracepoint::Import) {
+                return None;
+            }
+
+            // Use Tracepoint's Display impl for consistent messages
+            let message = t.v.to_string();
+
+            let loc = SpanLocation::from_span(world, t.span);
+            Some(TraceInfo {
+                message,
+                path: loc.as_ref().map(|l| l.path.clone()),
+                line: loc.as_ref().map(|l| l.start_line),
+                column: loc.as_ref().map(|l| l.start_col + 1),
+                source_lines: loc.as_ref().map(|l| l.to_source_lines()).unwrap_or_default(),
+            })
+        })
+        .collect();
+
+    DiagnosticInfo {
+        severity: diag.severity,
+        message: diag.message.to_string(),
+        path,
+        line,
+        column,
+        source_lines,
+        hints,
+        traces,
+    }
+}
+
+/// Resolve all diagnostics to structured info.
+/// (Internal - use `diagnostics.resolve(&world)` instead)
+#[allow(dead_code)]
+pub(crate) fn resolve_diagnostics<W: World>(
+    world: &W,
+    diagnostics: &[SourceDiagnostic],
+) -> Vec<DiagnosticInfo> {
+    diagnostics
+        .iter()
+        .map(|d| resolve_diagnostic(world, d))
+        .collect()
+}
+
+// ============================================================================
+// Internal Coloring (private)
+// ============================================================================
+
+/// Apply color to text based on severity.
+#[cfg(feature = "colored-diagnostics")]
+fn colorize(text: &str, severity: Severity) -> String {
+    use colored::Colorize;
+    match severity {
+        Severity::Error => text.red().to_string(),
+        Severity::Warning => text.yellow().to_string(),
+    }
+}
+
+#[cfg(feature = "colored-diagnostics")]
+fn colorize_help(text: &str) -> String {
+    use colored::Colorize;
+    text.cyan().to_string()
+}
+
+#[cfg(not(feature = "colored-diagnostics"))]
+fn colorize(text: &str, _severity: Severity) -> String {
+    text.to_owned()
+}
+
+#[cfg(not(feature = "colored-diagnostics"))]
+fn colorize_help(text: &str) -> String {
+    text.to_owned()
+}
+
+/// Get paint function based on options.
+fn get_paint_fn(options: &DiagnosticOptions, severity: Severity) -> Box<dyn Fn(&str) -> String> {
+    if options.colored {
+        Box::new(move |s| colorize(s, severity))
+    } else {
+        Box::new(|s: &str| s.to_owned())
+    }
+}
+
+fn get_help_paint_fn(options: &DiagnosticOptions) -> Box<dyn Fn(&str) -> String> {
+    if options.colored {
+        Box::new(colorize_help)
+    } else {
+        Box::new(|s: &str| s.to_owned())
     }
 }
 
@@ -607,6 +860,30 @@ impl SpanLocation {
     fn line_num_width(&self) -> usize {
         self.end_line().to_string().len().max(1)
     }
+
+    /// Convert to structured source lines for DiagnosticInfo.
+    fn to_source_lines(&self) -> Vec<SourceLine> {
+        self.lines
+            .iter()
+            .enumerate()
+            .map(|(i, text)| {
+                let line_num = self.start_line + i;
+                let highlight = if i == 0 {
+                    Some((self.highlight_start_col, self.highlight_end_col))
+                } else if self.lines.len() > 1 {
+                    // Multi-line: highlight entire line after first
+                    Some((0, text.chars().count()))
+                } else {
+                    None
+                };
+                SourceLine {
+                    line_num,
+                    text: text.clone(),
+                    highlight,
+                }
+            })
+            .collect()
+    }
 }
 
 // ============================================================================
@@ -617,21 +894,23 @@ impl SpanLocation {
 ///
 /// Encapsulates the logic for formatting source code with proper
 /// alignment, gutter characters, and highlighting.
-struct SnippetWriter<'a> {
+struct SnippetWriter<'a, F>
+where
+    F: Fn(&str) -> String,
+{
     output: &'a mut String,
-    theme: &'a DiagnosticTheme,
+    paint: F,
     line_num_width: usize,
 }
 
-impl<'a> SnippetWriter<'a> {
-    const fn new(
-        output: &'a mut String,
-        theme: &'a DiagnosticTheme,
-        line_num_width: usize,
-    ) -> Self {
+impl<'a, F> SnippetWriter<'a, F>
+where
+    F: Fn(&str) -> String,
+{
+    fn new(output: &'a mut String, paint: F, line_num_width: usize) -> Self {
         Self {
             output,
-            theme,
+            paint,
             line_num_width,
         }
     }
@@ -642,7 +921,7 @@ impl<'a> SnippetWriter<'a> {
             self.output,
             "{:>width$} {} {}:{}:{}",
             "",
-            self.theme.paint(gutter::HEADER),
+            (self.paint)(gutter::HEADER),
             path,
             line,
             col,
@@ -656,7 +935,7 @@ impl<'a> SnippetWriter<'a> {
             self.output,
             "{:>width$} {}",
             "",
-            self.theme.paint(gutter::BAR),
+            (self.paint)(gutter::BAR),
             width = self.line_num_width
         );
     }
@@ -673,33 +952,33 @@ impl<'a> SnippetWriter<'a> {
 
         let formatted_line = match (box_char, highlight_range) {
             (Some(bc), Some((start, end))) => {
-                let (before, highlighted, after) = Self::split_line(line_text, start, end);
+                let (before, highlighted, after) = split_line(line_text, start, end);
                 format!(
                     "{} {} {} {}{}{}",
-                    self.theme.paint(&line_num_str),
-                    self.theme.paint(gutter::BAR),
-                    self.theme.paint(bc),
+                    (self.paint)(&line_num_str),
+                    (self.paint)(gutter::BAR),
+                    (self.paint)(bc),
                     before,
-                    self.theme.paint(&highlighted),
+                    (self.paint)(&highlighted),
                     after
                 )
             }
             (None, Some((start, end))) => {
-                let (before, highlighted, after) = Self::split_line(line_text, start, end);
+                let (before, highlighted, after) = split_line(line_text, start, end);
                 format!(
                     "{} {} {}{}{}",
-                    self.theme.paint(&line_num_str),
-                    self.theme.paint(gutter::BAR),
+                    (self.paint)(&line_num_str),
+                    (self.paint)(gutter::BAR),
                     before,
-                    self.theme.paint(&highlighted),
+                    (self.paint)(&highlighted),
                     after
                 )
             }
             _ => {
                 format!(
                     "{} {} {}",
-                    self.theme.paint(&line_num_str),
-                    self.theme.paint(gutter::BAR),
+                    (self.paint)(&line_num_str),
+                    (self.paint)(gutter::BAR),
                     line_text
                 )
             }
@@ -716,9 +995,9 @@ impl<'a> SnippetWriter<'a> {
             self.output,
             "{:>width$} {} {}{}",
             "",
-            self.theme.paint(gutter::BAR),
+            (self.paint)(gutter::BAR),
             spaces,
-            self.theme.paint(&markers),
+            (self.paint)(&markers),
             width = self.line_num_width
         );
     }
@@ -730,27 +1009,27 @@ impl<'a> SnippetWriter<'a> {
             self.output,
             "{:>width$} {} {}{}{}",
             "",
-            self.theme.paint(gutter::BAR),
-            self.theme.paint(gutter::SPAN_END),
-            self.theme.paint(&dashes),
-            self.theme.paint(gutter::MARKER),
+            (self.paint)(gutter::BAR),
+            (self.paint)(gutter::SPAN_END),
+            (self.paint)(&dashes),
+            (self.paint)(gutter::MARKER),
             width = self.line_num_width
         );
     }
+}
 
-    /// Split a line into (before, highlighted, after) based on column range.
-    /// Both `start_col` and `end_col` are 0-indexed.
-    fn split_line(line: &str, start_col: usize, end_col: usize) -> (String, String, String) {
-        let chars: Vec<char> = line.chars().collect();
-        let start_idx = start_col.min(chars.len());
-        let end_idx = end_col.min(chars.len());
+/// Split a line into (before, highlighted, after) based on column range.
+/// Both `start_col` and `end_col` are 0-indexed.
+fn split_line(line: &str, start_col: usize, end_col: usize) -> (String, String, String) {
+    let chars: Vec<char> = line.chars().collect();
+    let start_idx = start_col.min(chars.len());
+    let end_idx = end_col.min(chars.len());
 
-        let before: String = chars[..start_idx].iter().collect();
-        let highlighted: String = chars[start_idx..end_idx].iter().collect();
-        let after: String = chars[end_idx..].iter().collect();
+    let before: String = chars[..start_idx].iter().collect();
+    let highlighted: String = chars[start_idx..end_idx].iter().collect();
+    let after: String = chars[end_idx..].iter().collect();
 
-        (before, highlighted, after)
-    }
+    (before, highlighted, after)
 }
 
 // ============================================================================
@@ -758,46 +1037,18 @@ impl<'a> SnippetWriter<'a> {
 // ============================================================================
 
 /// Format compilation diagnostics into a human-readable string.
-///
-/// Uses default options (colored, rich format with snippets).
-/// For custom formatting, use [`format_diagnostics_with_options`].
-///
-/// Errors are displayed first (higher priority), followed by warnings.
-pub fn format_diagnostics<W: World>(world: &W, diagnostics: &[SourceDiagnostic]) -> String {
+/// (Internal - use `diagnostics.format(&world)` instead)
+pub(crate) fn format_diagnostics<W: World>(world: &W, diagnostics: &[SourceDiagnostic]) -> String {
     format_diagnostics_with_options(world, diagnostics, &DiagnosticOptions::default())
 }
 
 /// Format compilation diagnostics with custom options.
-///
-/// # Example
-///
-/// ```ignore
-/// use typst_batch::diagnostic::{format_diagnostics_with_options, DiagnosticOptions};
-///
-/// // Plain text for log files
-/// let plain = format_diagnostics_with_options(
-///     &world,
-///     &diagnostics,
-///     &DiagnosticOptions::plain(),
-/// );
-///
-/// // Short format for CI
-/// let short = format_diagnostics_with_options(
-///     &world,
-///     &diagnostics,
-///     &DiagnosticOptions::short(),
-/// );
-/// ```
-pub fn format_diagnostics_with_options<W: World>(
+/// (Internal - use `diagnostics.format_with(&world, &options)` instead)
+pub(crate) fn format_diagnostics_with_options<W: World>(
     world: &W,
     diagnostics: &[SourceDiagnostic],
     options: &DiagnosticOptions,
 ) -> String {
-    // Set color override based on options
-    if !options.colored {
-        colored::control::set_override(false);
-    }
-
     let mut output = String::new();
 
     // Partition and sort: errors first, then warnings
@@ -812,11 +1063,6 @@ pub fn format_diagnostics_with_options<W: World>(
         if i < all_diags.len() - 1 {
             output.push('\n');
         }
-    }
-
-    // Reset color override
-    if !options.colored {
-        colored::control::unset_override();
     }
 
     output
@@ -857,7 +1103,7 @@ pub fn filter_html_warnings(diagnostics: &[SourceDiagnostic]) -> Vec<SourceDiagn
 }
 
 /// Disable colored output globally (for tests).
-#[cfg(test)]
+#[cfg(all(test, feature = "colored-diagnostics"))]
 pub fn disable_colors() {
     colored::control::set_override(false);
 }
@@ -873,17 +1119,18 @@ fn format_diagnostic_internal<W: World>(
     diag: &SourceDiagnostic,
     options: &DiagnosticOptions,
 ) {
-    let (label, theme) = match diag.severity {
-        Severity::Error => ("error", DiagnosticTheme::ERROR),
-        Severity::Warning => ("warning", DiagnosticTheme::WARNING),
+    let label = match diag.severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
     };
+    let paint = get_paint_fn(options, diag.severity);
 
     match options.style {
         DisplayStyle::Short => {
-            format_diagnostic_short(output, world, diag, label, &theme);
+            format_diagnostic_short(output, world, diag, label, &paint);
         }
         DisplayStyle::Rich => {
-            format_diagnostic_rich(output, world, diag, label, &theme, options);
+            format_diagnostic_rich(output, world, diag, label, &paint, options);
         }
     }
 }
@@ -894,7 +1141,7 @@ fn format_diagnostic_short<W: World>(
     world: &W,
     diag: &SourceDiagnostic,
     label: &str,
-    theme: &DiagnosticTheme,
+    paint: &dyn Fn(&str) -> String,
 ) {
     if let Some(loc) = SpanLocation::from_span(world, diag.span) {
         _ = writeln!(
@@ -903,11 +1150,11 @@ fn format_diagnostic_short<W: World>(
             loc.path,
             loc.start_line,
             loc.start_col + 1, // 1-indexed for display
-            theme.paint(label),
+            paint(label),
             diag.message
         );
     } else {
-        _ = writeln!(output, "{}: {}", theme.paint(label), diag.message);
+        _ = writeln!(output, "{}: {}", paint(label), diag.message);
     }
 }
 
@@ -917,33 +1164,35 @@ fn format_diagnostic_rich<W: World>(
     world: &W,
     diag: &SourceDiagnostic,
     label: &str,
-    theme: &DiagnosticTheme,
+    paint: &dyn Fn(&str) -> String,
     options: &DiagnosticOptions,
 ) {
     // Header: "error: message"
-    _ = writeln!(output, "{}: {}", theme.paint(label), diag.message);
+    _ = writeln!(output, "{}: {}", paint(label), diag.message);
 
     // Source snippet (if enabled)
-    if options.snippets {
-        if let Some(location) = SpanLocation::from_span(world, diag.span) {
-            write_snippet(output, &location, *theme);
-        }
+    if options.snippets
+        && let Some(location) = SpanLocation::from_span(world, diag.span)
+    {
+        write_snippet(output, &location, paint);
     }
 
     // Trace information (call stack) - if enabled
     if options.traces {
+        let help_paint = get_help_paint_fn(options);
         for trace in &diag.trace {
-            write_trace(output, world, &trace.v, trace.span);
+            write_trace(output, world, &trace.v, trace.span, &help_paint);
         }
     }
 
     // Hints - if enabled
     if options.hints {
+        let help_paint = get_help_paint_fn(options);
         for hint in &diag.hints {
             _ = writeln!(
                 output,
                 "  {} hint: {}",
-                DiagnosticTheme::HELP.paint("="),
+                help_paint("="),
                 hint
             );
         }
@@ -951,8 +1200,8 @@ fn format_diagnostic_rich<W: World>(
 }
 
 /// Write a source code snippet with highlighting.
-fn write_snippet(output: &mut String, location: &SpanLocation, theme: DiagnosticTheme) {
-    let mut writer = SnippetWriter::new(output, &theme, location.line_num_width());
+fn write_snippet(output: &mut String, location: &SpanLocation, paint: &dyn Fn(&str) -> String) {
+    let mut writer = SnippetWriter::new(output, |s| paint(s), location.line_num_width());
 
     writer.write_header(&location.path, location.start_line, location.start_col);
     writer.write_empty_gutter();
@@ -965,7 +1214,10 @@ fn write_snippet(output: &mut String, location: &SpanLocation, theme: Diagnostic
 }
 
 /// Write a single-line source snippet.
-fn write_singleline_snippet(writer: &mut SnippetWriter, location: &SpanLocation) {
+fn write_singleline_snippet<F>(writer: &mut SnippetWriter<F>, location: &SpanLocation)
+where
+    F: Fn(&str) -> String,
+{
     let line_text = location.lines.first().map_or("", String::as_str);
 
     let span_len = location
@@ -983,7 +1235,10 @@ fn write_singleline_snippet(writer: &mut SnippetWriter, location: &SpanLocation)
 }
 
 /// Write a multi-line source snippet with box drawing.
-fn write_multiline_snippet(writer: &mut SnippetWriter, location: &SpanLocation) {
+fn write_multiline_snippet<F>(writer: &mut SnippetWriter<F>, location: &SpanLocation)
+where
+    F: Fn(&str) -> String,
+{
     for (i, line_text) in location.lines.iter().enumerate() {
         let line_num = location.start_line + i;
         let is_first = i == 0;
@@ -1013,6 +1268,7 @@ fn write_trace<W: World>(
     world: &W,
     tracepoint: &typst::diag::Tracepoint,
     span: Span,
+    help_paint: &dyn Fn(&str) -> String,
 ) {
     use typst::diag::Tracepoint;
 
@@ -1033,12 +1289,12 @@ fn write_trace<W: World>(
     _ = writeln!(
         output,
         "{}: {}",
-        DiagnosticTheme::HELP.paint("help"),
+        help_paint("help"),
         message
     );
 
     if let Some(location) = SpanLocation::from_span(world, span) {
-        write_snippet(output, &location, DiagnosticTheme::HELP);
+        write_snippet(output, &location, help_paint);
     }
 }
 
@@ -1085,25 +1341,25 @@ mod tests {
     #[test]
     fn test_split_line_helper() {
         // Test normal case: "hello world", cols 6-11 -> "hello " + "world" + ""
-        let (before, highlighted, after) = SnippetWriter::split_line("hello world", 6, 11);
+        let (before, highlighted, after) = split_line("hello world", 6, 11);
         assert_eq!(before, "hello ");
         assert_eq!(highlighted, "world");
         assert_eq!(after, "");
 
         // Test start at beginning: "abc", cols 0-1 -> "" + "a" + "bc"
-        let (before, highlighted, after) = SnippetWriter::split_line("abc", 0, 1);
+        let (before, highlighted, after) = split_line("abc", 0, 1);
         assert_eq!(before, "");
         assert_eq!(highlighted, "a");
         assert_eq!(after, "bc");
 
         // Test full line: "test", cols 0-4 -> "" + "test" + ""
-        let (before, highlighted, after) = SnippetWriter::split_line("test", 0, 4);
+        let (before, highlighted, after) = split_line("test", 0, 4);
         assert_eq!(before, "");
         assert_eq!(highlighted, "test");
         assert_eq!(after, "");
 
         // Test with Unicode: "你好世界" (Hello World), cols 0-2 -> "" + "你好" + "世界"
-        let (before, highlighted, after) = SnippetWriter::split_line("你好世界", 0, 2);
+        let (before, highlighted, after) = split_line("你好世界", 0, 2);
         assert_eq!(before, "");
         assert_eq!(highlighted, "你好");
         assert_eq!(after, "世界");

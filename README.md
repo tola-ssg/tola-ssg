@@ -24,7 +24,16 @@ If you need:
 ```toml
 [dependencies]
 typst-batch = "0.1"
+
+# Optional: Enable colored diagnostics (requires `colored` crate)
+# typst-batch = { version = "0.1", features = ["colored-diagnostics"] }
 ```
+
+### Features
+
+| Feature | Description |
+|---------|-------------|
+| `colored-diagnostics` | Enable ANSI colored output via `colored` crate |
 
 ## Quick Start
 
@@ -46,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if result.diagnostics.has_errors() {
         let world = SystemWorld::new(path, root);
         eprintln!("Compilation failed:");
-        eprintln!("{}", format_diagnostics(&world, &result.diagnostics));
+        eprintln!("{}", result.diagnostics.format(&world));
         return Err("compilation error".into());
     }
 
@@ -155,37 +164,42 @@ let result = compile_html_with_inputs(
 by _#author_
 ```
 
-**With complex values using `Dict`:**
+#### Performance Considerations
+
+Using `sys.inputs` creates a **new library instance** per compilation, which
+has a small performance overhead. For batch compilation of many documents:
+
+**Recommended for static/global data:** Use VFS (Virtual File System) to inject
+shared data as files. This allows all compilations to share the global library:
+
 ```rust
-use typst_batch::{compile_html_with_inputs_dict, Dict, IntoValue};
+use typst_batch::{MapVirtualFS, set_virtual_fs, compile_html};
 
-let mut inputs = Dict::new();
-inputs.insert("title".into(), "My Post".into_value());
-inputs.insert("page".into(), 42i64.into_value());
-inputs.insert("draft".into(), true.into_value());
+let mut vfs = MapVirtualFS::new();
+vfs.insert("/_data/site.json", r#"{"name":"My Blog"}"#);
+set_virtual_fs(vfs);
 
-let result = compile_html_with_inputs_dict(path, root, inputs)?;
+// All compilations share the global library - best performance
+let result = compile_html(path, root)?;
 ```
+
+**Use `sys.inputs` for:** Build-time variables, CLI arguments, or truly
+document-specific data that can't be pre-computed as VFS files.
 
 **Low-level API with `SystemWorld`:**
 ```rust
-use typst_batch::{SystemWorld, create_library_with_inputs, Dict, IntoValue};
-use typst::World;
+use typst_batch::{SystemWorld, create_library_with_inputs};
+use typst_batch::typst::foundations::{Dict, IntoValue};
 
-// Method 1: Builder pattern
+// Builder pattern
 let world = SystemWorld::new(path, root)
     .with_inputs([("key", "value")]);
 
-// Method 2: Pre-built Dict
+// Or with pre-built Dict
 let mut inputs = Dict::new();
 inputs.insert("key".into(), "value".into_value());
 let world = SystemWorld::new(path, root)
     .with_inputs_dict(inputs);
-
-// Method 3: Custom library (for advanced use)
-let library = create_library_with_inputs(inputs);
-let world = SystemWorld::new(path, root)
-    .with_library(library);
 
 // Then compile with typst::compile(&world)
 ```
@@ -217,7 +231,7 @@ use typst_batch::{MapVirtualFS, set_virtual_fs};
 let mut vfs = MapVirtualFS::new();
 
 // Inject JSON data
-vfs.insert("/_data/site.json", r#"{"title":"My Blog","url":"https://example.com"}"#);
+vfs.insert("/_data/site.json", r#"{"title":"My Blog", "url":"https://example.com"}"#);
 
 // Inject computed data
 let posts_json = serde_json::to_string(&posts)?;
@@ -314,7 +328,7 @@ Format compilation errors and warnings with source context:
 ```rust
 use typst_batch::{
     compile_html, DiagnosticOptions, DisplayStyle,
-    format_diagnostics_with_options, DiagnosticsExt, SystemWorld,
+    DiagnosticsExt, SystemWorld,
 };
 use std::path::Path;
 
@@ -335,23 +349,87 @@ println!("{}", summary);  // "2 errors, 1 warning"
 // Or get raw counts
 let (errors, warnings) = result.diagnostics.counts();
 
-// Format with options
+// Format diagnostics (default: colored with rich snippets)
+let formatted = result.diagnostics.format(&world);
+eprintln!("{}", formatted);
+
+// Format with custom options
 let options = DiagnosticOptions {
-    colored: true,                  // ANSI colors
+    colored: true,                  // ANSI colors (requires `colored-diagnostics` feature)
     style: DisplayStyle::Rich,      // Full source snippets
     hints: true,                    // Include hints
     ..Default::default()
 };
-
-let formatted = format_diagnostics_with_options(&world, &result.diagnostics, &options);
-eprintln!("{}", formatted);
+let formatted = result.diagnostics.format_with(&world, &options);
 
 // Short style for CI/IDE (file:line:col: message)
-let short_options = DiagnosticOptions::short();
+let short = result.diagnostics.format_with(&world, &DiagnosticOptions::short());
 
-// Filter out noisy HTML export warnings
+// Filter out unwanted diagnostics
+use typst_batch::DiagnosticFilter;
+
+// Filter out HTML export warnings (shorthand)
 let filtered = result.diagnostics.filter_html_warnings();
+
+// Or use the general filter API for more control
+let filtered = result.diagnostics.filter_out(&[
+    DiagnosticFilter::HtmlExport,       // "html export is under active development"
+    DiagnosticFilter::ExternalPackages, // Warnings from extermal packages like `@preview/...`, `@local/...`
+]);
+
+// Available filters:
+// - DiagnosticFilter::HtmlExport         - HTML export development warning
+// - DiagnosticFilter::ExternalPackages   - Warnings from external packages (@preview/...)
+// - DiagnosticFilter::AllWarnings        - All warnings (keep only errors)
+// - DiagnosticFilter::MessageContains(s) - Custom filter by message text
 ```
+
+**Full Customization with Structured Data:**
+
+For complete control over rendering (JSON, HTML, IDE integration, etc.),
+use `.resolve()` to get structured `DiagnosticInfo`:
+
+```rust
+use typst_batch::{DiagnosticsExt, DiagnosticInfo};
+
+// Resolve all diagnostics to structured data
+for info in result.diagnostics.resolve(&world) {
+    // Full access to all diagnostic data:
+    // - info.severity: Error or Warning
+    // - info.message: Error message
+    // - info.path: Source file path (if available)
+    // - info.line, info.column: Location (1-indexed, if available)
+    // - info.source_lines: Vec<SourceLine> with line_num, text, highlight range
+    // - info.hints: List of hint strings
+    // - info.traces: Vec<TraceInfo>, each with:
+    //     - message: Trace point description
+    //     - path, line, column: Location (if available)
+    //     - source_lines: Source context at this trace point
+
+    // Example: Custom JSON output
+    println!("{}", serde_json::to_string_pretty(&info)?);
+
+    // Example: Custom HTML output
+    println!(r#"<div class="{:?}">"#, info.severity);
+    println!("  <strong>{}:{}</strong> {}",
+        info.path.as_deref().unwrap_or(""),
+        info.line.unwrap_or(0),
+        info.message);
+    for line in &info.source_lines {
+        println!("  <code>{}</code>", line.text);
+    }
+    println!("</div>");
+}
+```
+
+The `DiagnosticInfo` struct contains:
+- `severity`: `Severity::Error` or `Severity::Warning`
+- `message`: The diagnostic message
+- `path`: Source file path (optional)
+- `line`, `column`: Location info (optional)
+- `source_lines`: Vec of `SourceLine` with line number, text, and highlight range
+- `hints`: Vec of hint strings
+- `traces`: Vec of `TraceInfo` with call stack details
 
 ### Font Configuration
 
@@ -380,14 +458,21 @@ if let Some(count) = font_count() {
 }
 ```
 
-## Re-exported Types
+## Typst Access
 
-For convenience, commonly used typst types are re-exported:
+For advanced use cases, access the full typst ecosystem:
 
-- `FileId`, `VirtualPath`, `Source` — File identification
-- `SourceDiagnostic`, `DiagnosticSeverity`, `DiagnosticsExt` — Error handling
-- `FontBook`, `FontInfo`, `Font` — Font queries
-- `typst`, `typst_html`, `typst_kit` — Full crate access
+```rust
+// Access any typst type via the re-exported crate
+use typst_batch::typst::syntax::{FileId, VirtualPath, Source};
+use typst_batch::typst::diag::{SourceDiagnostic, Severity};
+use typst_batch::typst::foundations::{Dict, IntoValue};
+use typst_batch::typst::text::{FontBook, FontInfo, Font};
+
+// Or use the full crates
+use typst_batch::typst_html;
+use typst_batch::typst_kit;
+```
 
 ## Requirements
 

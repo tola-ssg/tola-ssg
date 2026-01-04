@@ -401,6 +401,12 @@ pub struct SlotCell<T> {
     pub accessed: bool,
 }
 
+impl<T: Clone> Default for SlotCell<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Clone> SlotCell<T> {
     /// Create a new empty slot cell.
     pub const fn new() -> Self {
