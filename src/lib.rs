@@ -77,8 +77,27 @@ pub mod world;
 
 pub use compile::{
     compile_document, compile_document_with_metadata, compile_html, compile_html_with_metadata,
-    query_metadata, DocumentResult, DocumentWithMetadataResult, HtmlResult,
+    query_metadata, query_metadata_map, DocumentResult, DocumentWithMetadataResult, HtmlResult,
     HtmlWithMetadataResult,
+};
+
+// =============================================================================
+// Diagnostics
+// =============================================================================
+
+pub use diagnostic::{
+    // Error type
+    CompileError,
+    // Options for formatting
+    DiagnosticOptions, DisplayStyle,
+    // Re-exported from typst for convenience
+    DiagnosticSeverity, SourceDiagnostic,
+    // Summary
+    DiagnosticSummary,
+    // Formatting functions
+    filter_html_warnings, format_diagnostics, format_diagnostics_with_options,
+    // Utilities
+    count_diagnostics, has_errors,
 };
 
 // =============================================================================
@@ -86,15 +105,86 @@ pub use compile::{
 // =============================================================================
 
 pub use config::{Config, ConfigBuilder};
-pub use diagnostic::{filter_html_warnings, format_diagnostics, has_errors};
 pub use file::{
-    clear_file_cache, get_accessed_files, is_virtual_path, read_virtual, read_with_global_virtual,
-    record_file_access, reset_access_flags, set_virtual_fs, NoVirtualFS, VirtualFileSystem,
-    EMPTY_ID, GLOBAL_FILE_CACHE, STDIN_ID,
+    clear_file_cache, file_id, file_id_from_path, get_accessed_files, is_virtual_path, read_virtual,
+    read_with_global_virtual, record_file_access, reset_access_flags, set_virtual_fs,
+    virtual_file_id, MapVirtualFS, NoVirtualFS, VirtualFileSystem, EMPTY_ID, GLOBAL_FILE_CACHE,
+    STDIN_ID,
 };
 pub use font::get_fonts;
 pub use library::GLOBAL_LIBRARY;
 pub use world::SystemWorld;
+
+// =============================================================================
+// Core typst types for VFS and file handling
+// =============================================================================
+
+/// File identifier used throughout Typst's file system.
+///
+/// `FileId` uniquely identifies files within a compilation. It combines:
+/// - An optional `PackageSpec` for package files
+/// - A `VirtualPath` for the file's location within the project/package
+///
+/// Use [`FileId::new`] to create IDs for your files, or [`FileId::new_fake`]
+/// for dynamically generated content.
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::{FileId, VirtualPath};
+///
+/// // Create a FileId for a project file
+/// let id = FileId::new(None, VirtualPath::new("/content/post.typ"));
+///
+/// // Create a fake FileId for virtual content
+/// let virtual_id = FileId::new_fake(VirtualPath::new("<generated>"));
+/// ```
+pub use typst::syntax::FileId;
+
+/// Virtual path within a project or package.
+///
+/// Virtual paths always start with `/` and represent paths relative to
+/// a project or package root. They're platform-independent (always use `/`).
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::VirtualPath;
+/// use std::path::Path;
+///
+/// // Create from a string path
+/// let vpath = VirtualPath::new("/content/post.typ");
+///
+/// // Create from a real path relative to root
+/// let vpath = VirtualPath::within_root(
+///     Path::new("/project/content/post.typ"),
+///     Path::new("/project"),
+/// );
+///
+/// // Resolve back to filesystem path
+/// let real_path = vpath.resolve(Path::new("/project"));
+/// ```
+pub use typst::syntax::VirtualPath;
+
+/// Parsed Typst source file.
+///
+/// Contains the source text along with its parsed AST. Used for diagnostics
+/// and incremental compilation.
+pub use typst::syntax::Source;
+
+/// Result type for file operations in Typst.
+pub use typst::diag::FileResult;
+
+/// Error type for file operations in Typst.
+pub use typst::diag::FileError;
+
+/// Package specification for Typst packages.
+///
+/// Used to identify packages in the format `@namespace/name:version`.
+pub use typst::syntax::package::PackageSpec;
+
+/// Raw bytes container used for binary files.
+pub use typst::foundations::Bytes;
 
 // =============================================================================
 // Re-export typst crates for advanced use

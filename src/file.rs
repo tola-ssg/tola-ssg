@@ -54,6 +54,74 @@ pub static EMPTY_ID: LazyLock<FileId> =
     LazyLock::new(|| FileId::new_fake(VirtualPath::new("<empty>")));
 
 // =============================================================================
+// FileId Helper Functions
+// =============================================================================
+
+/// Create a `FileId` for a project file.
+///
+/// This is the standard way to create file IDs for files within your project.
+/// The path should be root-relative (e.g., `/content/post.typ`).
+///
+/// # Arguments
+///
+/// * `path` - Path relative to project root, with leading `/`
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::file_id;
+///
+/// let id = file_id("/content/post.typ");
+/// ```
+pub fn file_id(path: impl AsRef<Path>) -> FileId {
+    FileId::new(None, VirtualPath::new(path.as_ref()))
+}
+
+/// Create a `FileId` for a file from its absolute path within a project root.
+///
+/// Returns `None` if the file is outside the root directory.
+///
+/// # Arguments
+///
+/// * `file_path` - Absolute path to the file
+/// * `root` - Absolute path to the project root
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::file_id_from_path;
+/// use std::path::Path;
+///
+/// let id = file_id_from_path(
+///     Path::new("/project/content/post.typ"),
+///     Path::new("/project"),
+/// );
+/// ```
+pub fn file_id_from_path(file_path: &Path, root: &Path) -> Option<FileId> {
+    VirtualPath::within_root(file_path, root).map(|vpath| FileId::new(None, vpath))
+}
+
+/// Create a virtual/fake `FileId` for dynamically generated content.
+///
+/// Use this for content that doesn't correspond to a real file on disk.
+/// Each call creates a unique ID that won't conflict with real file IDs.
+///
+/// # Arguments
+///
+/// * `name` - A descriptive name for the virtual file
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::virtual_file_id;
+///
+/// let id = virtual_file_id("<generated-data>");
+/// ```
+pub fn virtual_file_id(name: &str) -> FileId {
+    FileId::new_fake(VirtualPath::new(name))
+}
+
+// =============================================================================
 // Virtual File System
 // =============================================================================
 
@@ -122,6 +190,79 @@ pub struct NoVirtualFS;
 impl VirtualFileSystem for NoVirtualFS {
     fn read(&self, _path: &Path) -> Option<Vec<u8>> {
         None
+    }
+}
+
+/// A simple map-based virtual file system.
+///
+/// This provides a convenient way to inject virtual files without implementing
+/// the [`VirtualFileSystem`] trait manually.
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::{MapVirtualFS, set_virtual_fs};
+///
+/// let mut vfs = MapVirtualFS::new();
+/// vfs.insert("/_data/site.json", r#"{"title":"My Blog"}"#);
+/// vfs.insert("/_data/posts.json", serde_json::to_string(&posts)?);
+///
+/// set_virtual_fs(vfs);
+/// ```
+#[derive(Default, Clone)]
+pub struct MapVirtualFS {
+    files: FxHashMap<String, Vec<u8>>,
+}
+
+impl MapVirtualFS {
+    /// Create a new empty virtual file system.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Insert a virtual file with string content.
+    ///
+    /// The path should be root-relative (e.g., `/_data/config.json`).
+    pub fn insert(&mut self, path: impl Into<String>, content: impl AsRef<str>) {
+        self.files
+            .insert(path.into(), content.as_ref().as_bytes().to_vec());
+    }
+
+    /// Insert a virtual file with binary content.
+    pub fn insert_bytes(&mut self, path: impl Into<String>, content: impl Into<Vec<u8>>) {
+        self.files.insert(path.into(), content.into());
+    }
+
+    /// Check if a path exists in the virtual file system.
+    pub fn contains(&self, path: &str) -> bool {
+        self.files.contains_key(path)
+    }
+
+    /// Remove a virtual file.
+    pub fn remove(&mut self, path: &str) -> Option<Vec<u8>> {
+        self.files.remove(path)
+    }
+
+    /// Get the number of virtual files.
+    pub fn len(&self) -> usize {
+        self.files.len()
+    }
+
+    /// Check if the virtual file system is empty.
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+
+    /// Iterate over all virtual file paths.
+    pub fn paths(&self) -> impl Iterator<Item = &str> {
+        self.files.keys().map(String::as_str)
+    }
+}
+
+impl VirtualFileSystem for MapVirtualFS {
+    fn read(&self, path: &Path) -> Option<Vec<u8>> {
+        let path_str = path.to_str()?;
+        self.files.get(path_str).cloned()
     }
 }
 

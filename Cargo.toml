@@ -16,7 +16,6 @@ typst-html = "0.14.1"
 typst-svg = "0.14.1"
 
 # Error handling
-anyhow = "1.0"
 thiserror = "2.0"
 
 # Concurrency

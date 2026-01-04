@@ -1,6 +1,6 @@
 //! Diagnostic formatting for Typst compilation errors and warnings.
 //!
-//! This module provides human-readable formatting for `SourceDiagnostic` similar
+//! This module provides human-readable formatting for [`SourceDiagnostic`] similar
 //! to the official `typst-cli` output, including:
 //!
 //! - File path, line number, and column information
@@ -11,6 +11,7 @@
 //! # Architecture
 //!
 //! The module is organized into several layers:
+//! - **[`DiagnosticOptions`]**: Configuration for formatting behavior
 //! - **Theme**: Color styling for different diagnostic severities
 //! - **Gutter**: Box-drawing characters for source display
 //! - **`SpanLocation`**: Resolved source location information
@@ -25,13 +26,324 @@
 //! 1 │ #import "@invalid:meta.typ" as meta
 //!   │         ^^^^^^^^^^^^^^^^
 //! ```
+//!
+//! # Structured vs Formatted
+//!
+//! This module provides two levels of API:
+//!
+//! - **Structured**: Access raw [`SourceDiagnostic`] for programmatic analysis
+//! - **Formatted**: Human-readable string output via [`format_diagnostics`]
+//!
+//! ```ignore
+//! // Structured access for analysis
+//! let result = compile_html(path, root)?;
+//! for diag in &result.diagnostics {
+//!     match diag.severity {
+//!         Severity::Error => eprintln!("Error: {}", diag.message),
+//!         Severity::Warning => eprintln!("Warning: {}", diag.message),
+//!     }
+//! }
+//!
+//! // Formatted output for display
+//! let formatted = format_diagnostics_with_options(
+//!     &world,
+//!     &result.diagnostics,
+//!     &DiagnosticOptions::colored(),
+//! );
+//! eprintln!("{formatted}");
+//! ```
 
-use std::fmt::Write;
+use std::fmt::{self, Write};
 
 use colored::{ColoredString, Colorize};
-use typst::diag::{Severity, SourceDiagnostic};
+use thiserror::Error;
+use typst::diag::Severity;
 use typst::syntax::Span;
 use typst::World;
+
+// Re-export for user convenience
+pub use typst::diag::{Severity as DiagnosticSeverity, SourceDiagnostic};
+
+// ============================================================================
+// Diagnostic Options
+// ============================================================================
+
+/// Display style for diagnostic output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DisplayStyle {
+    /// Rich output with source snippets and highlighting.
+    #[default]
+    Rich,
+    /// Short output with just file:line:col and message.
+    Short,
+}
+
+/// Options for controlling diagnostic formatting.
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::diagnostic::{DiagnosticOptions, DisplayStyle};
+///
+/// // Default: colored rich output
+/// let opts = DiagnosticOptions::default();
+///
+/// // Plain text (no ANSI colors) for logging
+/// let opts = DiagnosticOptions::plain();
+///
+/// // Short format for CI/IDE integration
+/// let opts = DiagnosticOptions::short();
+///
+/// // Custom configuration
+/// let opts = DiagnosticOptions::new()
+///     .with_color(true)
+///     .with_style(DisplayStyle::Rich)
+///     .with_snippets(true);
+/// ```
+#[derive(Debug, Clone)]
+pub struct DiagnosticOptions {
+    /// Whether to use ANSI colors in output.
+    pub color: bool,
+    /// Display style (rich with snippets or short).
+    pub style: DisplayStyle,
+    /// Whether to include source code snippets.
+    pub snippets: bool,
+    /// Whether to include hints.
+    pub hints: bool,
+    /// Whether to include trace information.
+    pub traces: bool,
+    /// Tab width for display (default: 2).
+    pub tab_width: usize,
+}
+
+impl Default for DiagnosticOptions {
+    fn default() -> Self {
+        Self {
+            color: true,
+            style: DisplayStyle::Rich,
+            snippets: true,
+            hints: true,
+            traces: true,
+            tab_width: 2,
+        }
+    }
+}
+
+impl DiagnosticOptions {
+    /// Create new options with default settings.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create options for colored terminal output.
+    pub fn colored() -> Self {
+        Self::default()
+    }
+
+    /// Create options for plain text output (no ANSI colors).
+    pub fn plain() -> Self {
+        Self {
+            color: false,
+            ..Self::default()
+        }
+    }
+
+    /// Create options for short format (file:line:col: message).
+    pub fn short() -> Self {
+        Self {
+            style: DisplayStyle::Short,
+            snippets: false,
+            traces: false,
+            ..Self::default()
+        }
+    }
+
+    /// Set whether to use colors.
+    pub fn with_color(mut self, color: bool) -> Self {
+        self.color = color;
+        self
+    }
+
+    /// Set display style.
+    pub fn with_style(mut self, style: DisplayStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Set whether to include source snippets.
+    pub fn with_snippets(mut self, snippets: bool) -> Self {
+        self.snippets = snippets;
+        self
+    }
+
+    /// Set whether to include hints.
+    pub fn with_hints(mut self, hints: bool) -> Self {
+        self.hints = hints;
+        self
+    }
+
+    /// Set whether to include traces.
+    pub fn with_traces(mut self, traces: bool) -> Self {
+        self.traces = traces;
+        self
+    }
+
+    /// Set tab width for display.
+    pub fn with_tab_width(mut self, width: usize) -> Self {
+        self.tab_width = width;
+        self
+    }
+}
+
+// ============================================================================
+// Compilation Error Type
+// ============================================================================
+
+/// Error type for Typst compilation failures.
+///
+/// This provides structured access to compilation errors for programmatic handling,
+/// while also implementing `Display` for human-readable output.
+///
+/// # Example
+///
+/// ```ignore
+/// match compile_html(path, root) {
+///     Ok(result) => { /* success */ }
+///     Err(CompileError::Compilation { diagnostics, .. }) => {
+///         // Access individual errors
+///         for diag in &diagnostics {
+///             if diag.severity == Severity::Error {
+///                 // Handle error...
+///             }
+///         }
+///     }
+///     Err(CompileError::HtmlExport { message }) => {
+///         eprintln!("HTML export failed: {message}");
+///     }
+///     Err(e) => eprintln!("{e}"),
+/// }
+/// ```
+#[derive(Debug, Error)]
+pub enum CompileError {
+    /// Typst compilation failed with diagnostics.
+    #[error("Typst compilation failed:\n{formatted}")]
+    Compilation {
+        /// The raw diagnostics for programmatic access.
+        diagnostics: Vec<SourceDiagnostic>,
+        /// Pre-formatted error message.
+        formatted: String,
+    },
+
+    /// HTML export failed.
+    #[error("HTML export failed: {message}")]
+    HtmlExport {
+        /// Error message from typst_html.
+        message: String,
+    },
+
+    /// File I/O error.
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+impl CompileError {
+    /// Create a compilation error from diagnostics.
+    pub fn compilation<W: World>(world: &W, diagnostics: Vec<SourceDiagnostic>) -> Self {
+        let formatted = format_diagnostics(world, &diagnostics);
+        Self::Compilation {
+            diagnostics,
+            formatted,
+        }
+    }
+
+    /// Create a compilation error with custom formatting options.
+    pub fn compilation_with_options<W: World>(
+        world: &W,
+        diagnostics: Vec<SourceDiagnostic>,
+        options: &DiagnosticOptions,
+    ) -> Self {
+        let formatted = format_diagnostics_with_options(world, &diagnostics, options);
+        Self::Compilation {
+            diagnostics,
+            formatted,
+        }
+    }
+
+    /// Create an HTML export error.
+    pub fn html_export(message: impl Into<String>) -> Self {
+        Self::HtmlExport {
+            message: message.into(),
+        }
+    }
+
+    /// Check if this error contains any fatal errors (vs just warnings).
+    pub fn has_fatal_errors(&self) -> bool {
+        match self {
+            Self::Compilation { diagnostics, .. } => has_errors(diagnostics),
+            _ => true,
+        }
+    }
+
+    /// Get the diagnostics if this is a compilation error.
+    pub fn diagnostics(&self) -> Option<&[SourceDiagnostic]> {
+        match self {
+            Self::Compilation { diagnostics, .. } => Some(diagnostics),
+            _ => None,
+        }
+    }
+}
+
+// ============================================================================
+// Diagnostic Summary
+// ============================================================================
+
+/// Summary of diagnostic counts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DiagnosticSummary {
+    /// Number of errors.
+    pub errors: usize,
+    /// Number of warnings.
+    pub warnings: usize,
+}
+
+impl DiagnosticSummary {
+    /// Create summary from diagnostics.
+    pub fn from_diagnostics(diagnostics: &[SourceDiagnostic]) -> Self {
+        let (errors, warnings) = count_diagnostics(diagnostics);
+        Self { errors, warnings }
+    }
+
+    /// Total number of diagnostics.
+    pub fn total(&self) -> usize {
+        self.errors + self.warnings
+    }
+
+    /// Whether there are any errors.
+    pub fn has_errors(&self) -> bool {
+        self.errors > 0
+    }
+
+    /// Whether there are any diagnostics at all.
+    pub fn is_empty(&self) -> bool {
+        self.total() == 0
+    }
+}
+
+impl fmt::Display for DiagnosticSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (self.errors, self.warnings) {
+            (0, 0) => write!(f, "no diagnostics"),
+            (e, 0) => write!(f, "{e} error{}", if e == 1 { "" } else { "s" }),
+            (0, w) => write!(f, "{w} warning{}", if w == 1 { "" } else { "s" }),
+            (e, w) => write!(
+                f,
+                "{e} error{}, {w} warning{}",
+                if e == 1 { "" } else { "s" },
+                if w == 1 { "" } else { "s" }
+            ),
+        }
+    }
+}
 
 // ============================================================================
 // Gutter Characters
@@ -312,8 +624,45 @@ impl<'a> SnippetWriter<'a> {
 
 /// Format compilation diagnostics into a human-readable string.
 ///
+/// Uses default options (colored, rich format with snippets).
+/// For custom formatting, use [`format_diagnostics_with_options`].
+///
 /// Errors are displayed first (higher priority), followed by warnings.
 pub fn format_diagnostics<W: World>(world: &W, diagnostics: &[SourceDiagnostic]) -> String {
+    format_diagnostics_with_options(world, diagnostics, &DiagnosticOptions::default())
+}
+
+/// Format compilation diagnostics with custom options.
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::diagnostic::{format_diagnostics_with_options, DiagnosticOptions};
+///
+/// // Plain text for log files
+/// let plain = format_diagnostics_with_options(
+///     &world,
+///     &diagnostics,
+///     &DiagnosticOptions::plain(),
+/// );
+///
+/// // Short format for CI
+/// let short = format_diagnostics_with_options(
+///     &world,
+///     &diagnostics,
+///     &DiagnosticOptions::short(),
+/// );
+/// ```
+pub fn format_diagnostics_with_options<W: World>(
+    world: &W,
+    diagnostics: &[SourceDiagnostic],
+    options: &DiagnosticOptions,
+) -> String {
+    // Set color override based on options
+    if !options.color {
+        colored::control::set_override(false);
+    }
+
     let mut output = String::new();
 
     // Partition and sort: errors first, then warnings
@@ -323,18 +672,22 @@ pub fn format_diagnostics<W: World>(world: &W, diagnostics: &[SourceDiagnostic])
 
     let all_diags: Vec<_> = errors.iter().chain(warnings.iter()).collect();
     for (i, diag) in all_diags.iter().enumerate() {
-        format_diagnostic(&mut output, world, diag);
+        format_diagnostic_internal(&mut output, world, diag, options);
         // Add blank line between diagnostics (but not after the last one)
         if i < all_diags.len() - 1 {
             output.push('\n');
         }
     }
 
+    // Reset color override
+    if !options.color {
+        colored::control::unset_override();
+    }
+
     output
 }
 
 /// Count errors and warnings in a diagnostic list.
-#[allow(dead_code)]
 pub fn count_diagnostics(diagnostics: &[SourceDiagnostic]) -> (usize, usize) {
     diagnostics.iter().fold((0, 0), |(errors, warnings), d| {
         match d.severity {
@@ -368,7 +721,7 @@ pub fn filter_html_warnings(diagnostics: &[SourceDiagnostic]) -> Vec<SourceDiagn
         .collect()
 }
 
-/// Disable colored output (for tests).
+/// Disable colored output globally (for tests).
 #[cfg(test)]
 pub fn disable_colors() {
     colored::control::set_override(false);
@@ -379,33 +732,86 @@ pub fn disable_colors() {
 // ============================================================================
 
 /// Format a single diagnostic with its source snippet.
-fn format_diagnostic<W: World>(output: &mut String, world: &W, diag: &SourceDiagnostic) {
+fn format_diagnostic_internal<W: World>(
+    output: &mut String,
+    world: &W,
+    diag: &SourceDiagnostic,
+    options: &DiagnosticOptions,
+) {
     let (label, theme) = match diag.severity {
         Severity::Error => ("error", DiagnosticTheme::ERROR),
         Severity::Warning => ("warning", DiagnosticTheme::WARNING),
     };
 
+    match options.style {
+        DisplayStyle::Short => {
+            format_diagnostic_short(output, world, diag, label, &theme);
+        }
+        DisplayStyle::Rich => {
+            format_diagnostic_rich(output, world, diag, label, &theme, options);
+        }
+    }
+}
+
+/// Format diagnostic in short style: "file:line:col: severity: message"
+fn format_diagnostic_short<W: World>(
+    output: &mut String,
+    world: &W,
+    diag: &SourceDiagnostic,
+    label: &str,
+    theme: &DiagnosticTheme,
+) {
+    if let Some(loc) = SpanLocation::from_span(world, diag.span) {
+        _ = writeln!(
+            output,
+            "{}:{}:{}: {}: {}",
+            loc.path,
+            loc.start_line,
+            loc.start_col + 1, // 1-indexed for display
+            theme.paint(label),
+            diag.message
+        );
+    } else {
+        _ = writeln!(output, "{}: {}", theme.paint(label), diag.message);
+    }
+}
+
+/// Format diagnostic in rich style with source snippets.
+fn format_diagnostic_rich<W: World>(
+    output: &mut String,
+    world: &W,
+    diag: &SourceDiagnostic,
+    label: &str,
+    theme: &DiagnosticTheme,
+    options: &DiagnosticOptions,
+) {
     // Header: "error: message"
     _ = writeln!(output, "{}: {}", theme.paint(label), diag.message);
 
-    // Source snippet
-    if let Some(location) = SpanLocation::from_span(world, diag.span) {
-        write_snippet(output, &location, theme);
+    // Source snippet (if enabled)
+    if options.snippets {
+        if let Some(location) = SpanLocation::from_span(world, diag.span) {
+            write_snippet(output, &location, *theme);
+        }
     }
 
-    // Trace information (call stack)
-    for trace in &diag.trace {
-        write_trace(output, world, &trace.v, trace.span);
+    // Trace information (call stack) - if enabled
+    if options.traces {
+        for trace in &diag.trace {
+            write_trace(output, world, &trace.v, trace.span);
+        }
     }
 
-    // Hints
-    for hint in &diag.hints {
-        _ = writeln!(
-            output,
-            "  {} hint: {}",
-            DiagnosticTheme::HELP.paint("="),
-            hint
-        );
+    // Hints - if enabled
+    if options.hints {
+        for hint in &diag.hints {
+            _ = writeln!(
+                output,
+                "  {} hint: {}",
+                DiagnosticTheme::HELP.paint("="),
+                hint
+            );
+        }
     }
 }
 

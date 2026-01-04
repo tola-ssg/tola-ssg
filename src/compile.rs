@@ -12,15 +12,20 @@
 //! get_fonts(&[]);
 //!
 //! // Compile a file to HTML
-//! let result = compile_html(Path::new("doc.typ"), Path::new(".")).unwrap();
+//! let result = compile_html(Path::new("doc.typ"), Path::new("."))?;
 //! println!("HTML: {} bytes", result.html.len());
+//!
+//! // Access diagnostics (warnings)
+//! for diag in &result.diagnostics {
+//!     println!("Warning: {}", diag.message);
+//! }
 //!
 //! // With metadata extraction
 //! let result = compile_html_with_metadata(
 //!     Path::new("doc.typ"),
 //!     Path::new("."),
 //!     "my-meta",  // label name in typst: #metadata(...) <my-meta>
-//! ).unwrap();
+//! )?;
 //! if let Some(meta) = result.metadata {
 //!     println!("Title: {:?}", meta.get("title"));
 //! }
@@ -29,13 +34,14 @@
 use std::path::{Path, PathBuf};
 
 use serde_json::Value as JsonValue;
+use typst::diag::SourceDiagnostic;
 use typst::foundations::{Label, Selector};
 use typst::introspection::MetadataElem;
 use typst::utils::PicoStr;
 use typst::Document;
 use typst_html::HtmlDocument;
 
-use crate::diagnostic::{filter_html_warnings, format_diagnostics, has_errors};
+use crate::diagnostic::{filter_html_warnings, has_errors, CompileError};
 use crate::file::{get_accessed_files, reset_access_flags};
 use crate::world::SystemWorld;
 
@@ -50,8 +56,10 @@ pub struct HtmlResult {
     pub html: Vec<u8>,
     /// Files accessed during compilation (relative to root).
     pub accessed_files: Vec<PathBuf>,
-    /// Formatted warnings (if any).
-    pub warnings: Option<String>,
+    /// Compilation diagnostics (warnings only - errors cause Err return).
+    ///
+    /// Use [`crate::diagnostic::format_diagnostics`] to format for display.
+    pub diagnostics: Vec<SourceDiagnostic>,
 }
 
 /// Result of HTML compilation with metadata extraction.
@@ -63,8 +71,8 @@ pub struct HtmlWithMetadataResult {
     pub metadata: Option<JsonValue>,
     /// Files accessed during compilation (relative to root).
     pub accessed_files: Vec<PathBuf>,
-    /// Formatted warnings (if any).
-    pub warnings: Option<String>,
+    /// Compilation diagnostics (warnings only - errors cause Err return).
+    pub diagnostics: Vec<SourceDiagnostic>,
 }
 
 /// Result of document compilation (without HTML serialization).
@@ -74,8 +82,8 @@ pub struct DocumentResult {
     pub document: HtmlDocument,
     /// Files accessed during compilation (relative to root).
     pub accessed_files: Vec<PathBuf>,
-    /// Formatted warnings (if any).
-    pub warnings: Option<String>,
+    /// Compilation diagnostics (warnings only - errors cause Err return).
+    pub diagnostics: Vec<SourceDiagnostic>,
 }
 
 /// Result of document compilation with metadata.
@@ -87,8 +95,8 @@ pub struct DocumentWithMetadataResult {
     pub metadata: Option<JsonValue>,
     /// Files accessed during compilation (relative to root).
     pub accessed_files: Vec<PathBuf>,
-    /// Formatted warnings (if any).
-    pub warnings: Option<String>,
+    /// Compilation diagnostics (warnings only - errors cause Err return).
+    pub diagnostics: Vec<SourceDiagnostic>,
 }
 
 // =============================================================================
@@ -114,17 +122,17 @@ pub struct DocumentWithMetadataResult {
 /// let result = compile_html(Path::new("doc.typ"), Path::new("."))?;
 /// std::fs::write("output.html", &result.html)?;
 /// ```
-pub fn compile_html(path: &Path, root: &Path) -> anyhow::Result<HtmlResult> {
-    let (document, accessed_files, warnings) = compile_document_internal(path, root)?;
+pub fn compile_html(path: &Path, root: &Path) -> Result<HtmlResult, CompileError> {
+    let (document, accessed_files, diagnostics) = compile_document_internal(path, root)?;
 
     let html = typst_html::html(&document)
-        .map_err(|e| anyhow::anyhow!("HTML export failed: {e:?}"))?
+        .map_err(|e| CompileError::html_export(format!("{e:?}")))?
         .into_bytes();
 
     Ok(HtmlResult {
         html,
         accessed_files,
-        warnings,
+        diagnostics,
     })
 }
 
@@ -155,20 +163,20 @@ pub fn compile_html_with_metadata(
     path: &Path,
     root: &Path,
     label: &str,
-) -> anyhow::Result<HtmlWithMetadataResult> {
-    let (document, accessed_files, warnings) = compile_document_internal(path, root)?;
+) -> Result<HtmlWithMetadataResult, CompileError> {
+    let (document, accessed_files, diagnostics) = compile_document_internal(path, root)?;
 
     let metadata = query_metadata(&document, label);
 
     let html = typst_html::html(&document)
-        .map_err(|e| anyhow::anyhow!("HTML export failed: {e:?}"))?
+        .map_err(|e| CompileError::html_export(format!("{e:?}")))?
         .into_bytes();
 
     Ok(HtmlWithMetadataResult {
         html,
         metadata,
         accessed_files,
-        warnings,
+        diagnostics,
     })
 }
 
@@ -180,13 +188,13 @@ pub fn compile_html_with_metadata(
 ///
 /// * `path` - Path to the .typ file to compile
 /// * `root` - Project root directory
-pub fn compile_document(path: &Path, root: &Path) -> anyhow::Result<DocumentResult> {
-    let (document, accessed_files, warnings) = compile_document_internal(path, root)?;
+pub fn compile_document(path: &Path, root: &Path) -> Result<DocumentResult, CompileError> {
+    let (document, accessed_files, diagnostics) = compile_document_internal(path, root)?;
 
     Ok(DocumentResult {
         document,
         accessed_files,
-        warnings,
+        diagnostics,
     })
 }
 
@@ -197,8 +205,8 @@ pub fn compile_document_with_metadata(
     path: &Path,
     root: &Path,
     label: &str,
-) -> anyhow::Result<DocumentWithMetadataResult> {
-    let (document, accessed_files, warnings) = compile_document_internal(path, root)?;
+) -> Result<DocumentWithMetadataResult, CompileError> {
+    let (document, accessed_files, diagnostics) = compile_document_internal(path, root)?;
 
     let metadata = query_metadata(&document, label);
 
@@ -206,7 +214,7 @@ pub fn compile_document_with_metadata(
         document,
         metadata,
         accessed_files,
-        warnings,
+        diagnostics,
     })
 }
 
@@ -245,6 +253,45 @@ pub fn query_metadata(document: &HtmlDocument, label: &str) -> Option<JsonValue>
         .and_then(|meta| serde_json::to_value(&meta.value).ok())
 }
 
+/// Query multiple metadata labels from a compiled document.
+///
+/// This is useful when you have multiple metadata elements in a document.
+///
+/// # Example
+///
+/// ```typst
+/// #metadata((title: "My Post")) <post-meta>
+/// #metadata((author: "Alice", bio: "...")) <author-meta>
+/// ```
+///
+/// ```ignore
+/// let meta = query_metadata_map(&document, &["post-meta", "author-meta"]);
+/// // Returns: {"post-meta": {"title": "My Post"}, "author-meta": {"author": "Alice", ...}}
+/// ```
+///
+/// # Arguments
+///
+/// * `document` - The compiled HtmlDocument
+/// * `labels` - Slice of label names to query
+///
+/// # Returns
+///
+/// Returns a map from label name to metadata value. Labels not found are omitted.
+pub fn query_metadata_map<'a>(
+    document: &HtmlDocument,
+    labels: impl IntoIterator<Item = &'a str>,
+) -> serde_json::Map<String, JsonValue> {
+    let mut result = serde_json::Map::new();
+    
+    for label in labels {
+        if let Some(value) = query_metadata(document, label) {
+            result.insert(label.to_string(), value);
+        }
+    }
+    
+    result
+}
+
 // =============================================================================
 // Internal Helpers
 // =============================================================================
@@ -253,38 +300,31 @@ pub fn query_metadata(document: &HtmlDocument, label: &str) -> Option<JsonValue>
 fn compile_document_internal(
     path: &Path,
     root: &Path,
-) -> anyhow::Result<(HtmlDocument, Vec<PathBuf>, Option<String>)> {
+) -> Result<(HtmlDocument, Vec<PathBuf>, Vec<SourceDiagnostic>), CompileError> {
     reset_access_flags();
 
     let world = SystemWorld::new(path, root);
     let result = typst::compile(&world);
 
-    // Check for errors in warnings
+    // Check for errors in warnings (shouldn't happen, but handle it)
     if has_errors(&result.warnings) {
-        let formatted = format_diagnostics(&world, &result.warnings);
-        anyhow::bail!("Typst compilation warnings:\n{formatted}");
+        return Err(CompileError::compilation(&world, result.warnings.to_vec()));
     }
 
-    // Extract document or format errors
+    // Extract document or return errors
     let document = result.output.map_err(|errors| {
         let all_diags: Vec<_> = errors.iter().chain(&result.warnings).cloned().collect();
         let filtered = filter_html_warnings(&all_diags);
-        let formatted = format_diagnostics(&world, &filtered);
-        anyhow::anyhow!("Typst compilation failed:\n{formatted}")
+        CompileError::compilation(&world, filtered)
     })?;
 
     // Collect accessed files
     let accessed_files = collect_accessed_files(root);
 
-    // Format warnings
-    let filtered_warnings = filter_html_warnings(&result.warnings);
-    let warnings = if filtered_warnings.is_empty() {
-        None
-    } else {
-        Some(format_diagnostics(&world, &filtered_warnings))
-    };
+    // Filter HTML development warnings
+    let diagnostics = filter_html_warnings(&result.warnings);
 
-    Ok((document, accessed_files, warnings))
+    Ok((document, accessed_files, diagnostics))
 }
 
 /// Collect accessed files relative to root.
