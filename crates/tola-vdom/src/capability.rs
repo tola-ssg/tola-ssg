@@ -695,6 +695,10 @@ mod tests {
     fn test_requires_macro() {
         use crate::capability::requires;
 
+        // ═══════════════════════════════════════════════════════════════════════
+        // Basic usage
+        // ═══════════════════════════════════════════════════════════════════════
+
         // Single capability requirement using attribute macro
         #[requires(C: TestCapA)]
         fn needs_a<C>() {}
@@ -703,13 +707,85 @@ mod tests {
         #[requires(C: TestCapA, TestCapB)]
         fn needs_a_and_b<C>() {}
 
-        // Using caps! macro for cleaner type construction
+        // ═══════════════════════════════════════════════════════════════════════
+        // With existing where clause
+        // ═══════════════════════════════════════════════════════════════════════
+
+        // Existing where clause on DIFFERENT type parameter - should add new predicate
+        #[requires(C: TestCapA)]
+        fn with_other_where<P, C>()
+        where
+            P: 'static,
+        {
+        }
+
+        // Existing where clause on SAME type parameter - should MERGE bounds
+        #[requires(C: TestCapA, TestCapB)]
+        fn with_c_where<C>()
+        where
+            C: Capabilities,
+        {
+        }
+
+        // Existing where clause with multiple bounds on C - should merge
+        #[requires(C: TestCapC)]
+        fn with_multi_bound_where<C>()
+        where
+            C: Capabilities + Send,
+        {
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // With bounds in generic parameter position
+        // ═══════════════════════════════════════════════════════════════════════
+
+        // Bounds in generic params are preserved, new constraints go to where clause
+        #[requires(C: TestCapA)]
+        fn with_inline_bound<C: Capabilities>() {}
+
+        // Multiple generic params with inline bounds
+        #[requires(C: TestCapB)]
+        fn multi_generic_inline<P: 'static, C: Capabilities>() {}
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // Complex scenarios
+        // ═══════════════════════════════════════════════════════════════════════
+
+        // Both inline bounds AND where clause
+        #[requires(C: TestCapA)]
+        fn both_inline_and_where<P: Clone, C: Capabilities>()
+        where
+            P: Send,
+        {
+        }
+
+        // Where clause already has a HasCapability (non-overlapping with requires)
+        // Note: This is rare but valid - manually specifying one while requiring another
+        #[requires(C: TestCapB)]
+        fn already_has_cap<C, ExistingI>()
+        where
+            C: HasCapability<TestCapA, ExistingI>,
+        {
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // Call all functions to verify they compile and work
+        // ═══════════════════════════════════════════════════════════════════════
+
         needs_a::<caps![TestCapA], _>();
         needs_a::<caps![TestCapB, TestCapA], _>(); // A at depth 1
 
         needs_a_and_b::<caps![TestCapA, TestCapB], _, _>();
         needs_a_and_b::<caps![TestCapB, TestCapA], _, _>();
         needs_a_and_b::<caps![TestCapC, TestCapB, TestCapA], _, _>(); // Both at depth
+
+        with_other_where::<String, caps![TestCapA], _>();
+        with_c_where::<caps![TestCapA, TestCapB], _, _>();
+        with_multi_bound_where::<caps![TestCapC], _>();
+        with_inline_bound::<caps![TestCapA], _>();
+        multi_generic_inline::<i32, caps![TestCapB], _>();
+        both_inline_and_where::<String, caps![TestCapA], _>();
+        already_has_cap::<caps![TestCapA, TestCapB], _, _>();
 
         // Using cap_call! macro to avoid writing _ placeholders
         cap_call!(needs_a, caps![TestCapA]);
