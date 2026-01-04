@@ -26,8 +26,8 @@ pub enum CompileOutcome {
         path: PathBuf,
         /// URL path for the page (e.g., "/blog/post")
         url_path: String,
-        /// Indexed VDOM document
-        vdom: Document<Indexed>,
+        /// Indexed VDOM document (boxed to reduce enum size)
+        vdom: Box<Document<Indexed>>,
     },
     /// Non-content file changed, needs full reload
     Reload { reason: String },
@@ -83,7 +83,7 @@ fn compile_typst_file(path: &Path, config: &SiteConfig) -> CompileOutcome {
                 CompileOutcome::Vdom {
                     path: path.to_path_buf(),
                     url_path,
-                    vdom,
+                    vdom: Box::new(vdom),
                 }
             } else {
                 // No VDOM available (shouldn't happen in dev mode)

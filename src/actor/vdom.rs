@@ -69,7 +69,7 @@ impl VdomActor {
                 }
 
                 VdomMsg::Process { path, url_path, vdom } => {
-                    self.handle_process(path, url_path, vdom).await;
+                    self.handle_process(path, url_path, *vdom).await;
                 }
 
                 VdomMsg::Reload { reason } => {
@@ -143,7 +143,7 @@ impl VdomActor {
                     // Update cache AFTER successful send
                     // This keeps cache in sync with what browser should display
                     let key = CacheKey::new(&url_path);
-                    self.cache.lock().insert(key, new_vdom);
+                    self.cache.lock().insert(key, *new_vdom);
                 }
             }
             DiffOutcome::Initial => {

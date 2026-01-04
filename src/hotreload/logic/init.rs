@@ -27,7 +27,7 @@ pub fn build_initial_cache(config: &SiteConfig) -> Vec<(String, Document<Indexed
     let results: Vec<_> = typ_files
         .iter()
         .filter_map(|path| match compile_page(path, config) {
-            CompileOutcome::Vdom { url_path, vdom, .. } => Some((url_path, vdom)),
+            CompileOutcome::Vdom { url_path, vdom, .. } => Some((url_path, *vdom)),
             CompileOutcome::Error { path, error } => {
                 crate::log!("init"; "error {}: {}", path.display(), error);
                 None

@@ -222,10 +222,10 @@ impl Debouncer {
         }
 
         // Must wait for cooldown from last compile
-        if let Some(last_compile) = self.last_compile {
-            if last_compile.elapsed() < Duration::from_millis(REBUILD_COOLDOWN_MS) {
-                return false;
-            }
+        if let Some(last_compile) = self.last_compile
+            && last_compile.elapsed() < Duration::from_millis(REBUILD_COOLDOWN_MS)
+        {
+            return false;
         }
 
         !self.changed.is_empty()

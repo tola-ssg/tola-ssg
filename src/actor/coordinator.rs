@@ -61,10 +61,10 @@ impl Coordinator {
         let (ws_tx, ws_rx) = mpsc::channel::<WsMsg>(CHANNEL_BUFFER);
 
         // Start WebSocket server
-        if let Some(port) = self.ws_port {
-            if let Err(e) = crate::hotreload::ws::start_ws_server_with_channel(port, ws_tx.clone()) {
-                crate::log!("actor"; "websocket server failed: {}", e);
-            }
+        if let Some(port) = self.ws_port
+            && let Err(e) = crate::hotreload::ws::start_ws_server_with_channel(port, ws_tx.clone())
+        {
+            crate::log!("actor"; "websocket server failed: {}", e);
         }
 
         // Create actors

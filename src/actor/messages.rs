@@ -43,7 +43,8 @@ pub enum VdomMsg {
     Process {
         path: PathBuf,
         url_path: String,
-        vdom: Document<Indexed>,
+        /// Boxed to reduce enum size (Document<Indexed> is ~520 bytes)
+        vdom: Box<Document<Indexed>>,
     },
     /// Trigger reload
     Reload { reason: String },

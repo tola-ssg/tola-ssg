@@ -375,7 +375,7 @@ impl BuildDriver for Development {
 |------|--------|--------|------|------|
 | pipeline/ → hotreload/logic/ | P0 | 低 | 无 | ✅ 已完成 |
 | CONFIG 封装 | P1 | 低 | 无 | ✅ 已完成 (cfg() 仅入口调用) |
-| 构建系统统一 | P1 | 中 | Driver Pattern | 📋 进行中 |
+| 构建系统统一 | P1 | 中 | Driver Pattern | ✅ 已完成 (bridge::compile_vdom 为统一入口) |
 | Actor 错误处理统一 | P2 | 中 | 无 | 📋 待定 |
 | GLOBAL_SITE_DATA 封装 | P2 | 中 | 无 | 📋 待定 |
 | GLOBAL_SITE_DATA 内部化 | P3 | 高 | Actor 重构 | 📋 待定 |

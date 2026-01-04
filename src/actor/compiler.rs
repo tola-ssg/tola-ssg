@@ -155,6 +155,7 @@ impl CompilerActor {
     async fn route_outcome(&mut self, outcome: CompileOutcome) {
         match outcome {
             CompileOutcome::Vdom { path, url_path, vdom } => {
+                // vdom is already Box<Document<Indexed>> from CompileOutcome
                 let _ = self.vdom_tx.send(VdomMsg::Process {
                     path,
                     url_path,

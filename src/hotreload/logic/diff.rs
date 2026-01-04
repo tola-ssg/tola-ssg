@@ -18,7 +18,8 @@ pub enum DiffOutcome {
     /// No changes detected
     Unchanged,
     /// Patches to apply (includes new VDOM for cache update after broadcast)
-    Patches(Vec<Patch>, Document<Indexed>),
+    /// Document is boxed to reduce enum size
+    Patches(Vec<Patch>, Box<Document<Indexed>>),
     /// Structural change requires full reload
     NeedsReload { reason: String },
 }
@@ -46,7 +47,7 @@ pub fn diff_vdom(
     } else if diff_result.ops.is_empty() {
         DiffOutcome::Unchanged
     } else {
-        DiffOutcome::Patches(diff_result.ops, new_vdom.clone())
+        DiffOutcome::Patches(diff_result.ops, Box::new(new_vdom.clone()))
     }
 }
 
