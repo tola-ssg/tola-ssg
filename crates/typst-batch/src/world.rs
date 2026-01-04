@@ -107,9 +107,6 @@ pub struct SystemWorld {
     now: LazyNow,
 }
 
-/// Type alias for the exported world type.
-pub type TolaWorld = SystemWorld;
-
 impl SystemWorld {
     /// Create a new world for compiling a specific file.
     ///

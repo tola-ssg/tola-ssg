@@ -20,7 +20,7 @@ mod typst_lib;
 mod utils;
 mod vdom_compile;
 
-// Use tola_vdom crate, aliased as vdom for compatibility
+// Use tola-vdom crate, aliased as vdom for compatibility
 use tola_vdom as vdom;
 
 use anyhow::Result;

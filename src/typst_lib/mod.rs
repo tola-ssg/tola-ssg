@@ -1,6 +1,6 @@
 //! Typst library integration for direct compilation without CLI overhead.
 //!
-//! This module provides a thin wrapper around `tola_typst` crate, adding
+//! This module provides a thin wrapper around `typst_batch` crate, adding
 //! tola-specific functionality like virtual data files (`/_data/*.json`).
 //!
 //! # Architecture
@@ -8,7 +8,7 @@
 //! ```text
 //! ┌─────────────────────────────────────────────────────────────────────────┐
 //! │                       Global Shared Resources                           │
-//! │           (provided by tola_typst crate)                                │
+//! │           (provided by typst_batch crate)                               │
 //! ├─────────────┬─────────────┬─────────────────┬───────────────────────────┤
 //! │ GLOBAL_FONTS│GLOBAL_LIBRARY│GLOBAL_PACKAGE   │   GLOBAL_FILE_CACHE       │
 //! │ (~100ms)    │ (std lib)    │ (pkg cache)     │ (source/bytes per FileId) │
@@ -30,8 +30,8 @@ use typst::foundations::{Label, Selector, Value};
 use typst::introspection::MetadataElem;
 use typst::utils::PicoStr;
 
-// Re-export from tola_typst
-pub use tola_typst::{
+// Re-export from typst_batch
+pub use typst_batch::{
     clear_file_cache, format_diagnostics, get_fonts, has_errors, filter_html_warnings,
     reset_access_flags, get_accessed_files, SystemWorld, GLOBAL_LIBRARY,
 };
@@ -48,7 +48,7 @@ use crate::data::{is_virtual_data_path, read_virtual_data};
 /// and return dynamically generated JSON from the global site data store.
 pub struct TolaVirtualData;
 
-impl tola_typst::VirtualDataProvider for TolaVirtualData {
+impl typst_batch::VirtualDataProvider for TolaVirtualData {
     fn is_virtual_path(&self, path: &Path) -> bool {
         is_virtual_data_path(path)
     }
@@ -122,12 +122,12 @@ const fn acquire_test_lock() -> DummyGuard {
 /// Also registers the virtual data provider for `/_data/*.json` files.
 pub fn warmup_with_font_dirs(font_dirs: &[&Path]) {
     // Register tola's virtual data provider for /_data/*.json files
-    tola_typst::set_virtual_provider(TolaVirtualData);
+    typst_batch::set_virtual_provider(TolaVirtualData);
 
     let _ = get_fonts(font_dirs);
     let _ = &*GLOBAL_LIBRARY;
-    let _ = &*tola_typst::GLOBAL_PACKAGE_STORAGE;
-    let _ = &*tola_typst::GLOBAL_FILE_CACHE;
+    let _ = typst_batch::config::package_storage();
+    let _ = &*typst_batch::GLOBAL_FILE_CACHE;
 }
 
 /// Compile a Typst file and extract metadata in a single pass.

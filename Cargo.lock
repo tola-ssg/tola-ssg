@@ -5044,11 +5044,11 @@ dependencies = [
  "thiserror 2.0.17",
  "tiny_http",
  "tokio",
- "tola_typst",
- "tola_vdom",
+ "tola-vdom",
  "toml",
  "tungstenite",
  "typst",
+ "typst-batch",
  "typst-html",
  "typst-kit",
  "typst-svg",
@@ -5059,25 +5059,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tola_typst"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arc-swap",
- "chrono",
- "colored",
- "parking_lot",
- "rustc-hash 2.1.1",
- "tempfile",
- "thiserror 2.0.17",
- "typst",
- "typst-html",
- "typst-kit",
- "typst-svg",
-]
-
-[[package]]
-name = "tola_vdom"
+name = "tola-vdom"
 version = "0.1.0"
 dependencies = [
  "blake3",
@@ -5210,6 +5192,24 @@ name = "typst-assets"
 version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5613cb719a6222fe9b74027c3625d107767ec187bff26b8fc931cf58942c834f"
+
+[[package]]
+name = "typst-batch"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "chrono",
+ "colored",
+ "parking_lot",
+ "rustc-hash 2.1.1",
+ "tempfile",
+ "thiserror 2.0.17",
+ "typst",
+ "typst-html",
+ "typst-kit",
+ "typst-svg",
+]
 
 [[package]]
 name = "typst-eval"

@@ -1,13 +1,13 @@
 [package]
-name = "tola_vdom"
+name = "tola-vdom"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-description = "Type-safe, multi-phase HTML/XML DOM processing with TTG pattern"
+description = "Type-safe multi-phase HTML/XML DOM with TTG pattern"
 keywords = ["vdom", "html", "dom", "diff", "transform"]
 categories = ["parsing", "web-programming"]
-repository = "https://github.com/aspect-rs/tola"
+repository = "https://github.com/aspect-rs/tola-vdom"
 
 [features]
 default = ["std"]

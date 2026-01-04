@@ -39,7 +39,7 @@ use typst::foundations::Bytes;
 use typst::syntax::{FileId, Source, VirtualPath};
 use typst_kit::download::{DownloadState, Progress};
 
-use crate::package::GLOBAL_PACKAGE_STORAGE;
+use crate::config::{default_typst_toml, package_storage};
 
 // =============================================================================
 // Constants
@@ -52,10 +52,6 @@ pub static STDIN_ID: LazyLock<FileId> =
 /// Virtual `FileId` for empty/no input.
 pub static EMPTY_ID: LazyLock<FileId> =
     LazyLock::new(|| FileId::new_fake(VirtualPath::new("<empty>")));
-
-/// Default typst.toml content for projects without one.
-const DEFAULT_TYPST_TOML: &[u8] =
-    b"[package]\nname = \"tola-project\"\nversion = \"0.0.0\"\nentrypoint = \"content/index.typ\"";
 
 // =============================================================================
 // Virtual Data Provider Trait
@@ -106,7 +102,7 @@ static GLOBAL_VIRTUAL_PROVIDER: LazyLock<RwLock<Box<dyn VirtualDataProvider>>> =
 /// # Example
 ///
 /// ```ignore
-/// use tola_typst::file::{set_virtual_provider, VirtualDataProvider};
+/// use typst_batch::file::{set_virtual_provider, VirtualDataProvider};
 ///
 /// struct MyVirtualData;
 ///
@@ -295,7 +291,7 @@ pub fn read_with_global_virtual(id: FileId, project_root: &Path) -> FileResult<V
 
     // Generate default typst.toml if missing
     if path.ends_with("typst.toml") && !path.exists() {
-        return Ok(DEFAULT_TYPST_TOML.to_vec());
+        return Ok(default_typst_toml());
     }
 
     read_disk(&path)
@@ -336,7 +332,7 @@ pub fn read_with_virtual<V: VirtualDataProvider>(
 
     // Generate default typst.toml if missing
     if path.ends_with("typst.toml") && !path.exists() {
-        return Ok(DEFAULT_TYPST_TOML.to_vec());
+        return Ok(default_typst_toml());
     }
 
     read_disk(&path)
@@ -352,7 +348,7 @@ pub fn decode_utf8(buf: &[u8]) -> FileResult<&str> {
 fn resolve_path(project_root: &Path, id: FileId) -> FileResult<std::path::PathBuf> {
     let root = id
         .package()
-        .map(|spec| GLOBAL_PACKAGE_STORAGE.prepare_package(spec, &mut SilentProgress))
+        .map(|spec| package_storage().prepare_package(spec, &mut SilentProgress))
         .transpose()?
         .unwrap_or_else(|| project_root.to_path_buf());
 

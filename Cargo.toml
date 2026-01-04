@@ -91,8 +91,8 @@ rkyv = { version = "0.8", optional = true }
 redb = { version = "2", optional = true }
 
 # Workspace crates
-tola_typst = { path = "crates/tola_typst" }
-tola_vdom = { path = "crates/tola_vdom" }
+typst-batch = { path = "crates/typst-batch" }
+tola-vdom = { path = "crates/tola-vdom" }
 
 [features]
 default = []

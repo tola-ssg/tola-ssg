@@ -26,29 +26,18 @@
 //!
 //! `PackageStorage` is thread-safe and can be shared across compilations.
 //! Downloads are coordinated to prevent duplicate requests.
+//!
+//! # Configuration
+//!
+//! Use [`crate::config::ConfigBuilder`] to configure the User-Agent string
+//! before first package download.
 
-use std::sync::LazyLock;
+pub use crate::config::{package_storage, PACKAGE_STORAGE};
 
-use typst_kit::download::Downloader;
-use typst_kit::package::PackageStorage;
-
-/// Global shared package storage - one cache for all compilations.
-///
-/// Uses `LazyLock` for thread-safe, one-time initialization on first access.
-///
-/// # Configuration
-///
-/// - Cache path: Uses platform default (`~/.cache/typst/packages` on Linux)
-/// - Package path: Uses platform default
-/// - User-Agent: `tola/{version}` for package downloads
-pub static GLOBAL_PACKAGE_STORAGE: LazyLock<PackageStorage> = LazyLock::new(|| {
-    PackageStorage::new(
-        None, // Use default cache path (~/.cache/typst/packages)
-        None, // Use default package path
-        // Create downloader with tola user-agent for attribution
-        Downloader::new(concat!("tola/", env!("CARGO_PKG_VERSION")).to_string()),
-    )
-});
+/// Backwards-compatible alias for global package storage.
+#[deprecated(since = "0.2.0", note = "Use package_storage() instead")]
+pub static GLOBAL_PACKAGE_STORAGE: std::sync::LazyLock<&'static typst_kit::package::PackageStorage> =
+    std::sync::LazyLock::new(|| package_storage());
 
 #[cfg(test)]
 mod tests {
@@ -56,15 +45,13 @@ mod tests {
 
     #[test]
     fn test_storage_initialized() {
-        // Should not panic on access
-        let _storage = &*GLOBAL_PACKAGE_STORAGE;
+        let _storage = package_storage();
     }
 
     #[test]
     fn test_storage_is_shared() {
-        let storage1 = &*GLOBAL_PACKAGE_STORAGE;
-        let storage2 = &*GLOBAL_PACKAGE_STORAGE;
-        // Should return the same static reference
+        let storage1 = package_storage();
+        let storage2 = package_storage();
         assert!(std::ptr::eq(storage1, storage2), "Storage should be shared");
     }
 }
