@@ -100,16 +100,16 @@ pub struct RawDocExt {
 /// converted to StableId in the Indexer transform.
 #[derive(Debug, Clone, Default)]
 pub struct RawElemExt {
-    /// Typst Span for this element (if available)
+    /// Source Span for this element (if available)
     ///
     /// Used to generate stable IDs that persist across compilations.
     /// `None` for elements without a source location (e.g., generated wrappers).
-    pub span: Option<typst::syntax::Span>,
+    pub span: Option<crate::span::SourceSpan>,
 }
 
 impl RawElemExt {
     /// Create with a span
-    pub fn with_span(span: typst::syntax::Span) -> Self {
+    pub fn with_span(span: crate::span::SourceSpan) -> Self {
         Self { span: Some(span) }
     }
 
@@ -129,13 +129,13 @@ impl RawElemExt {
 /// Text nodes also have Spans which are used for StableId generation.
 #[derive(Debug, Clone, Default)]
 pub struct RawTextExt {
-    /// Typst Span for this text node (if available)
-    pub span: Option<typst::syntax::Span>,
+    /// Source Span for this text node (if available)
+    pub span: Option<crate::span::SourceSpan>,
 }
 
 impl RawTextExt {
     /// Create with a span
-    pub fn with_span(span: typst::syntax::Span) -> Self {
+    pub fn with_span(span: crate::span::SourceSpan) -> Self {
         Self { span: Some(span) }
     }
 

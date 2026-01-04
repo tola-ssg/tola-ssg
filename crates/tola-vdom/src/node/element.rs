@@ -119,7 +119,7 @@ impl<P: PhaseData> Element<P> {
 // =============================================================================
 
 impl Element<Raw> {
-    /// Auto-detect family and capture Typst Span for StableId generation
+    /// Auto-detect family and capture SourceSpan for StableId generation
     ///
     /// This is the primary constructor for Raw phase elements during
     /// typst-html conversion. The Span is stored in the element extension
@@ -129,11 +129,11 @@ impl Element<Raw> {
     ///
     /// * `tag` - HTML tag name
     /// * `attrs` - Attributes for family detection (not stored)
-    /// * `span` - Typst Span from the source element
+    /// * `span` - SourceSpan from the source element
     pub fn auto_with_span(
         tag: impl Into<String>,
         attrs: &[(String, String)],
-        span: typst::syntax::Span,
+        span: crate::span::SourceSpan,
     ) -> Self {
         use crate::family::identify_family_kind;
         let tag = tag.into();

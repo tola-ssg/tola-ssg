@@ -65,7 +65,7 @@ impl<P: PhaseData> FamilyExt<P> {
 /// Raw phase: access and set Span for StableId generation
 impl FamilyExt<Raw> {
     /// Get the Span from any family variant
-    pub fn span(&self) -> Option<typst::syntax::Span> {
+    pub fn span(&self) -> Option<crate::span::SourceSpan> {
         match self {
             Self::Svg(ext) => ext.span,
             Self::Link(ext) => ext.span,
@@ -76,7 +76,7 @@ impl FamilyExt<Raw> {
     }
 
     /// Set the Span on any family variant
-    pub fn set_span(&mut self, span: typst::syntax::Span) {
+    pub fn set_span(&mut self, span: crate::span::SourceSpan) {
         match self {
             Self::Svg(ext) => ext.span = Some(span),
             Self::Link(ext) => ext.span = Some(span),

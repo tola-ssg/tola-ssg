@@ -1,4 +1,4 @@
-//! Conversion from typst-html output to Raw VDOM
+//! Conversion from typst HtmlDocument to Raw VDOM
 //!
 //! This module bridges typst-html's Element type to our VDOM.
 //! The conversion happens at build time, creating a Raw phase tree
@@ -25,12 +25,12 @@
 //! ```
 
 use smallvec::SmallVec;
-use typst::introspection::Introspector;
-use typst::syntax::Span;
-use typst_html::{HtmlDocument, HtmlElement, HtmlFrame, HtmlNode};
+use typst_batch::typst::introspection::Introspector;
+use typst_batch::typst_html::{HtmlDocument, HtmlElement, HtmlFrame, HtmlNode};
 
-use super::node::{Document, Element, Node, Text};
-use super::phase::{Raw, RawDocExt, RawTextExt};
+use crate::node::{Document, Element, Node, Text};
+use crate::phase::{Raw, RawDocExt, RawTextExt};
+use crate::span::SourceSpan;
 
 // =============================================================================
 // Converter
@@ -79,7 +79,8 @@ impl<'a> Converter<'a> {
             .collect();
 
         // Create element with auto-detected family and captured Span
-        let mut element = Element::auto_with_span(&tag, &attrs, elem.span);
+        // Convert typst Span to our SourceSpan abstraction
+        let mut element = Element::auto_with_span(&tag, &attrs, elem.span.into());
         element.attrs = attrs;
         element.children = children;
 
@@ -95,9 +96,10 @@ impl<'a> Converter<'a> {
             HtmlNode::Tag(_) => None,
 
             // Text nodes - capture Span for StableId generation
+            // Convert typst Span to our SourceSpan abstraction
             HtmlNode::Text(text, span) => Some(Node::Text(Text {
                 content: text.to_string(),
-                ext: RawTextExt::with_span(*span),
+                ext: RawTextExt::with_span((*span).into()),
             })),
 
             // Recursive element conversion
@@ -121,7 +123,7 @@ impl<'a> Converter<'a> {
     fn convert_frame_to_svg(&mut self, frame: &HtmlFrame) -> Node<Raw> {
         // Render frame to SVG string using typst-svg
         // This returns a COMPLETE <svg>...</svg> string
-        let svg_string = typst_svg::svg_html_frame(
+        let svg_string = typst_batch::typst_svg::svg_html_frame(
             &frame.inner,
             frame.text_size,
             frame.id.as_deref(),
@@ -134,7 +136,8 @@ impl<'a> Converter<'a> {
         let (attrs, inner_content) = parse_svg_string(&svg_string);
 
         // Create SVG element with parsed attributes
-        let mut svg_elem = Element::auto_with_span("svg", &attrs, Span::detached());
+        // Use detached SourceSpan since frames don't have direct source spans
+        let mut svg_elem = Element::auto_with_span("svg", &attrs, SourceSpan::detached());
         svg_elem.attrs = attrs;
 
         // The inner content is raw SVG (paths, groups, etc.)

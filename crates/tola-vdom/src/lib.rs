@@ -20,8 +20,10 @@
 //! - `lcs`: Longest Common Subsequence (used by diff)
 //! - `id`: StableId (content-hash based identity)
 //!
-//! ## Conversion
-//! - `convert`: typst-html → Raw VDOM conversion
+//! ## Conversion (feature-gated)
+//! - `convert::typst`: Typst HtmlDocument → Raw VDOM (feature = "typst")
+//! - `convert::markdown`: Markdown → Raw VDOM (planned, feature = "markdown")
+//! - `convert::html`: HTML string → Raw VDOM (planned, feature = "html-parser")
 //!
 //! # Usage
 //!
@@ -51,6 +53,7 @@ pub mod lcs;
 pub mod macros;
 pub mod node;
 pub mod phase;
+pub mod span;
 pub mod transform;
 pub mod transforms;
 
@@ -87,7 +90,12 @@ pub use phase::{
     Rendered, RenderedDocExt,
 };
 
-// Conversion
+// Source span abstraction
+#[allow(unused_imports)]
+pub use span::SourceSpan;
+
+// Conversion (requires typst feature)
+#[cfg(feature = "typst")]
 #[allow(unused_imports)]
 pub use convert::{from_typst_html, from_typst_html_with_meta};
 
@@ -111,6 +119,7 @@ pub use hash::StableHasher;
 // High-level API for compilation pipeline integration
 // =============================================================================
 
+#[cfg(feature = "typst")]
 use transforms::{HtmlRenderer, Indexer};
 
 /// Result of VDOM compilation
@@ -140,7 +149,8 @@ pub struct VdomCompileResult {
 /// let result = vdom::compile_to_html(&doc_result.document);
 /// fs::write(output_path, &result.html)?;
 /// ```
-pub fn compile_to_html(document: &typst_html::HtmlDocument) -> VdomCompileResult {
+#[cfg(feature = "typst")]
+pub fn compile_to_html(document: &typst_batch::typst_html::HtmlDocument) -> VdomCompileResult {
     use transform::Transform;
 
     // Raw phase: convert from typst

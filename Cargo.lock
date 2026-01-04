@@ -5063,9 +5063,7 @@ dependencies = [
  "smallvec",
  "tokio",
  "tungstenite",
- "typst",
- "typst-html",
- "typst-svg",
+ "typst-batch",
 ]
 
 [[package]]
@@ -5187,18 +5185,18 @@ checksum = "5613cb719a6222fe9b74027c3625d107767ec187bff26b8fc931cf58942c834f"
 [[package]]
 name = "typst-batch"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91b04d2251a80837c0ad2acacc73b083e55a1ebb0bba42b8189411d3daa2bed"
 dependencies = [
  "chrono",
  "colored",
  "parking_lot",
  "rustc-hash 2.1.1",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.17",
  "typst",
  "typst-html",
  "typst-kit",
+ "typst-svg",
 ]
 
 [[package]]
