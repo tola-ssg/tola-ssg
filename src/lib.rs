@@ -1,48 +1,68 @@
 //! # typst-batch
 //!
-//! A Typst compilation library with shared global resources for batch processing.
+//! A Typst → HTML batch compilation library with shared global resources.
 //!
-//! This crate provides a [`World`](typst::World) implementation optimized for
-//! compiling multiple Typst documents efficiently by sharing:
+//! This crate was created for [tola](https://github.com/aspect-rs/tola-ssg),
+//! a Typst-based static site generator. It provides optimized batch compilation
+//! by sharing expensive resources across multiple document compilations:
 //!
-//! - **Fonts**: Loaded once and shared across all compilations
+//! - **Fonts**: Loaded once (~100ms saved per compilation)
 //! - **Packages**: Downloaded once and cached globally
 //! - **File cache**: Fingerprint-based invalidation for incremental builds
-//! - **Standard library**: Shared with HTML feature enabled
+//! - **Standard library**: Shared instance with HTML feature enabled
+//!
+//! ## ⚠️ Scope Note
+//!
+//! This library is specifically designed for **Typst → HTML** workflows.
+//! If you need PDF output or other formats, consider using typst directly
+//! or the official typst-cli.
 //!
 //! ## Quick Start
 //!
 //! ```ignore
-//! use typst_batch::{compile, SystemWorld, get_fonts, HtmlDocument};
+//! use typst_batch::{compile_html, get_fonts};
 //! use std::path::Path;
 //!
-//! // Initialize fonts (once at startup)
-//! let fonts = get_fonts(&[]);
+//! // Initialize fonts once at startup
+//! get_fonts(&[]);
 //!
-//! // Create a world for compilation
-//! let world = SystemWorld::new(
-//!     Path::new("content/index.typ"),
+//! // Compile a single file
+//! let result = compile_html(Path::new("doc.typ"), Path::new("."))?;
+//! std::fs::write("output.html", &result.html)?;
+//!
+//! // Compile with metadata extraction
+//! // In your .typ file: #metadata((title: "Hello")) <post-meta>
+//! let result = compile_html_with_metadata(
+//!     Path::new("post.typ"),
 //!     Path::new("."),
-//! );
-//!
-//! // Compile to HTML document
-//! let document = compile(&world).unwrap();
-//! let html_doc = typst_batch::html(&document).unwrap();
+//!     "post-meta",  // label name
+//! )?;
+//! println!("Title: {:?}", result.metadata);
 //! ```
 //!
-//! ## Modules
+//! ## High-Level API
+//!
+//! For most use cases, use the high-level functions:
+//!
+//! - [`compile_html`]: Compile to HTML bytes
+//! - [`compile_html_with_metadata`]: Compile to HTML with metadata extraction
+//! - [`compile_document`]: Compile to HtmlDocument (for further processing)
+//! - [`query_metadata`]: Extract metadata from a compiled document
+//!
+//! ## Low-Level API
+//!
+//! For advanced use cases, access the underlying modules:
 //!
 //! - [`config`]: Runtime configuration (User-Agent for package downloads)
 //! - [`world`]: Typst World implementation
 //! - [`font`]: Font discovery and loading
-//! - [`package`]: Package resolution
-//! - [`library`]: Typst standard library
 //! - [`file`]: File caching and virtual file support
 //! - [`diagnostic`]: Error formatting
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod compile;
 pub mod config;
 pub mod diagnostic;
 pub mod file;
@@ -52,7 +72,17 @@ pub mod package;
 pub mod world;
 
 // =============================================================================
-// Re-export main types from this crate
+// High-Level API (recommended for most use cases)
+// =============================================================================
+
+pub use compile::{
+    compile_document, compile_document_with_metadata, compile_html, compile_html_with_metadata,
+    query_metadata, DocumentResult, DocumentWithMetadataResult, HtmlResult,
+    HtmlWithMetadataResult,
+};
+
+// =============================================================================
+// Infrastructure
 // =============================================================================
 
 pub use config::{Config, ConfigBuilder};
@@ -67,43 +97,17 @@ pub use library::GLOBAL_LIBRARY;
 pub use world::SystemWorld;
 
 // =============================================================================
-// Re-export commonly used typst types for convenience
+// Re-export typst crates for advanced use
 // =============================================================================
 
-// Core compilation
-pub use typst::compile;
-pub use typst::World;
-
-// Document types
-pub use typst::Document;
-pub use typst_html::HtmlDocument;
-
-// HTML rendering
-pub use typst_html::html;
-
-// Metadata extraction (for querying document metadata)
-pub use typst::foundations::{Label, Selector, Value};
-pub use typst::introspection::MetadataElem;
-pub use typst::utils::PicoStr;
-
-// Diagnostics
-pub use typst::diag::{SourceDiagnostic, SourceResult};
-
-// =============================================================================
-// Re-export full typst crates for advanced use
-// =============================================================================
-
-/// Full typst crate for advanced use cases.
-///
-/// Most common types are re-exported at the crate root.
-/// Use this module for advanced features not exposed at the root level.
+/// Full typst crate for advanced/custom compilation workflows.
 pub use typst;
 
-/// Full typst-html crate for advanced HTML rendering.
+/// typst-html crate for HTML rendering.
 pub use typst_html;
 
-/// Full typst-kit crate for font/package utilities.
+/// typst-kit for font/package utilities.
 pub use typst_kit;
 
-/// Full typst-svg crate for SVG rendering.
+/// typst-svg for SVG rendering (used internally for math/graphics).
 pub use typst_svg;

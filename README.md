@@ -1,13 +1,22 @@
 # typst-batch
 
-A Typst compilation library with shared global resources for batch processing.
+A Typst → HTML batch compilation library with shared global resources.
+
+## ⚠️ Scope Note
+
+This library was created for [tola](https://github.com/tola-ssg/tola-ssg), a Typst-based static site generator. It is specifically designed for **Typst → HTML** workflows and may not suit all use cases.
+
+If you need:
+- **PDF output** → Use [typst](https://crates.io/crates/typst) directly or the official `typst-cli`
+- **Single file compilation** → The official `typst-cli` is simpler
+- **Custom output formats** → Use the typst crate directly
 
 ## Overview
 
-`typst-batch` provides a [`World`](https://docs.rs/typst/latest/typst/trait.World.html) implementation optimized for compiling multiple Typst documents efficiently. Resources are loaded once and shared across all compilations:
+`typst-batch` optimizes batch compilation by sharing expensive resources:
 
-- **Fonts**: System and custom fonts loaded once at startup
-- **Packages**: Downloaded once from the Typst registry and cached
+- **Fonts**: Loaded once (~100ms saved per compilation)
+- **Packages**: Downloaded once from Typst registry and cached
 - **File cache**: Fingerprint-based invalidation for incremental builds
 - **Standard library**: Shared instance with HTML feature enabled
 
@@ -18,51 +27,90 @@ A Typst compilation library with shared global resources for batch processing.
 typst-batch = "0.1"
 ```
 
-## Usage
-
-### Basic Usage
+## Quick Start
 
 ```rust
-use typst_batch::{SystemWorld, get_fonts};
+use typst_batch::{compile_html, get_fonts};
 use std::path::Path;
 
-// Initialize fonts (once at startup)
-let _fonts = get_fonts(&[]);
+// Initialize fonts once at startup
+get_fonts(&[]);
 
-// Create a world for compilation
-let world = SystemWorld::new(
-    Path::new("document.typ"),
-    Path::new("."),
-);
-
-// Compile with typst
-let result = typst::compile(&world);
+// Compile a single file
+let result = compile_html(Path::new("doc.typ"), Path::new("."))?;
+std::fs::write("output.html", &result.html)?;
 ```
 
-### Configuration (Optional)
+## High-Level API
 
-Configuration is optional. Without any configuration, the library uses sensible defaults:
+### Compile to HTML
 
 ```rust
-// Option 1: Use defaults (recommended for most cases)
-// No configuration needed - just start using the library
+use typst_batch::compile_html;
 
-// Option 2: Custom User-Agent for package downloads
+let result = compile_html(Path::new("doc.typ"), Path::new("."))?;
+// result.html: Vec<u8>
+// result.accessed_files: Vec<PathBuf>
+// result.warnings: Option<String>
+```
+
+### Compile with Metadata Extraction
+
+In your Typst file:
+```typst
+#metadata((title: "My Post", date: "2024-01-01")) <post-meta>
+```
+
+Then extract it:
+```rust
+use typst_batch::compile_html_with_metadata;
+
+let result = compile_html_with_metadata(
+    Path::new("post.typ"),
+    Path::new("."),
+    "post-meta",  // label name (without angle brackets)
+)?;
+
+if let Some(meta) = &result.metadata {
+    println!("Title: {}", meta["title"]);
+}
+```
+
+### Get HtmlDocument for Further Processing
+
+```rust
+use typst_batch::compile_document;
+
+let result = compile_document(Path::new("doc.typ"), Path::new("."))?;
+// result.document: typst_html::HtmlDocument
+// Process with tola-vdom or other libraries
+```
+
+### Query Metadata from Existing Document
+
+```rust
+use typst_batch::query_metadata;
+
+let meta = query_metadata(&document, "post-meta");
+```
+
+## Configuration (Optional)
+
+```rust
 use typst_batch::config::ConfigBuilder;
 
+// Custom User-Agent for package downloads (default: "typst-batch/{version}")
 ConfigBuilder::new()
     .user_agent("my-app/1.0.0")
     .init();
 ```
 
-The only configurable option is `user_agent`, which is used for HTTP requests when downloading packages from the Typst registry. Default: `"typst-batch/{version}"`.
-
-### Virtual Files
+## Virtual Files
 
 Support dynamically generated files that don't exist on disk:
 
 ```rust
-use typst_batch::file::{set_virtual_provider, VirtualDataProvider};
+use typst_batch::{set_virtual_provider, VirtualDataProvider};
 use std::path::Path;
 
 struct MyVirtualData;
@@ -84,36 +132,17 @@ impl VirtualDataProvider for MyVirtualData {
 set_virtual_provider(MyVirtualData);
 ```
 
-### Incremental Compilation
+## Low-Level API
 
-The file cache automatically tracks file access and invalidates based on content fingerprints:
+For advanced use cases, access the underlying typst crates:
 
 ```rust
-use typst_batch::file::{reset_access_flags, get_accessed_files, clear_file_cache};
+use typst_batch::{typst, typst_html, SystemWorld};
 
-// Before each compilation
-reset_access_flags();
-
-// ... compile ...
-
-// Get files accessed during compilation
-let accessed = get_accessed_files();
-
-// Clear cache when dependencies change
-clear_file_cache();
+let world = SystemWorld::new(path, root);
+let result = typst::compile(&world);
+let html_doc = typst_html::html(&result.output.unwrap())?;
 ```
-
-## Modules
-
-| Module | Description |
-|--------|-------------|
-| `config` | Runtime configuration (User-Agent, project defaults) |
-| `world` | `SystemWorld` - Typst World implementation |
-| `font` | Global font discovery and loading |
-| `package` | Package resolution and caching |
-| `library` | Typst standard library with HTML feature |
-| `file` | File caching, virtual files, access tracking |
-| `diagnostic` | Error and warning formatting |
 
 ## Requirements
 
