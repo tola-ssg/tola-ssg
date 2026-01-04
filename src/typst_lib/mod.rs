@@ -25,10 +25,12 @@
 
 use std::path::{Path, PathBuf};
 
-use typst::Document;  // Trait for .introspector()
-use typst::foundations::{Label, Selector, Value};
-use typst::introspection::MetadataElem;
-use typst::utils::PicoStr;
+use typst_batch::typst::foundations::{Label, Selector, Value};
+use typst_batch::typst::introspection::MetadataElem;
+use typst_batch::typst::utils::PicoStr;
+use typst_batch::typst::Document;  // Trait for .introspector()
+use typst_batch::typst;
+use typst_batch::typst_html;
 
 // Re-export from typst_batch
 pub use typst_batch::{

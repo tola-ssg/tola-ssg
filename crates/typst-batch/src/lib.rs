@@ -62,7 +62,9 @@ pub use font::get_fonts;
 pub use library::GLOBAL_LIBRARY;
 pub use world::SystemWorld;
 
-// Re-export typst types for convenience
+// Re-export typst crates for downstream use
+// This allows users to depend only on typst-batch instead of multiple typst-* crates
+// e.g.: use typst_batch::typst::Document;
 pub use typst;
 pub use typst_html;
 pub use typst_kit;

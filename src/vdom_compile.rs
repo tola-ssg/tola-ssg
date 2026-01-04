@@ -5,6 +5,7 @@
 //! configuration.
 
 use serde_json::Value as JsonValue;
+use typst_batch::typst_html;
 
 use crate::driver::BuildDriver;
 use tola_vdom::{
@@ -53,9 +54,9 @@ pub fn compile<D: BuildDriver>(
     driver: &D,
     page_path: Option<&str>,
 ) -> CompileOutput {
-    use typst::foundations::{Label, Selector};
-    use typst::introspection::MetadataElem;
-    use typst::utils::PicoStr;
+    use typst_batch::typst::foundations::{Label, Selector};
+    use typst_batch::typst::introspection::MetadataElem;
+    use typst_batch::typst::utils::PicoStr;
 
     // Extract metadata
     let meta = (|| {
