@@ -32,8 +32,6 @@ debug = 1
 strip = false
 
 [dependencies]
-compact_str = "0.8"
-smallvec = { version = "1.13", features = ["union", "const_generics"] }
 arc-swap = "1.7"
 anyhow = "1.0.98"
 which = "8.0.0"
@@ -63,13 +61,11 @@ deunicode = "1.6.2"
 portable-pty = "0.9.0"
 
 # Typst integration (via typst-batch crate)
-typst-batch = { path = "crates/typst-batch" }
+typst-batch = "0.1"
 tola-vdom = { path = "crates/tola-vdom", features = ["hotreload", "parallel", "rkyv"] }
 
-chrono = { version = "0.4.41", default-features = false, features = ["clock", "std"] }
 parking_lot = "0.12.5"
 rustc-hash = "2.1.1"
-paste = "1.0.15"
 
 # WebSocket for hot reload
 tungstenite = "0.27"
@@ -83,16 +79,11 @@ blake3 = "1.8"
 # Async runtime for Actor model
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
 
-# Zero-copy serialization for VDOM diffing and caching
-rkyv = { version = "0.8", optional = true }
-
 # Embedded key-value store for VDOM caching (optional)
 redb = { version = "2", optional = true }
 
 [features]
 default = []
-# Enable rkyv serialization for VDOM (Phase 2 of PLAN.md)
-rkyv = ["dep:rkyv"]
 # Enable persistent VDOM cache with redb (Phase 6 of PLAN.md)
 cache = ["dep:redb"]
 

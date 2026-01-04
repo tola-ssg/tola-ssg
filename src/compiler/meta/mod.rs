@@ -9,8 +9,8 @@
 mod asset;
 mod page;
 
-pub use asset::{AssetMeta, AssetPaths, url_from_output_path};
-pub use page::{ContentMeta, PageMeta, PagePaths, Pages};
+pub use asset::{AssetMeta, url_from_output_path};
+pub use page::{ContentMeta, PageMeta, Pages};
 
 // ============================================================================
 // Constants

@@ -5,7 +5,6 @@
 //! configuration.
 
 use serde_json::Value as JsonValue;
-use typst_batch::typst_html;
 
 use crate::driver::BuildDriver;
 use tola_vdom::{
@@ -49,23 +48,13 @@ pub struct CompileOutput {
 /// cache.insert(path, result.indexed.unwrap()); // Cache for diffing
 /// ```
 pub fn compile<D: BuildDriver>(
-    document: &typst_html::HtmlDocument,
+    document: &typst_batch::typst_html::HtmlDocument,
     label_name: &str,
     driver: &D,
     page_path: Option<&str>,
 ) -> CompileOutput {
-    use typst_batch::typst::foundations::{Label, Selector};
-    use typst_batch::typst::introspection::MetadataElem;
-    use typst_batch::typst::utils::PicoStr;
-
-    // Extract metadata
-    let meta = (|| {
-        let label = Label::new(PicoStr::intern(label_name))?;
-        let introspector = &document.introspector;
-        let elem = introspector.query_unique(&Selector::Label(label)).ok()?;
-        elem.to_packed::<MetadataElem>()
-            .and_then(|meta| serde_json::to_value(&meta.value).ok())
-    })();
+    // Extract metadata using typst-batch's high-level API
+    let meta = typst_batch::query_metadata(document, label_name);
 
     // Raw phase: convert from typst
     let raw_doc = tola_vdom::from_typst_html(document);

@@ -25,38 +25,34 @@
 
 use std::path::{Path, PathBuf};
 
-use typst_batch::typst::foundations::{Label, Selector, Value};
-use typst_batch::typst::introspection::MetadataElem;
-use typst_batch::typst::utils::PicoStr;
-use typst_batch::typst::Document;  // Trait for .introspector()
-use typst_batch::typst;
 use typst_batch::typst_html;
 
 // Re-export from typst_batch
 pub use typst_batch::{
-    clear_file_cache, format_diagnostics, get_fonts, has_errors, filter_html_warnings,
+    clear_file_cache, get_fonts, DiagnosticsExt,
     reset_access_flags, get_accessed_files, SystemWorld, GLOBAL_LIBRARY,
+    query_metadata,
 };
 
 use crate::data::{is_virtual_data_path, read_virtual_data};
 
 // =============================================================================
-// Virtual Data Provider
+// Virtual File System
 // =============================================================================
 
-/// Tola's virtual data provider for `/_data/*.json` files.
+/// Tola's virtual file system for `/_data/*.json` files.
 ///
-/// Implements `VirtualDataProvider` to intercept file reads for virtual paths
+/// Implements `VirtualFileSystem` to intercept file reads for virtual paths
 /// and return dynamically generated JSON from the global site data store.
-pub struct TolaVirtualData;
+pub struct TolaVirtualFS;
 
-impl typst_batch::VirtualDataProvider for TolaVirtualData {
-    fn is_virtual_path(&self, path: &Path) -> bool {
-        is_virtual_data_path(path)
-    }
-
-    fn read_virtual(&self, path: &Path) -> Option<Vec<u8>> {
-        read_virtual_data(path)
+impl typst_batch::VirtualFileSystem for TolaVirtualFS {
+    fn read(&self, path: &Path) -> Option<Vec<u8>> {
+        if is_virtual_data_path(path) {
+            read_virtual_data(path)
+        } else {
+            None
+        }
     }
 }
 
@@ -121,10 +117,10 @@ const fn acquire_test_lock() -> DummyGuard {
 /// Pre-warm global resources (fonts, library, package storage).
 ///
 /// Call once at startup to avoid lazy initialization during compilation.
-/// Also registers the virtual data provider for `/_data/*.json` files.
+/// Also registers the virtual file system for `/_data/*.json` files.
 pub fn warmup_with_font_dirs(font_dirs: &[&Path]) {
-    // Register tola's virtual data provider for /_data/*.json files
-    typst_batch::set_virtual_provider(TolaVirtualData);
+    // Register tola's virtual file system for /_data/*.json files
+    typst_batch::set_virtual_fs(TolaVirtualFS);
 
     let _ = get_fonts(font_dirs);
     let _ = &*GLOBAL_LIBRARY;
@@ -217,41 +213,36 @@ fn compile_base(
     reset_access_flags();
 
     let world = SystemWorld::new(path, root);
-    let result = typst::compile(&world);
+    let result = typst_batch::typst::compile(&world);
 
     // Check for errors in warnings
-    if has_errors(&result.warnings) {
-        let formatted = format_diagnostics(&world, &result.warnings);
+    if result.warnings.has_errors() {
+        let formatted = result.warnings.format(&world);
         anyhow::bail!("Typst compilation warnings:\n{formatted}");
     }
 
     // Extract document or format errors
     let document = result.output.map_err(|errors| {
         let all_diags: Vec<_> = errors.iter().chain(&result.warnings).cloned().collect();
-        let filtered = filter_html_warnings(&all_diags);
-        let formatted = format_diagnostics(&world, &filtered);
+        let filtered = all_diags.filter_html_warnings();
+        let formatted = filtered.format(&world);
         anyhow::anyhow!("Typst compilation failed:\n{formatted}")
     })?;
 
     // Format warnings for caller to display
-    let filtered_warnings = filter_html_warnings(&result.warnings);
+    let filtered_warnings = result.warnings.filter_html_warnings();
     let warnings = if filtered_warnings.is_empty() {
         None
     } else {
-        Some(format_diagnostics(&world, &filtered_warnings))
+        Some(filtered_warnings.format(&world))
     };
 
     Ok((world, document, warnings))
 }
 
 /// Extract metadata from a compiled document by label name.
-fn extract_meta(document: &typst_html::HtmlDocument, label_name: &str) -> Option<serde_json::Value> {
-    let label = Label::new(PicoStr::intern(label_name))?;
-    let introspector = document.introspector();
-    let elem = introspector.query_unique(&Selector::Label(label)).ok()?;
-
-    elem.to_packed::<MetadataElem>()
-        .and_then(|meta| serde_json::to_value(&meta.value).ok())
+fn extract_meta(document: &typst_batch::typst_html::HtmlDocument, label_name: &str) -> Option<serde_json::Value> {
+    query_metadata(document, label_name)
 }
 
 /// Collect files accessed during the last compilation.
@@ -274,21 +265,12 @@ fn collect_accessed_files(root: &Path) -> Vec<PathBuf> {
 
 /// Query metadata from a Typst file by label name.
 #[allow(dead_code)]
-pub fn query_meta(path: &Path, root: &Path, label_name: &str) -> anyhow::Result<Value> {
+pub fn query_meta(path: &Path, root: &Path, label_name: &str) -> anyhow::Result<serde_json::Value> {
     let _guard = acquire_test_lock();
     let (_world, document, _warnings) = compile_base(path, root)?;
 
-    let label = Label::new(PicoStr::intern(label_name))
-        .ok_or_else(|| anyhow::anyhow!("Invalid label name: {label_name}"))?;
-
-    let introspector = document.introspector();
-    let elem = introspector
-        .query_unique(&Selector::Label(label))
-        .map_err(|e| anyhow::anyhow!("Query failed: {e}"))?;
-
-    elem.to_packed::<MetadataElem>()
-        .map(|meta| meta.value.clone())
-        .ok_or_else(|| anyhow::anyhow!("Element is not a metadata element"))
+    query_metadata(&document, label_name)
+        .ok_or_else(|| anyhow::anyhow!("Metadata with label '{label_name}' not found"))
 }
 
 /// Disable ANSI color output for tests.
