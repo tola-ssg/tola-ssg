@@ -105,32 +105,38 @@ ConfigBuilder::new()
     .init();
 ```
 
-## Virtual Files
+## Virtual File System
 
-Support dynamically generated files that don't exist on disk:
+Inject dynamically generated files that don't exist on disk. This is the primary
+extension point for batch compilation scenarios like static site generators.
 
 ```rust
-use typst_batch::{set_virtual_provider, VirtualDataProvider};
+use typst_batch::{set_virtual_fs, VirtualFileSystem};
 use std::path::Path;
 
-struct MyVirtualData;
+struct SiteData {
+    config: String,
+    posts: Vec<Post>,
+}
 
-impl VirtualDataProvider for MyVirtualData {
-    fn is_virtual_path(&self, path: &Path) -> bool {
-        path.starts_with("/_data/")
-    }
-
-    fn read_virtual(&self, path: &Path) -> Option<Vec<u8>> {
-        if path == Path::new("/_data/config.json") {
-            Some(b"{}".to_vec())
-        } else {
-            None
+impl VirtualFileSystem for SiteData {
+    fn read(&self, path: &Path) -> Option<Vec<u8>> {
+        match path.to_str()? {
+            "/_data/site.json" => Some(self.config.as_bytes().to_vec()),
+            "/_data/posts.json" => Some(serde_json::to_vec(&self.posts).ok()?),
+            _ => None, // Fall back to real filesystem
         }
     }
 }
 
-set_virtual_provider(MyVirtualData);
+// Register at startup
+set_virtual_fs(SiteData { config: "...", posts: vec![...] });
 ```
+
+Use cases:
+- **Data injection**: Provide computed JSON data accessible via `#json("/_data/...")`
+- **Configuration**: Inject site-wide settings without physical files
+- **Asset manifests**: Generate file lists at compile time
 
 ## Low-Level API
 

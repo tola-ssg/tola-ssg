@@ -54,82 +54,142 @@ pub static EMPTY_ID: LazyLock<FileId> =
     LazyLock::new(|| FileId::new_fake(VirtualPath::new("<empty>")));
 
 // =============================================================================
-// Virtual Data Provider Trait
+// Virtual File System
 // =============================================================================
 
-/// Trait for providing virtual data files.
+/// Trait for providing virtual files that don't exist on disk.
 ///
-/// The main application can implement this to provide dynamically generated
-/// files like `/_data/pages.json` that don't exist on disk.
-pub trait VirtualDataProvider: Send + Sync {
-    /// Check if the given path is a virtual data path.
-    fn is_virtual_path(&self, path: &Path) -> bool;
-
-    /// Read virtual data for the given path.
-    /// Returns `None` if the path is not a virtual data path.
-    fn read_virtual(&self, path: &Path) -> Option<Vec<u8>>;
-}
-
-/// No-op virtual data provider (no virtual files).
-pub struct NoVirtualData;
-
-impl VirtualDataProvider for NoVirtualData {
-    fn is_virtual_path(&self, _path: &Path) -> bool {
-        false
-    }
-
-    fn read_virtual(&self, _path: &Path) -> Option<Vec<u8>> {
-        None
-    }
-}
-
-// =============================================================================
-// Global Virtual Data Provider
-// =============================================================================
-
-/// Global virtual data provider.
+/// This is the primary extension point for batch compilation scenarios.
+/// Implement this trait to inject dynamically generated content into
+/// Typst's file system.
 ///
-/// This allows the main application to register a custom virtual data provider
-/// that will be used by `FileSlot::source()` and `FileSlot::file()`.
-static GLOBAL_VIRTUAL_PROVIDER: LazyLock<RwLock<Box<dyn VirtualDataProvider>>> =
-    LazyLock::new(|| RwLock::new(Box::new(NoVirtualData)));
-
-/// Set the global virtual data provider.
+/// # Use Cases
 ///
-/// Call this at application startup to enable virtual data files like
-/// `/_data/pages.json`.
+/// - **Data injection**: Provide `/_data/posts.json` with blog post metadata
+/// - **Configuration**: Inject site configuration without physical files
+/// - **Template variables**: Provide computed values accessible via `json()`
+/// - **Asset manifests**: Generate asset URLs at compile time
 ///
 /// # Example
 ///
 /// ```ignore
-/// use typst_batch::file::{set_virtual_provider, VirtualDataProvider};
+/// use typst_batch::{VirtualFileSystem, set_virtual_fs};
+/// use std::path::Path;
 ///
-/// struct MyVirtualData;
+/// struct MyVirtualFS {
+///     site_config: String,
+/// }
 ///
-/// impl VirtualDataProvider for MyVirtualData {
-///     fn is_virtual_path(&self, path: &Path) -> bool {
-///         path.starts_with("/_data/")
-///     }
-///     fn read_virtual(&self, path: &Path) -> Option<Vec<u8>> {
-///         // Return virtual file content
-///         Some(b"{}".to_vec())
+/// impl VirtualFileSystem for MyVirtualFS {
+///     fn read(&self, path: &Path) -> Option<Vec<u8>> {
+///         match path.to_str()? {
+///             "/_data/site.json" => Some(self.site_config.as_bytes().to_vec()),
+///             "/_data/build-time.txt" => {
+///                 Some(chrono::Utc::now().to_rfc3339().into_bytes())
+///             }
+///             _ => None, // Fall back to real filesystem
+///         }
 ///     }
 /// }
 ///
-/// set_virtual_provider(MyVirtualData);
+/// set_virtual_fs(MyVirtualFS { site_config: r#"{"title":"My Blog"}"#.into() });
 /// ```
-pub fn set_virtual_provider<V: VirtualDataProvider + 'static>(provider: V) {
-    *GLOBAL_VIRTUAL_PROVIDER.write() = Box::new(provider);
+///
+/// # Thread Safety
+///
+/// Implementations must be `Send + Sync` as compilation may run in parallel.
+/// The provider is called for each file access, so implementations should be
+/// efficient (consider caching expensive computations).
+///
+/// # Note on Global State
+///
+/// Due to Typst's `World` trait design, the virtual file system must be
+/// registered globally via [`set_virtual_fs`]. This is a limitation of
+/// the underlying architecture, not a design choice.
+pub trait VirtualFileSystem: Send + Sync {
+    /// Read a virtual file by path.
+    ///
+    /// Return `Some(bytes)` to provide virtual content, or `None` to fall
+    /// back to the real filesystem.
+    ///
+    /// The path is root-relative (e.g., `/_data/config.json` or `/assets/style.css`).
+    fn read(&self, path: &Path) -> Option<Vec<u8>>;
 }
 
-/// Check if the given path is a virtual data path using the global provider.
-pub fn is_virtual_path(path: &Path) -> bool {
-    GLOBAL_VIRTUAL_PROVIDER.read().is_virtual_path(path)
+/// No-op virtual file system (all files from real filesystem).
+pub struct NoVirtualFS;
+
+impl VirtualFileSystem for NoVirtualFS {
+    fn read(&self, _path: &Path) -> Option<Vec<u8>> {
+        None
+    }
 }
 
-/// Read virtual data for the given path using the global provider.
+// Legacy type alias for backward compatibility
+#[doc(hidden)]
+pub type VirtualDataProvider = dyn VirtualFileSystem;
+
+// =============================================================================
+// Global Virtual File System
+// =============================================================================
+
+/// Global virtual file system instance.
+///
+/// This allows the main application to register a custom virtual file system
+/// that will be used by all file access operations during compilation.
+static GLOBAL_VIRTUAL_FS: LazyLock<RwLock<Box<dyn VirtualFileSystem>>> =
+    LazyLock::new(|| RwLock::new(Box::new(NoVirtualFS)));
+
+/// Set the global virtual file system.
+///
+/// Call this at application startup to enable virtual files.
+/// The virtual file system will be consulted for every file access.
+/// Return `Some(bytes)` from your implementation to provide virtual content,
+/// or `None` to fall back to the real filesystem.
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::{VirtualFileSystem, set_virtual_fs};
+/// use std::path::Path;
+///
+/// struct SiteData {
+///     posts: Vec<Post>,
+/// }
+///
+/// impl VirtualFileSystem for SiteData {
+///     fn read(&self, path: &Path) -> Option<Vec<u8>> {
+///         if path == Path::new("/_data/posts.json") {
+///             Some(serde_json::to_vec(&self.posts).unwrap())
+///         } else {
+///             None
+///         }
+///     }
+/// }
+///
+/// set_virtual_fs(SiteData { posts: vec![...] });
+/// ```
+pub fn set_virtual_fs<V: VirtualFileSystem + 'static>(fs: V) {
+    *GLOBAL_VIRTUAL_FS.write() = Box::new(fs);
+}
+
+/// Read a file, checking virtual file system first.
+///
+/// Returns virtual content if the VFS provides it, otherwise returns `None`
+/// to indicate the real filesystem should be used.
 pub fn read_virtual(path: &Path) -> Option<Vec<u8>> {
-    GLOBAL_VIRTUAL_PROVIDER.read().read_virtual(path)
+    GLOBAL_VIRTUAL_FS.read().read(path)
+}
+
+/// Check if a path has virtual content available.
+pub fn is_virtual_path(path: &Path) -> bool {
+    GLOBAL_VIRTUAL_FS.read().read(path).is_some()
+}
+
+// Legacy function alias for backward compatibility
+#[doc(hidden)]
+pub fn set_virtual_provider<V: VirtualFileSystem + 'static>(provider: V) {
+    set_virtual_fs(provider);
 }
 
 // =============================================================================
@@ -257,13 +317,13 @@ impl<T: Clone> SlotCell<T> {
 /// - `STDIN_ID`: Reads from stdin
 /// - Package files: Downloads package if needed
 pub fn read(id: FileId, project_root: &Path) -> FileResult<Vec<u8>> {
-    read_with_virtual(id, project_root, &NoVirtualData)
+    read_with_virtual(id, project_root, &NoVirtualFS)
 }
 
-/// Read file content using the global virtual data provider.
+/// Read file content using the global virtual file system.
 ///
-/// This function uses the globally registered virtual data provider.
-/// Call [`set_virtual_provider`] at startup to register your provider.
+/// This function uses the globally registered virtual file system.
+/// Call [`set_virtual_fs`] at startup to register your VFS.
 pub fn read_with_global_virtual(id: FileId, project_root: &Path) -> FileResult<Vec<u8>> {
     // Handle virtual file IDs first (don't need provider)
     if id == *EMPTY_ID {
@@ -288,10 +348,10 @@ pub fn read_with_global_virtual(id: FileId, project_root: &Path) -> FileResult<V
 /// Read file content with virtual data support.
 ///
 /// Like [`read`], but also handles virtual data files via the provider.
-pub fn read_with_virtual<V: VirtualDataProvider>(
+pub fn read_with_virtual<V: VirtualFileSystem>(
     id: FileId,
     project_root: &Path,
-    virtual_provider: &V,
+    virtual_fs: &V,
 ) -> FileResult<Vec<u8>> {
     // Handle virtual file IDs
     if id == *EMPTY_ID {
@@ -303,11 +363,9 @@ pub fn read_with_virtual<V: VirtualDataProvider>(
 
     // Handle virtual data files (e.g., /_data/*.json)
     let vpath = id.vpath().as_rooted_path();
-    if virtual_provider.is_virtual_path(vpath) {
+    if let Some(data) = virtual_fs.read(vpath) {
         record_file_access(id);
-        return virtual_provider
-            .read_virtual(vpath)
-            .ok_or_else(|| FileError::NotFound(vpath.to_path_buf()));
+        return Ok(data);
     }
 
     // Resolve path and read from disk
@@ -397,12 +455,12 @@ impl FileSlot {
 
     /// Retrieve parsed source for this file (no virtual data).
     pub fn source(&mut self, project_root: &Path) -> FileResult<Source> {
-        self.source_with_virtual(project_root, &NoVirtualData)
+        self.source_with_virtual(project_root, &NoVirtualFS)
     }
 
-    /// Retrieve parsed source using the global virtual data provider.
+    /// Retrieve parsed source using the global virtual file system.
     ///
-    /// This uses the provider registered via [`set_virtual_provider`].
+    /// This uses the VFS registered via [`set_virtual_fs`].
     pub fn source_with_global_virtual(&mut self, project_root: &Path) -> FileResult<Source> {
         record_file_access(self.id);
         self.source.get_or_init(
@@ -420,15 +478,15 @@ impl FileSlot {
         )
     }
 
-    /// Retrieve parsed source with virtual data support.
-    pub fn source_with_virtual<V: VirtualDataProvider>(
+    /// Retrieve parsed source with virtual file system support.
+    pub fn source_with_virtual<V: VirtualFileSystem>(
         &mut self,
         project_root: &Path,
-        virtual_provider: &V,
+        virtual_fs: &V,
     ) -> FileResult<Source> {
         record_file_access(self.id);
         self.source.get_or_init(
-            || read_with_virtual(self.id, project_root, virtual_provider),
+            || read_with_virtual(self.id, project_root, virtual_fs),
             |data, prev| {
                 let text = decode_utf8(&data)?;
                 match prev {
@@ -444,12 +502,12 @@ impl FileSlot {
 
     /// Retrieve raw bytes for this file (no virtual data).
     pub fn file(&mut self, project_root: &Path) -> FileResult<Bytes> {
-        self.file_with_virtual(project_root, &NoVirtualData)
+        self.file_with_virtual(project_root, &NoVirtualFS)
     }
 
-    /// Retrieve raw bytes using the global virtual data provider.
+    /// Retrieve raw bytes using the global virtual file system.
     ///
-    /// This uses the provider registered via [`set_virtual_provider`].
+    /// This uses the VFS registered via [`set_virtual_fs`].
     pub fn file_with_global_virtual(&mut self, project_root: &Path) -> FileResult<Bytes> {
         record_file_access(self.id);
         self.file.get_or_init(
@@ -458,15 +516,15 @@ impl FileSlot {
         )
     }
 
-    /// Retrieve raw bytes with virtual data support.
-    pub fn file_with_virtual<V: VirtualDataProvider>(
+    /// Retrieve raw bytes with virtual file system support.
+    pub fn file_with_virtual<V: VirtualFileSystem>(
         &mut self,
         project_root: &Path,
-        virtual_provider: &V,
+        virtual_fs: &V,
     ) -> FileResult<Bytes> {
         record_file_access(self.id);
         self.file.get_or_init(
-            || read_with_virtual(self.id, project_root, virtual_provider),
+            || read_with_virtual(self.id, project_root, virtual_fs),
             |data, _| Ok(Bytes::new(data)),
         )
     }

@@ -42,7 +42,7 @@ use typst::utils::LazyHash;
 use typst::{Library, World};
 use typst_kit::fonts::Fonts;
 
-use crate::file::{FileSlot, VirtualDataProvider, GLOBAL_FILE_CACHE};
+use crate::file::{FileSlot, VirtualFileSystem, GLOBAL_FILE_CACHE};
 use crate::font::get_fonts;
 use crate::library::GLOBAL_LIBRARY;
 
@@ -162,37 +162,37 @@ impl SystemWorld {
         f(cache.entry(id).or_insert_with(|| FileSlot::new(id)))
     }
 
-    /// Access a file slot with virtual data support.
+    /// Access a file slot with virtual file system support.
     #[allow(clippy::unused_self)]
-    fn slot_virtual<V, F, T>(&self, id: FileId, virtual_provider: &V, f: F) -> T
+    fn slot_virtual<V, F, T>(&self, id: FileId, virtual_fs: &V, f: F) -> T
     where
-        V: VirtualDataProvider,
+        V: VirtualFileSystem,
         F: FnOnce(&mut FileSlot, &V) -> T,
     {
         let mut cache = GLOBAL_FILE_CACHE.write();
         let slot = cache.entry(id).or_insert_with(|| FileSlot::new(id));
-        f(slot, virtual_provider)
+        f(slot, virtual_fs)
     }
 
-    /// Load source with virtual data support.
-    pub fn source_with_virtual<V: VirtualDataProvider>(
+    /// Load source with virtual file system support.
+    pub fn source_with_virtual<V: VirtualFileSystem>(
         &self,
         id: FileId,
-        virtual_provider: &V,
+        virtual_fs: &V,
     ) -> FileResult<Source> {
-        self.slot_virtual(id, virtual_provider, |slot, vp| {
-            slot.source_with_virtual(&self.root, vp)
+        self.slot_virtual(id, virtual_fs, |slot, vfs| {
+            slot.source_with_virtual(&self.root, vfs)
         })
     }
 
-    /// Load file with virtual data support.
-    pub fn file_with_virtual<V: VirtualDataProvider>(
+    /// Load file with virtual file system support.
+    pub fn file_with_virtual<V: VirtualFileSystem>(
         &self,
         id: FileId,
-        virtual_provider: &V,
+        virtual_fs: &V,
     ) -> FileResult<Bytes> {
-        self.slot_virtual(id, virtual_provider, |slot, vp| {
-            slot.file_with_virtual(&self.root, vp)
+        self.slot_virtual(id, virtual_fs, |slot, vfs| {
+            slot.file_with_virtual(&self.root, vfs)
         })
     }
 }
