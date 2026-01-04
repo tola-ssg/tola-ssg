@@ -346,6 +346,141 @@ impl fmt::Display for DiagnosticSummary {
 }
 
 // ============================================================================
+// Diagnostics Extension Trait
+// ============================================================================
+
+/// Extension trait for working with diagnostic slices.
+///
+/// This trait provides convenient methods for analyzing collections of
+/// [`SourceDiagnostic`]s without importing standalone functions.
+///
+/// # Example
+///
+/// ```ignore
+/// use typst_batch::{compile_html, DiagnosticsExt};
+///
+/// let result = compile_html(path, root)?;
+///
+/// if result.diagnostics.has_errors() {
+///     eprintln!("Compilation failed with {} errors", result.diagnostics.error_count());
+/// }
+///
+/// let summary = result.diagnostics.summary();
+/// println!("{}", summary);  // "2 errors, 1 warning"
+/// ```
+pub trait DiagnosticsExt {
+    /// Check if there are any errors in the diagnostics.
+    fn has_errors(&self) -> bool;
+
+    /// Check if the diagnostic list is empty.
+    fn is_empty(&self) -> bool;
+
+    /// Get the number of diagnostics.
+    fn len(&self) -> usize;
+
+    /// Count errors in the diagnostics.
+    fn error_count(&self) -> usize;
+
+    /// Count warnings in the diagnostics.
+    fn warning_count(&self) -> usize;
+
+    /// Get counts of errors and warnings.
+    fn counts(&self) -> (usize, usize);
+
+    /// Get a summary of the diagnostics.
+    fn summary(&self) -> DiagnosticSummary;
+
+    /// Filter out known HTML export development warnings.
+    fn filter_html_warnings(&self) -> Vec<SourceDiagnostic>;
+}
+
+impl DiagnosticsExt for [SourceDiagnostic] {
+    fn has_errors(&self) -> bool {
+        self.iter().any(|d| d.severity == Severity::Error)
+    }
+
+    fn is_empty(&self) -> bool {
+        <[SourceDiagnostic]>::is_empty(self)
+    }
+
+    fn len(&self) -> usize {
+        <[SourceDiagnostic]>::len(self)
+    }
+
+    fn error_count(&self) -> usize {
+        self.iter()
+            .filter(|d| d.severity == Severity::Error)
+            .count()
+    }
+
+    fn warning_count(&self) -> usize {
+        self.iter()
+            .filter(|d| d.severity == Severity::Warning)
+            .count()
+    }
+
+    fn counts(&self) -> (usize, usize) {
+        self.iter().fold((0, 0), |(errors, warnings), d| match d.severity {
+            Severity::Error => (errors + 1, warnings),
+            Severity::Warning => (errors, warnings + 1),
+        })
+    }
+
+    fn summary(&self) -> DiagnosticSummary {
+        let (errors, warnings) = self.counts();
+        DiagnosticSummary { errors, warnings }
+    }
+
+    fn filter_html_warnings(&self) -> Vec<SourceDiagnostic> {
+        self.iter()
+            .filter(|d| {
+                // Keep all errors
+                if d.severity == Severity::Error {
+                    return true;
+                }
+                // Filter out HTML export warning
+                !d.message.contains("html export is under active development")
+            })
+            .cloned()
+            .collect()
+    }
+}
+
+impl DiagnosticsExt for Vec<SourceDiagnostic> {
+    fn has_errors(&self) -> bool {
+        self.as_slice().has_errors()
+    }
+
+    fn is_empty(&self) -> bool {
+        Vec::is_empty(self)
+    }
+
+    fn len(&self) -> usize {
+        Vec::len(self)
+    }
+
+    fn error_count(&self) -> usize {
+        self.as_slice().error_count()
+    }
+
+    fn warning_count(&self) -> usize {
+        self.as_slice().warning_count()
+    }
+
+    fn counts(&self) -> (usize, usize) {
+        self.as_slice().counts()
+    }
+
+    fn summary(&self) -> DiagnosticSummary {
+        self.as_slice().summary()
+    }
+
+    fn filter_html_warnings(&self) -> Vec<SourceDiagnostic> {
+        self.as_slice().filter_html_warnings()
+    }
+}
+
+// ============================================================================
 // Gutter Characters
 // ============================================================================
 

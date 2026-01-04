@@ -72,6 +72,57 @@ pub mod package;
 pub mod world;
 
 // =============================================================================
+// Prelude - import commonly used items with a single `use`
+// =============================================================================
+
+/// Prelude module for convenient imports.
+///
+/// Import everything commonly needed with:
+///
+/// ```ignore
+/// use typst_batch::prelude::*;
+/// ```
+///
+/// This includes:
+/// - Compilation functions: `compile_html`, `compile_document`, etc.
+/// - Diagnostics: `DiagnosticsExt`, `SourceDiagnostic`, `CompileError`
+/// - VFS: `VirtualFileSystem`, `MapVirtualFS`, `set_virtual_fs`
+/// - Fonts: `get_fonts`, `FontOptions`
+/// - Core types: `FileId`, `VirtualPath`, `SystemWorld`
+pub mod prelude {
+    // Compilation
+    pub use crate::compile::{
+        compile_document, compile_document_with_metadata, compile_html,
+        compile_html_with_metadata, query_metadata, query_metadata_map, DocumentResult,
+        HtmlResult,
+    };
+
+    // Diagnostics
+    pub use crate::diagnostic::{
+        format_diagnostics, format_diagnostics_with_options, CompileError, DiagnosticOptions,
+        DiagnosticSeverity, DiagnosticSummary, DiagnosticsExt, DisplayStyle, SourceDiagnostic,
+    };
+
+    // VFS
+    pub use crate::file::{
+        file_id, file_id_from_path, set_virtual_fs, virtual_file_id, MapVirtualFS, NoVirtualFS,
+        VirtualFileSystem,
+    };
+
+    // Fonts
+    pub use crate::font::{get_fonts, init_fonts_with_options, FontOptions};
+
+    // World
+    pub use crate::world::SystemWorld;
+
+    // Core typst types
+    pub use typst::diag::{FileError, FileResult};
+    pub use typst::foundations::Bytes;
+    pub use typst::syntax::{FileId, Source, VirtualPath};
+    pub use typst::text::{Font, FontBook, FontInfo};
+}
+
+// =============================================================================
 // High-Level API (recommended for most use cases)
 // =============================================================================
 
@@ -92,12 +143,12 @@ pub use diagnostic::{
     DiagnosticOptions, DisplayStyle,
     // Re-exported from typst for convenience
     DiagnosticSeverity, SourceDiagnostic,
-    // Summary
-    DiagnosticSummary,
+    // Summary and extension trait
+    DiagnosticSummary, DiagnosticsExt,
     // Formatting functions
-    filter_html_warnings, format_diagnostics, format_diagnostics_with_options,
-    // Utilities
-    count_diagnostics, has_errors,
+    format_diagnostics, format_diagnostics_with_options,
+    // Standalone utilities (prefer DiagnosticsExt methods)
+    count_diagnostics, filter_html_warnings, has_errors,
 };
 
 // =============================================================================
