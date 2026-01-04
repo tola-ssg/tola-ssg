@@ -13,11 +13,11 @@
 //! ## Quick Start
 //!
 //! ```ignore
-//! use typst_batch::{SystemWorld, get_fonts};
+//! use typst_batch::{compile, SystemWorld, get_fonts, HtmlDocument};
 //! use std::path::Path;
 //!
 //! // Initialize fonts (once at startup)
-//! let fonts = get_fonts(&[Path::new("assets/fonts")]);
+//! let fonts = get_fonts(&[]);
 //!
 //! // Create a world for compilation
 //! let world = SystemWorld::new(
@@ -25,8 +25,9 @@
 //!     Path::new("."),
 //! );
 //!
-//! // Compile with typst
-//! let result = typst::compile(&world);
+//! // Compile to HTML document
+//! let document = compile(&world).unwrap();
+//! let html_doc = typst_batch::html(&document).unwrap();
 //! ```
 //!
 //! ## Modules
@@ -50,7 +51,10 @@ pub mod library;
 pub mod package;
 pub mod world;
 
-// Re-export main types
+// =============================================================================
+// Re-export main types from this crate
+// =============================================================================
+
 pub use config::{Config, ConfigBuilder};
 pub use diagnostic::{filter_html_warnings, format_diagnostics, has_errors};
 pub use file::{
@@ -62,10 +66,44 @@ pub use font::get_fonts;
 pub use library::GLOBAL_LIBRARY;
 pub use world::SystemWorld;
 
-// Re-export typst crates for downstream use
-// This allows users to depend only on typst-batch instead of multiple typst-* crates
-// e.g.: use typst_batch::typst::Document;
+// =============================================================================
+// Re-export commonly used typst types for convenience
+// =============================================================================
+
+// Core compilation
+pub use typst::compile;
+pub use typst::World;
+
+// Document types
+pub use typst::Document;
+pub use typst_html::HtmlDocument;
+
+// HTML rendering
+pub use typst_html::html;
+
+// Metadata extraction (for querying document metadata)
+pub use typst::foundations::{Label, Selector, Value};
+pub use typst::introspection::MetadataElem;
+pub use typst::utils::PicoStr;
+
+// Diagnostics
+pub use typst::diag::{SourceDiagnostic, SourceResult};
+
+// =============================================================================
+// Re-export full typst crates for advanced use
+// =============================================================================
+
+/// Full typst crate for advanced use cases.
+///
+/// Most common types are re-exported at the crate root.
+/// Use this module for advanced features not exposed at the root level.
 pub use typst;
+
+/// Full typst-html crate for advanced HTML rendering.
 pub use typst_html;
+
+/// Full typst-kit crate for font/package utilities.
 pub use typst_kit;
+
+/// Full typst-svg crate for SVG rendering.
 pub use typst_svg;
