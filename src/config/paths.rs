@@ -175,7 +175,10 @@ mod tests {
     #[test]
     fn test_url_for_filename_with_prefix() {
         let paths = PathResolver::new(Path::new("/public"), Path::new("my-project"));
-        assert_eq!(paths.url_for_filename("styles.css"), "/my-project/styles.css");
+        assert_eq!(
+            paths.url_for_filename("styles.css"),
+            "/my-project/styles.css"
+        );
     }
 
     #[test]
@@ -193,7 +196,10 @@ mod tests {
     #[test]
     fn test_url_for_rel_path_nested_prefix() {
         let paths = PathResolver::new(Path::new("/public"), Path::new("sites/blog"));
-        assert_eq!(paths.url_for_rel_path("img/logo.png"), "/sites/blog/img/logo.png");
+        assert_eq!(
+            paths.url_for_rel_path("img/logo.png"),
+            "/sites/blog/img/logo.png"
+        );
     }
 
     #[test]

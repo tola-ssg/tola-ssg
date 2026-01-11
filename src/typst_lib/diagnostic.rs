@@ -29,9 +29,9 @@
 use std::fmt::Write;
 
 use colored::{ColoredString, Colorize};
+use typst::World;
 use typst::diag::{Severity, SourceDiagnostic};
 use typst::syntax::Span;
-use typst::World;
 
 // ============================================================================
 // Gutter Characters
@@ -177,7 +177,11 @@ struct SnippetWriter<'a> {
 }
 
 impl<'a> SnippetWriter<'a> {
-    const fn new(output: &'a mut String, theme: &'a DiagnosticTheme, line_num_width: usize) -> Self {
+    const fn new(
+        output: &'a mut String,
+        theme: &'a DiagnosticTheme,
+        line_num_width: usize,
+    ) -> Self {
         Self {
             output,
             theme,
@@ -327,12 +331,12 @@ pub fn format_diagnostics<W: World>(world: &W, diagnostics: &[SourceDiagnostic])
 /// Count errors and warnings in a diagnostic list.
 #[allow(dead_code)]
 pub fn count_diagnostics(diagnostics: &[SourceDiagnostic]) -> (usize, usize) {
-    diagnostics.iter().fold((0, 0), |(errors, warnings), d| {
-        match d.severity {
+    diagnostics
+        .iter()
+        .fold((0, 0), |(errors, warnings), d| match d.severity {
             Severity::Error => (errors + 1, warnings),
             Severity::Warning => (errors, warnings + 1),
-        }
-    })
+        })
 }
 
 /// Check if there are any errors in the diagnostics.
@@ -353,7 +357,8 @@ pub fn filter_html_warnings(diagnostics: &[SourceDiagnostic]) -> Vec<SourceDiagn
                 return true;
             }
             // Filter out HTML export warning
-            !d.message.contains("html export is under active development")
+            !d.message
+                .contains("html export is under active development")
         })
         .cloned()
         .collect()

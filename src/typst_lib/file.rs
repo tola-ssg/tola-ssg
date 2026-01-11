@@ -19,12 +19,12 @@
 //! 4. Otherwise → recompute and cache
 //! ```
 
+use std::cell::RefCell;
 use std::fs;
 use std::io::{self, Read};
 use std::mem;
 use std::path::Path;
 use std::sync::LazyLock;
-use std::cell::RefCell;
 
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
@@ -181,8 +181,7 @@ pub fn read(id: FileId, project_root: &Path) -> FileResult<Vec<u8>> {
     let vpath = id.vpath().as_rooted_path();
     if is_virtual_data_path(vpath) {
         record_file_access(id);
-        return read_virtual_data(vpath)
-            .ok_or_else(|| FileError::NotFound(vpath.to_path_buf()));
+        return read_virtual_data(vpath).ok_or_else(|| FileError::NotFound(vpath.to_path_buf()));
     }
 
     // Resolve path with typst.toml fallback
@@ -233,15 +232,13 @@ fn read_disk(path: &Path) -> FileResult<Vec<u8>> {
 /// Read all data from stdin.
 fn read_stdin() -> FileResult<Vec<u8>> {
     let mut buf = Vec::new();
-    io::stdin()
-        .read_to_end(&mut buf)
-        .or_else(|e| {
-            if e.kind() == io::ErrorKind::BrokenPipe {
-                Ok(0)
-            } else {
-                Err(FileError::from_io(e, Path::new("<stdin>")))
-            }
-        })?;
+    io::stdin().read_to_end(&mut buf).or_else(|e| {
+        if e.kind() == io::ErrorKind::BrokenPipe {
+            Ok(0)
+        } else {
+            Err(FileError::from_io(e, Path::new("<stdin>")))
+        }
+    })?;
     Ok(buf)
 }
 
@@ -300,8 +297,10 @@ impl FileSlot {
     /// Retrieve raw bytes for this file.
     pub fn file(&mut self, project_root: &Path) -> FileResult<Bytes> {
         record_file_access(self.id);
-        self.file
-            .get_or_init(|| read(self.id, project_root), |data, _| Ok(Bytes::new(data)))
+        self.file.get_or_init(
+            || read(self.id, project_root),
+            |data, _| Ok(Bytes::new(data)),
+        )
     }
 }
 

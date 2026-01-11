@@ -104,8 +104,7 @@ pub fn normalize_path(path: &Path) -> PathBuf {
         if path.is_absolute() {
             path.to_path_buf()
         } else {
-            env::current_dir()
-                .map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
+            env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
         }
     })
 }

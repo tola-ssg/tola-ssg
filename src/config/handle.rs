@@ -84,7 +84,9 @@ pub fn reload_config() -> anyhow::Result<bool> {
     use std::fs;
 
     let c = cfg();
-    let cli = c.cli.expect("CLI should be set in config during initialization");
+    let cli = c
+        .cli
+        .expect("CLI should be set in config during initialization");
 
     // Read raw content to check for changes
     // Using config_path form current config which is absolute path
@@ -121,11 +123,11 @@ pub fn init_config(config: SiteConfig) {
 
     // Initialize hash if file exists
     if config.config_path.exists()
-        && let Ok(content) = fs::read_to_string(&config.config_path) {
-            let hash = crate::utils::hash::compute(content.as_bytes());
-            CONFIG_HASH.store(hash, std::sync::atomic::Ordering::Relaxed);
-        }
+        && let Ok(content) = fs::read_to_string(&config.config_path)
+    {
+        let hash = crate::utils::hash::compute(content.as_bytes());
+        CONFIG_HASH.store(hash, std::sync::atomic::Ordering::Relaxed);
+    }
 
     CONFIG.store(Arc::new(config));
 }
-

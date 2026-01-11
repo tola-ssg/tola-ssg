@@ -655,12 +655,7 @@ mod tests {
     // Integration tests with SiteConfig
     // ========================================================================
 
-    fn make_config(
-        path_mode: &str,
-        fragment_mode: &str,
-        case: &str,
-        sep: char,
-    ) -> SiteConfig {
+    fn make_config(path_mode: &str, fragment_mode: &str, case: &str, sep: char) -> SiteConfig {
         let sep_str = if sep == '-' { "dash" } else { "underscore" };
         let toml = format!(
             r#"
@@ -766,4 +761,3 @@ mod tests {
         );
     }
 }
-

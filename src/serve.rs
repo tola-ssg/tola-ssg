@@ -27,7 +27,11 @@
 //!              (public/ dir)
 //! ```
 
-use crate::{config::{cfg, SiteConfig}, log, watch::watch_for_changes_blocking};
+use crate::{
+    config::{SiteConfig, cfg},
+    log,
+    watch::watch_for_changes_blocking,
+};
 use anyhow::{Context, Result};
 use std::{
     fs,
@@ -275,7 +279,11 @@ fn guess_content_type(path: &Path) -> &'static str {
 /// - Shows folder/file icons
 /// - Provides parent directory navigation
 /// - Falls back to welcome page if directory is empty
-fn generate_directory_listing(dir_path: &PathBuf, request_path: &str, data_dir_name: &str) -> std::io::Result<String> {
+fn generate_directory_listing(
+    dir_path: &PathBuf,
+    request_path: &str,
+    data_dir_name: &str,
+) -> std::io::Result<String> {
     let entries: Vec<_> = fs::read_dir(dir_path)?
         .filter_map(Result::ok)
         .filter(|entry| {
@@ -329,7 +337,8 @@ fn generate_directory_listing(dir_path: &PathBuf, request_path: &str, data_dir_n
         )
     };
 
-    #[allow(clippy::literal_string_with_formatting_args)] // These are template placeholders, not format args
+    #[allow(clippy::literal_string_with_formatting_args)]
+    // These are template placeholders, not format args
     Ok(DIRECTORY_TEMPLATE
         .replace("{path}", request_path)
         .replace("{parent_link}", &parent_link)
