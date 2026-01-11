@@ -197,6 +197,8 @@ impl SiteDataStore {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
@@ -204,6 +206,7 @@ mod tests {
         let store = SiteDataStore::new();
 
         store.insert_page(PageData {
+            source: PathBuf::from("posts/first.typ"),
             url: "/posts/first/".to_string(),
             title: "First Post".to_string(),
             summary: None,
@@ -215,6 +218,7 @@ mod tests {
         });
 
         store.insert_page(PageData {
+            source: PathBuf::from("posts/second.typ"),
             url: "/posts/second/".to_string(),
             title: "Second Post".to_string(),
             summary: None,
@@ -237,6 +241,7 @@ mod tests {
         let store = SiteDataStore::new();
 
         store.insert_page(PageData {
+            source: PathBuf::from("a.typ"),
             url: "/a/".to_string(),
             title: "A".to_string(),
             summary: None,
@@ -248,6 +253,7 @@ mod tests {
         });
 
         store.insert_page(PageData {
+            source: PathBuf::from("b.typ"),
             url: "/b/".to_string(),
             title: "B".to_string(),
             summary: None,
@@ -273,6 +279,7 @@ mod tests {
         let store = SiteDataStore::new();
 
         store.insert_page(PageData {
+            source: PathBuf::from("draft.typ"),
             url: "/draft/".to_string(),
             title: "Draft".to_string(),
             summary: None,
@@ -292,6 +299,7 @@ mod tests {
         let store = SiteDataStore::new();
 
         store.insert_page(PageData {
+            source: PathBuf::from("published.typ"),
             url: "/published/".to_string(),
             title: "Published".to_string(),
             summary: None,
@@ -303,6 +311,7 @@ mod tests {
         });
 
         store.insert_page(PageData {
+            source: PathBuf::from("draft.typ"),
             url: "/draft/".to_string(),
             title: "Draft".to_string(),
             summary: None,
@@ -323,6 +332,7 @@ mod tests {
         let store = SiteDataStore::new();
 
         store.insert_page(PageData {
+            source: PathBuf::from("b.typ"),
             url: "/b/".to_string(),
             title: "Beta".to_string(),
             summary: None,
@@ -334,6 +344,7 @@ mod tests {
         });
 
         store.insert_page(PageData {
+            source: PathBuf::from("a.typ"),
             url: "/a/".to_string(),
             title: "Alpha".to_string(),
             summary: None,
@@ -356,6 +367,7 @@ mod tests {
         let store = SiteDataStore::new();
 
         store.insert_page(PageData {
+            source: PathBuf::from("no-date.typ"),
             url: "/no-date/".to_string(),
             title: "No Date".to_string(),
             summary: None,
@@ -367,6 +379,7 @@ mod tests {
         });
 
         store.insert_page(PageData {
+            source: PathBuf::from("has-date.typ"),
             url: "/has-date/".to_string(),
             title: "Has Date".to_string(),
             summary: None,
@@ -389,6 +402,7 @@ mod tests {
         let store = SiteDataStore::new();
 
         store.insert_page(PageData {
+            source: PathBuf::from("test.typ"),
             url: "/test/".to_string(),
             title: "Test".to_string(),
             summary: None,
