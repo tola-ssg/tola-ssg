@@ -1,15 +1,15 @@
-use crate::compiler::meta::{PageMeta, ContentMeta, Pages, TOLA_META_LABEL};
+use crate::compiler::meta::{ContentMeta, PageMeta, Pages, TOLA_META_LABEL};
 use crate::compiler::{collect_all_files, is_up_to_date};
-use crate::data::{PageData, GLOBAL_SITE_DATA};
-use crate::utils::minify::{minify, MinifyType};
-use crate::utils::xml::process_html;
+use crate::data::{GLOBAL_SITE_DATA, PageData};
 use crate::utils::exec::FilterRule;
+use crate::utils::minify::{MinifyType, minify};
+use crate::utils::xml::process_html;
 use crate::{config::SiteConfig, exec, log, typst_lib};
 use anyhow::Result;
+use rayon::prelude::*;
 use std::fs;
 use std::path::Path;
 use std::time::SystemTime;
-use rayon::prelude::*;
 
 /// Skip known HTML export warnings (used by `compile_cli`).
 const TYPST_FILTER: FilterRule = FilterRule::new(&[
@@ -136,7 +136,9 @@ fn write_page(
 
     // Post-process and write
     // Check if the source file was named "index.typ" for relative path resolution
-    let is_source_index = page.paths.source
+    let is_source_index = page
+        .paths
+        .source
         .file_stem()
         .is_some_and(|stem| stem == "index");
     let html_content = process_html(&page.paths.html, &html_content, config, is_source_index)?;
@@ -153,7 +155,9 @@ pub fn compile_meta(path: &Path, config: &SiteConfig) -> Result<(Vec<u8>, Option
     if config.build.typst.use_lib {
         let root = config.get_root();
         let result = typst_lib::compile_meta(path, root, TOLA_META_LABEL)?;
-        let meta = result.metadata.and_then(|json| serde_json::from_value(json).ok());
+        let meta = result
+            .metadata
+            .and_then(|json| serde_json::from_value(json).ok());
 
         // Record dependencies for incremental rebuild
         super::deps::DEPENDENCY_GRAPH
@@ -173,7 +177,9 @@ pub fn query_meta(path: &Path, config: &SiteConfig) -> Option<ContentMeta> {
     if config.build.typst.use_lib {
         let root = config.get_root();
         let result = typst_lib::compile_meta(path, root, TOLA_META_LABEL).ok()?;
-        result.metadata.and_then(|json| serde_json::from_value(json).ok())
+        result
+            .metadata
+            .and_then(|json| serde_json::from_value(json).ok())
     } else {
         query_meta_cli(path, config)
     }
@@ -243,9 +249,7 @@ fn page_meta_to_data(page: &PageMeta) -> PageData {
         date: content.and_then(|c| c.date.clone()),
         update: content.and_then(|c| c.update.clone()),
         author: content.and_then(|c| c.author.clone()),
-        tags: content
-            .map(|c| c.tags.clone())
-            .unwrap_or_default(),
+        tags: content.map(|c| c.tags.clone()).unwrap_or_default(),
         draft: content.is_some_and(|c| c.draft),
     }
 }
@@ -285,7 +289,9 @@ pub fn collect_metadata(
                     .write()
                     .record_dependencies(path, &result.accessed_files);
 
-                result.metadata.and_then(|json| serde_json::from_value(json).ok())
+                result
+                    .metadata
+                    .and_then(|json| serde_json::from_value(json).ok())
             } else {
                 query_meta(path, config)
             };
@@ -415,7 +421,7 @@ pub fn collect_pages(config: &SiteConfig) -> Result<Pages> {
     for result in results {
         match result {
             Ok(Some(page)) => items.push(page),
-            Ok(None) => {} // Draft, skip
+            Ok(None) => {}           // Draft, skip
             Err(e) => return Err(e), // Propagate compilation error
         }
     }
@@ -484,7 +490,10 @@ mod tests {
 
         let (html, meta) = result.unwrap();
         assert!(!html.is_empty(), "HTML should not be empty");
-        assert!(meta.is_none(), "Metadata should be None when no <tola-meta> label");
+        assert!(
+            meta.is_none(),
+            "Metadata should be None when no <tola-meta> label"
+        );
     }
 
     #[test]
@@ -608,7 +617,11 @@ mod tests {
     #[test]
     fn test_compile_cli_pipe() {
         // Skip if typst not available
-        if std::process::Command::new("typst").arg("--version").output().is_err() {
+        if std::process::Command::new("typst")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
             eprintln!("Skipping test_compile_cli_pipe: typst not found");
             return;
         }
@@ -630,13 +643,17 @@ mod tests {
                 let html_str = String::from_utf8_lossy(&html);
                 assert!(!html.is_empty(), "Captured stdout should not be empty");
                 // Typst HTML output usually contains the content
-                assert!(html_str.contains("Hello Pipe"), "Output should contain content. Got: {}", html_str);
+                assert!(
+                    html_str.contains("Hello Pipe"),
+                    "Output should contain content. Got: {}",
+                    html_str
+                );
             }
             Err(e) => {
-                 // Fail the test if Typst exists but compilation fails (e.g. pipe error)
-                 // Unless it's a version mismatch/feature missing issue.
-                 // We will panic to signal failure.
-                 panic!("CLI compilation failed: {}", e);
+                // Fail the test if Typst exists but compilation fails (e.g. pipe error)
+                // Unless it's a version mismatch/feature missing issue.
+                // We will panic to signal failure.
+                panic!("CLI compilation failed: {}", e);
             }
         }
     }

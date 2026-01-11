@@ -1,9 +1,6 @@
 use crate::{config::SiteConfig, exec, log};
 use anyhow::{Context, Result, bail};
-use gix::{
-    Repository, ThreadSafeRepository,
-    remote::Direction,
-};
+use gix::{Repository, ThreadSafeRepository, remote::Direction};
 use std::{fs, path::Path};
 
 use super::repo::get_repo_root;

@@ -1,8 +1,8 @@
+use crate::utils::svg::{SVG_PADDING_BOTTOM, SVG_PADDING_TOP};
 use anyhow::Result;
-use quick_xml::events::attributes::Attribute;
 use quick_xml::events::BytesStart;
+use quick_xml::events::attributes::Attribute;
 use quick_xml::name::QName;
-use crate::utils::svg::{SVG_PADDING_TOP, SVG_PADDING_BOTTOM};
 
 /// Transform SVG attributes (height, viewBox adjustments).
 pub fn transform_svg_attrs<'a>(elem: &'a BytesStart<'_>) -> Result<Vec<Attribute<'a>>> {
@@ -41,7 +41,9 @@ fn adjust_viewbox(attr: Attribute<'_>) -> Result<Attribute<'static>> {
 
     // Parse 4 values without allocating a Vec
     let mut iter = value.split_whitespace();
-    let (Some(s0), Some(s1), Some(s2), Some(s3)) = (iter.next(), iter.next(), iter.next(), iter.next()) else {
+    let (Some(s0), Some(s1), Some(s2), Some(s3)) =
+        (iter.next(), iter.next(), iter.next(), iter.next())
+    else {
         anyhow::bail!("Invalid viewBox: expected 4 values")
     };
 

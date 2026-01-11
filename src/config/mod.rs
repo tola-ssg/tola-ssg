@@ -210,8 +210,13 @@ impl SiteConfig {
 
         // Validate config existence
         match (cli.is_init(), exists) {
-            (true, true) => bail!("Config file already exists. Remove it manually or init in a different path."),
-            (false, false) => bail!("Config file '{}' not found. Run 'tola init' to create a new project.", cli.config.display()),
+            (true, true) => {
+                bail!("Config file already exists. Remove it manually or init in a different path.")
+            }
+            (false, false) => bail!(
+                "Config file '{}' not found. Run 'tola init' to create a new project.",
+                cli.config.display()
+            ),
             _ => {}
         }
 
@@ -267,10 +272,12 @@ impl SiteConfig {
             Commands::Init { name: Some(name) } => {
                 std::env::current_dir().unwrap_or_default().join(name)
             }
-            Commands::Init { name: None } => {
-                std::env::current_dir().unwrap_or_default()
-            }
-            _ => self.config_path.parent().map(Path::to_path_buf).unwrap_or_default(),
+            Commands::Init { name: None } => std::env::current_dir().unwrap_or_default(),
+            _ => self
+                .config_path
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or_default(),
         };
 
         self.set_root(&root);
@@ -377,7 +384,13 @@ impl SiteConfig {
             Commands::Build { build_args } => {
                 self.apply_build_args(build_args, false);
             }
-            Commands::Serve { build_args, interface, port, watch, .. } => {
+            Commands::Serve {
+                build_args,
+                interface,
+                port,
+                watch,
+                ..
+            } => {
                 self.apply_build_args(build_args, true);
                 self.apply_serve_options(interface.as_ref(), *port, *watch);
             }
@@ -403,9 +416,10 @@ impl SiteConfig {
             // Extract path from URL and set as path_prefix
             // e.g., "https://example.github.io/my-project/foo" → "my-project/foo"
             if let Some(path) = extract_url_path(url)
-                && !path.is_empty() {
-                    self.build.path_prefix = PathBuf::from(path);
-                }
+                && !path.is_empty()
+            {
+                self.build.path_prefix = PathBuf::from(path);
+            }
         }
 
         if is_serve {
@@ -501,7 +515,11 @@ impl SiteConfig {
     fn normalize_token_path(path: &Path, root: &Path) -> PathBuf {
         let expanded = shellexpand::tilde(path.to_str().unwrap_or_default()).into_owned();
         let path = PathBuf::from(expanded);
-        let full_path = if path.is_relative() { root.join(&path) } else { path };
+        let full_path = if path.is_relative() {
+            root.join(&path)
+        } else {
+            path
+        };
         Self::normalize_path(&full_path)
     }
 
@@ -511,8 +529,7 @@ impl SiteConfig {
             if path.is_absolute() {
                 path.to_path_buf()
             } else {
-                std::env::current_dir()
-                    .map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
+                std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
             }
         })
     }
@@ -538,11 +555,12 @@ impl SiteConfig {
         }
 
         if let Some(base_url) = &self.base.url
-            && !base_url.contains("://") {
-                bail!(ConfigError::Validation(
-                    "[base.url] must be a valid URL with scheme (e.g., https://example.com)".into()
-                ));
-            }
+            && !base_url.contains("://")
+        {
+            bail!(ConfigError::Validation(
+                "[base.url] must be a valid URL with scheme (e.g., https://example.com)".into()
+            ));
+        }
         Ok(())
     }
 
@@ -565,15 +583,24 @@ impl SiteConfig {
             return Ok(());
         }
 
-        Self::check_command_installed("[build.css.tailwind.command]", &self.build.css.tailwind.command)?;
+        Self::check_command_installed(
+            "[build.css.tailwind.command]",
+            &self.build.css.tailwind.command,
+        )?;
 
         match &self.build.css.tailwind.input {
-            None => bail!("[build.css.tailwind.enable] = true requires [build.css.tailwind.input] to be set"),
+            None => bail!(
+                "[build.css.tailwind.enable] = true requires [build.css.tailwind.input] to be set"
+            ),
             Some(path) if !path.exists() => {
-                bail!(ConfigError::Validation("[build.css.tailwind.input] not found".into()))
+                bail!(ConfigError::Validation(
+                    "[build.css.tailwind.input] not found".into()
+                ))
             }
             Some(path) if !path.is_file() => {
-                bail!(ConfigError::Validation("[build.css.tailwind.input] is not a file".into()))
+                bail!(ConfigError::Validation(
+                    "[build.css.tailwind.input] is not a file".into()
+                ))
             }
             _ => Ok(()),
         }
@@ -581,7 +608,10 @@ impl SiteConfig {
 
     fn validate_inline_max_size(&self) -> Result<()> {
         const VALID_SUFFIXES: [&str; 3] = ["B", "KB", "MB"];
-        if !VALID_SUFFIXES.iter().any(|s| self.build.typst.svg.inline_max_size.ends_with(s)) {
+        if !VALID_SUFFIXES
+            .iter()
+            .any(|s| self.build.typst.svg.inline_max_size.ends_with(s))
+        {
             bail!(ConfigError::Validation(
                 "[build.typst.svg.inline_max_size] must end with B, KB, or MB".into()
             ));
@@ -603,10 +633,14 @@ impl SiteConfig {
     fn validate_deploy(&self) -> Result<()> {
         if let Some(path) = &self.deploy.github.token_path {
             if !path.exists() {
-                bail!(ConfigError::Validation("[deploy.github.token_path] not found".into()));
+                bail!(ConfigError::Validation(
+                    "[deploy.github.token_path] not found".into()
+                ));
             }
             if !path.is_file() {
-                bail!(ConfigError::Validation("[deploy.github.token_path] is not a file".into()));
+                bail!(ConfigError::Validation(
+                    "[deploy.github.token_path] is not a file".into()
+                ));
             }
         }
         Ok(())
@@ -615,11 +649,14 @@ impl SiteConfig {
     /// Check if a command is installed and available.
     fn check_command_installed(field: &str, command: &[String]) -> Result<()> {
         if command.is_empty() {
-            bail!(ConfigError::Validation(format!("{field} must have at least one element")));
+            bail!(ConfigError::Validation(format!(
+                "{field} must have at least one element"
+            )));
         }
 
         let cmd = &command[0];
-        which::which(cmd).with_context(|| format!("`{cmd}` not found. Please install it first."))?;
+        which::which(cmd)
+            .with_context(|| format!("`{cmd}` not found. Please install it first."))?;
         Ok(())
     }
 }
@@ -669,10 +706,7 @@ mod tests {
         );
 
         // Root path (no subpath)
-        assert_eq!(
-            extract_url_path("https://example.com"),
-            Some(String::new())
-        );
+        assert_eq!(extract_url_path("https://example.com"), Some(String::new()));
 
         // Root path with trailing slash
         assert_eq!(

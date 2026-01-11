@@ -214,9 +214,10 @@ pub fn process_relative_link(value: &str, is_source_index: bool) -> Result<Cow<'
 pub fn is_external_link(link: &str) -> bool {
     link.find(':').is_some_and(|pos| {
         // Scheme must be non-empty
-        pos > 0 && link[..pos]
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        pos > 0
+            && link[..pos]
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
     })
 }
 
@@ -231,27 +232,60 @@ mod tests {
     #[test]
     fn test_relative_link_index_no_adjustment() {
         // index.typ: output is at same level, no adjustment needed
-        assert_eq!(process_relative_link("./img.png", true).unwrap(), "./img.png");
-        assert_eq!(process_relative_link("../doc.pdf", true).unwrap(), "../doc.pdf");
-        assert_eq!(process_relative_link("asset/logo.svg", true).unwrap(), "asset/logo.svg");
-        assert_eq!(process_relative_link("../../up/up.txt", true).unwrap(), "../../up/up.txt");
+        assert_eq!(
+            process_relative_link("./img.png", true).unwrap(),
+            "./img.png"
+        );
+        assert_eq!(
+            process_relative_link("../doc.pdf", true).unwrap(),
+            "../doc.pdf"
+        );
+        assert_eq!(
+            process_relative_link("asset/logo.svg", true).unwrap(),
+            "asset/logo.svg"
+        );
+        assert_eq!(
+            process_relative_link("../../up/up.txt", true).unwrap(),
+            "../../up/up.txt"
+        );
     }
 
     #[test]
     fn test_relative_link_non_index_prepend() {
         // Non-index.typ: output is one level deeper, prepend ../
-        assert_eq!(process_relative_link("./img.png", false).unwrap(), ".././img.png");
-        assert_eq!(process_relative_link("../doc.pdf", false).unwrap(), "../../doc.pdf");
-        assert_eq!(process_relative_link("asset/logo.svg", false).unwrap(), "../asset/logo.svg");
+        assert_eq!(
+            process_relative_link("./img.png", false).unwrap(),
+            ".././img.png"
+        );
+        assert_eq!(
+            process_relative_link("../doc.pdf", false).unwrap(),
+            "../../doc.pdf"
+        );
+        assert_eq!(
+            process_relative_link("asset/logo.svg", false).unwrap(),
+            "../asset/logo.svg"
+        );
     }
 
     #[test]
     fn test_relative_link_external_unchanged() {
         // External links: unchanged regardless of is_source_index
-        assert_eq!(process_relative_link("https://example.com", true).unwrap(), "https://example.com");
-        assert_eq!(process_relative_link("https://example.com", false).unwrap(), "https://example.com");
-        assert_eq!(process_relative_link("mailto:user@example.com", true).unwrap(), "mailto:user@example.com");
-        assert_eq!(process_relative_link("tel:+1234567890", false).unwrap(), "tel:+1234567890");
+        assert_eq!(
+            process_relative_link("https://example.com", true).unwrap(),
+            "https://example.com"
+        );
+        assert_eq!(
+            process_relative_link("https://example.com", false).unwrap(),
+            "https://example.com"
+        );
+        assert_eq!(
+            process_relative_link("mailto:user@example.com", true).unwrap(),
+            "mailto:user@example.com"
+        );
+        assert_eq!(
+            process_relative_link("tel:+1234567890", false).unwrap(),
+            "tel:+1234567890"
+        );
     }
 
     // ========================================================================
@@ -296,8 +330,14 @@ mod tests {
     #[test]
     fn test_fragment_link_simple() {
         let config = SiteConfig::default();
-        assert_eq!(process_fragment_link("#section", &config).unwrap(), "#section");
-        assert_eq!(process_fragment_link("#my-heading", &config).unwrap(), "#my-heading");
+        assert_eq!(
+            process_fragment_link("#section", &config).unwrap(),
+            "#section"
+        );
+        assert_eq!(
+            process_fragment_link("#my-heading", &config).unwrap(),
+            "#my-heading"
+        );
     }
 
     #[test]

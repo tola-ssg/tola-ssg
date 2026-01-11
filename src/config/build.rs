@@ -470,14 +470,17 @@ mod tests {
     #[test]
     fn test_slug_mode_parsing() {
         // Test "full"
-        let config: SiteConfig = toml::from_str(r#"
+        let config: SiteConfig = toml::from_str(
+            r#"
             [base]
             title = "Test"
             description = "Test"
             [build.slug]
             path = "full"
             fragment = "full"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert!(matches!(config.build.slug.path, SlugMode::Full));
         assert!(matches!(config.build.slug.fragment, SlugMode::Full));
 
@@ -821,7 +824,10 @@ mod tests {
         "#;
         // This should fail because path_prefix is not a valid config field
         let result: Result<SiteConfig, _> = toml::from_str(config);
-        assert!(result.is_err(), "path_prefix should not be accepted in config");
+        assert!(
+            result.is_err(),
+            "path_prefix should not be accepted in config"
+        );
     }
 
     #[test]
@@ -1045,7 +1051,10 @@ mod tests {
             command = ["npx", "tailwindcss"]
         "#;
         let config: SiteConfig = toml::from_str(config).unwrap();
-        assert_eq!(config.build.css.tailwind.command, vec!["npx", "tailwindcss"]);
+        assert_eq!(
+            config.build.css.tailwind.command,
+            vec!["npx", "tailwindcss"]
+        );
     }
 
     #[test]
@@ -1064,23 +1073,32 @@ mod tests {
     #[test]
     fn test_slug_separator_parsing() {
         // Test "dash"
-        let config: SiteConfig = toml::from_str(r#"
+        let config: SiteConfig = toml::from_str(
+            r#"
             [base]
             title = "Test"
             description = "Test"
             [build.slug]
             separator = "dash"
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert!(matches!(config.build.slug.separator, SlugSeparator::Dash));
 
         // Test "underscore"
-        let config: SiteConfig = toml::from_str(r#"
+        let config: SiteConfig = toml::from_str(
+            r#"
             [base]
             title = "Test"
             description = "Test"
             [build.slug]
             separator = "underscore"
-        "#).unwrap();
-        assert!(matches!(config.build.slug.separator, SlugSeparator::Underscore));
+        "#,
+        )
+        .unwrap();
+        assert!(matches!(
+            config.build.slug.separator,
+            SlugSeparator::Underscore
+        ));
     }
 }

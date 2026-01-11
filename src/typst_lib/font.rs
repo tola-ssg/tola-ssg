@@ -92,9 +92,8 @@ fn init_fonts(font_paths: &[&Path]) -> (Fonts, LazyHash<FontBook>) {
 /// This function is thread-safe. If called concurrently, only one thread
 /// performs initialization; others wait and receive the shared result.
 pub fn get_fonts(font_path: Option<&Path>) -> &'static (Fonts, LazyHash<FontBook>) {
-    GLOBAL_FONTS.get_or_init(|| {
-        font_path.map_or_else(|| init_fonts(&[]), |path| init_fonts(&[path]))
-    })
+    GLOBAL_FONTS
+        .get_or_init(|| font_path.map_or_else(|| init_fonts(&[]), |path| init_fonts(&[path])))
 }
 
 #[cfg(test)]
@@ -113,7 +112,10 @@ mod tests {
     fn test_font_book_not_empty() {
         let fonts = get_fonts(None);
         // FontBook should have indexed the fonts
-        assert!(fonts.1.families().count() > 0, "Font book should have families");
+        assert!(
+            fonts.1.families().count() > 0,
+            "Font book should have families"
+        );
     }
 
     #[test]
@@ -130,6 +132,9 @@ mod tests {
         let fonts1 = get_fonts(None);
         // Second call with different path should return same fonts
         let fonts2 = get_fonts(Some(Path::new("/nonexistent")));
-        assert!(std::ptr::eq(fonts1, fonts2), "Path ignored after initialization");
+        assert!(
+            std::ptr::eq(fonts1, fonts2),
+            "Path ignored after initialization"
+        );
     }
 }

@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
 use crate::config::SiteConfig;
+use anyhow::{Context, Result};
 
 /// Optimize SVG using usvg, returning optimized bytes and dimensions.
 pub fn optimize_svg(content: &[u8], config: &SiteConfig) -> Result<(Vec<u8>, (f32, f32))> {

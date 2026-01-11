@@ -36,10 +36,7 @@ pub fn is_virtual_data_path(path: &Path) -> bool {
 
     // Handle both absolute paths and root-relative paths
     if path_str.contains("/_data/") {
-        let suffix = path_str
-            .rsplit("/_data/")
-            .next()
-            .unwrap_or("");
+        let suffix = path_str.rsplit("/_data/").next().unwrap_or("");
 
         return VIRTUAL_FILES.iter().any(|(name, _)| *name == suffix);
     }
@@ -59,9 +56,7 @@ pub fn is_virtual_data_path(path: &Path) -> bool {
 pub fn read_virtual_data(path: &Path) -> Option<Vec<u8>> {
     let path_str = path.to_string_lossy();
 
-    let suffix = path_str
-        .rsplit("/_data/")
-        .next()?;
+    let suffix = path_str.rsplit("/_data/").next()?;
 
     for (name, generator) in VIRTUAL_FILES {
         if *name == suffix {
@@ -107,7 +102,9 @@ mod tests {
         assert!(is_virtual_data_path(Path::new("/_data/pages.json")));
         assert!(is_virtual_data_path(Path::new("/_data/tags.json")));
         assert!(is_virtual_data_path(Path::new("/project/_data/pages.json")));
-        assert!(is_virtual_data_path(Path::new("/some/path/_data/tags.json")));
+        assert!(is_virtual_data_path(Path::new(
+            "/some/path/_data/tags.json"
+        )));
 
         assert!(!is_virtual_data_path(Path::new("/_data/unknown.json")));
         assert!(!is_virtual_data_path(Path::new("/regular/file.json")));

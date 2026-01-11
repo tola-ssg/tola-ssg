@@ -5,7 +5,7 @@ use quick_xml::events::{BytesEnd, Event};
 use std::io::Write;
 
 use super::assets::{compute_asset_href, compute_stylesheet_href, get_icon_mime_type};
-use super::common::{write_empty_elem, write_script, write_text_element, XmlWriter};
+use super::common::{XmlWriter, write_empty_elem, write_script, write_text_element};
 
 /// Write `<head>` section content before closing tag.
 pub fn write_head_content(writer: &mut XmlWriter, config: &SiteConfig) -> Result<()> {

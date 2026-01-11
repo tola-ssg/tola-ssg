@@ -18,7 +18,7 @@ use anyhow::Result;
 use build::build_site;
 use clap::Parser;
 use cli::{Cli, Commands};
-use config::{cfg, init_config, SiteConfig};
+use config::{SiteConfig, cfg, init_config};
 use deploy::deploy_site;
 use generator::{rss::build_rss, sitemap::build_sitemap};
 use gix::ThreadSafeRepository;
@@ -54,13 +54,10 @@ fn build_all() -> Result<ThreadSafeRepository> {
     let (repo, pages) = build_site(&c, false)?;
 
     // Generate rss and sitemap in parallel using collected pages
-    let (rss_result, sitemap_result) = rayon::join(
-        || build_rss(&c, &pages),
-        || build_sitemap(&c, &pages),
-    );
+    let (rss_result, sitemap_result) =
+        rayon::join(|| build_rss(&c, &pages), || build_sitemap(&c, &pages));
 
     rss_result?;
     sitemap_result?;
     Ok(repo)
 }
-

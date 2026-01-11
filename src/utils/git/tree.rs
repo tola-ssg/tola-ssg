@@ -163,9 +163,21 @@ mod tests {
     #[test]
     fn test_sort_tree_entries() {
         let mut entries = vec![
-            Entry { mode: EntryKind::Blob.into(), filename: "foo.rs".into(), oid: gix::ObjectId::null(gix::hash::Kind::Sha1) },
-            Entry { mode: EntryKind::Tree.into(), filename: "foo".into(), oid: gix::ObjectId::null(gix::hash::Kind::Sha1) },
-            Entry { mode: EntryKind::Blob.into(), filename: "foo-bar".into(), oid: gix::ObjectId::null(gix::hash::Kind::Sha1) },
+            Entry {
+                mode: EntryKind::Blob.into(),
+                filename: "foo.rs".into(),
+                oid: gix::ObjectId::null(gix::hash::Kind::Sha1),
+            },
+            Entry {
+                mode: EntryKind::Tree.into(),
+                filename: "foo".into(),
+                oid: gix::ObjectId::null(gix::hash::Kind::Sha1),
+            },
+            Entry {
+                mode: EntryKind::Blob.into(),
+                filename: "foo-bar".into(),
+                oid: gix::ObjectId::null(gix::hash::Kind::Sha1),
+            },
         ];
 
         // Git sort order:

@@ -1,10 +1,6 @@
 use crate::{init::init_ignored_files, log};
 use anyhow::{Result, anyhow, bail};
-use gix::{
-    Repository, ThreadSafeRepository,
-    commit::NO_PARENT_IDS,
-    index::State,
-};
+use gix::{Repository, ThreadSafeRepository, commit::NO_PARENT_IDS, index::State};
 use std::{fs, path::Path};
 
 use super::tree::TreeBuilder;
@@ -75,7 +71,10 @@ fn get_parent_commit_ids(repo: &ThreadSafeRepository) -> Result<Vec<gix::ObjectI
     let parent_ids = repo_local
         .find_reference("refs/heads/main")
         .ok()
-        .map_or_else(|| NO_PARENT_IDS.to_vec(), |refs| vec![refs.target().id().to_owned()]);
+        .map_or_else(
+            || NO_PARENT_IDS.to_vec(),
+            |refs| vec![refs.target().id().to_owned()],
+        );
 
     Ok(parent_ids)
 }
@@ -124,7 +123,10 @@ mod tests {
             let mut head = repo_local.head().unwrap();
             let commit = head.peel_to_commit_in_place().unwrap();
 
-            assert_eq!(commit.message().unwrap().summary().to_string(), "Initial commit");
+            assert_eq!(
+                commit.message().unwrap().summary().to_string(),
+                "Initial commit"
+            );
         });
     }
 
@@ -133,7 +135,10 @@ mod tests {
         with_temp_repo(|_dir, repo| {
             let result = commit_all(repo, "   ");
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err().to_string(), "Commit message cannot be empty");
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                "Commit message cannot be empty"
+            );
         });
     }
 

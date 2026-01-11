@@ -4,11 +4,11 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, Writer};
 use std::io::Cursor;
 
-use crate::config::SiteConfig;
-use crate::compiler::meta::url_from_output_path;
-use crate::utils::svg::{HtmlContext, Svg, INITIAL_SVG_BUFFER_SIZE};
 use super::optimize::optimize_svg;
 use super::transform::transform_svg_attrs;
+use crate::compiler::meta::url_from_output_path;
+use crate::config::SiteConfig;
+use crate::utils::svg::{HtmlContext, INITIAL_SVG_BUFFER_SIZE, Svg};
 
 /// Extract and optimize an SVG element, writing an img placeholder to the output
 pub fn extract_svg_element(
@@ -190,7 +190,10 @@ mod tests {
         let s = String::from_utf8(captured).unwrap();
 
         // Should wrap in <svg>...</svg>
-        assert_eq!(s, r#"<svg><rect x="0" y="0" width="10" height="10"/></svg>"#);
+        assert_eq!(
+            s,
+            r#"<svg><rect x="0" y="0" width="10" height="10"/></svg>"#
+        );
     }
 
     #[test]
@@ -206,7 +209,10 @@ mod tests {
         let captured = capture_svg_content(&mut reader, &attrs).unwrap();
         let s = String::from_utf8(captured).unwrap();
 
-        assert_eq!(s, r#"<svg><g><svg viewBox="0 0 10 10"><rect/></svg></g></svg>"#);
+        assert_eq!(
+            s,
+            r#"<svg><g><svg viewBox="0 0 10 10"><rect/></svg></g></svg>"#
+        );
     }
 
     #[test]
@@ -217,8 +223,14 @@ mod tests {
         let _ = reader.read_event().unwrap();
 
         let attrs = vec![
-            Attribute { key: QName(b"width"), value: b"100".as_slice().into() },
-            Attribute { key: QName(b"height"), value: b"100".as_slice().into() },
+            Attribute {
+                key: QName(b"width"),
+                value: b"100".as_slice().into(),
+            },
+            Attribute {
+                key: QName(b"height"),
+                value: b"100".as_slice().into(),
+            },
         ];
 
         let captured = capture_svg_content(&mut reader, &attrs).unwrap();

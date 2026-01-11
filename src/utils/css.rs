@@ -5,9 +5,9 @@
 //! - Tailwind CSS build integration
 
 use crate::config::SiteConfig;
-use crate::utils::exec::FilterRule;
 use crate::exec;
-use anyhow::{anyhow, Result};
+use crate::utils::exec::FilterRule;
+use anyhow::{Result, anyhow};
 use std::{
     fs,
     io::Write,
@@ -92,8 +92,12 @@ pub fn is_tailwind_input(path: &Path, config: &SiteConfig) -> bool {
 
 /// Run Tailwind CSS build for the input file.
 pub fn run_tailwind(input: &Path, output: &Path, config: &SiteConfig, quiet: bool) -> Result<()> {
-    use super::exec::{SILENT_FILTER, FilterRule};
-    let filter: &'static FilterRule = if quiet { &SILENT_FILTER } else { &TAILWIND_FILTER };
+    use super::exec::{FilterRule, SILENT_FILTER};
+    let filter: &'static FilterRule = if quiet {
+        &SILENT_FILTER
+    } else {
+        &TAILWIND_FILTER
+    };
     exec!(
         pty=true;
         filter=filter;
@@ -184,6 +188,9 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().starts_with(".enhance-"))
             .collect();
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].file_name().to_string_lossy(), enhance_css_filename());
+        assert_eq!(
+            files[0].file_name().to_string_lossy(),
+            enhance_css_filename()
+        );
     }
 }

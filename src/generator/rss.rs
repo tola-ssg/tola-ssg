@@ -8,7 +8,7 @@ use crate::{
     log,
     utils::{
         date::DateTimeUtc,
-        minify::{minify, MinifyType},
+        minify::{MinifyType, minify},
     },
 };
 use anyhow::{Ok, Result, anyhow};
@@ -43,10 +43,7 @@ impl<'a> RssFeed<'a> {
     ///
     /// Pages without content metadata are silently skipped.
     fn build(config: &'a SiteConfig, pages: &'a Pages) -> Result<Self> {
-        let pages: Vec<_> = pages
-            .iter()
-            .filter(|p| p.content_meta.is_some())
-            .collect();
+        let pages: Vec<_> = pages.iter().filter(|p| p.content_meta.is_some()).collect();
 
         Ok(Self { config, pages })
     }

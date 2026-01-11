@@ -58,10 +58,10 @@ mod world;
 
 use std::path::{Path, PathBuf};
 
+use typst::Document;
 use typst::foundations::{Label, Selector, Value};
 use typst::introspection::MetadataElem;
 use typst::utils::PicoStr;
-use typst::Document;
 
 pub use world::SystemWorld;
 
@@ -132,11 +132,7 @@ pub fn warmup_with_root(root: &Path) {
 /// * `path` - Path to the `.typ` file to compile
 /// * `root` - Project root directory for resolving imports
 /// * `label_name` - The label to query for metadata (e.g., "tola-meta")
-pub fn compile_meta(
-    path: &Path,
-    root: &Path,
-    label_name: &str,
-) -> anyhow::Result<CompileResult> {
+pub fn compile_meta(path: &Path, root: &Path, label_name: &str) -> anyhow::Result<CompileResult> {
     let _guard = acquire_test_lock();
     let (_world, document) = compile_base(path, root)?;
 
@@ -188,7 +184,10 @@ fn compile_base(
 }
 
 /// Extract metadata from a compiled document by label name.
-fn extract_meta(document: &typst_html::HtmlDocument, label_name: &str) -> Option<serde_json::Value> {
+fn extract_meta(
+    document: &typst_html::HtmlDocument,
+    label_name: &str,
+) -> Option<serde_json::Value> {
     let label = Label::new(PicoStr::intern(label_name))?;
     let introspector = document.introspector();
     let elem = introspector.query_unique(&Selector::Label(label)).ok()?;
@@ -405,9 +404,18 @@ mod tests {
 
         // Serialize to JSON to check contents
         let json: serde_json::Value = serde_json::to_value(&value).unwrap();
-        assert_eq!(json.get("title").and_then(|v| v.as_str()), Some("Test Post"));
-        assert_eq!(json.get("date").and_then(|v| v.as_str()), Some("2024-01-01"));
-        assert_eq!(json.get("author").and_then(|v| v.as_str()), Some("Test Author"));
+        assert_eq!(
+            json.get("title").and_then(|v| v.as_str()),
+            Some("Test Post")
+        );
+        assert_eq!(
+            json.get("date").and_then(|v| v.as_str()),
+            Some("2024-01-01")
+        );
+        assert_eq!(
+            json.get("author").and_then(|v| v.as_str()),
+            Some("Test Author")
+        );
     }
 
     #[test]

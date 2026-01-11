@@ -1,8 +1,8 @@
-use crate::config::SiteConfig;
-use crate::compiler::meta::AssetMeta;
 use crate::compiler::is_up_to_date;
-use crate::utils::css;
+use crate::compiler::meta::AssetMeta;
+use crate::config::SiteConfig;
 use crate::log;
+use crate::utils::css;
 use anyhow::{Result, anyhow};
 use std::fs;
 use std::path::Path;
@@ -83,8 +83,12 @@ pub fn process_rel_asset(
 /// Delegates to `utils::css::rebuild_tailwind` with asset path resolution.
 /// When `quiet` is true, output is suppressed (for watch mode).
 pub fn rebuild_tailwind(config: &SiteConfig, quiet: bool) -> Result<()> {
-    css::rebuild_tailwind(config, |input| {
-        let meta = AssetMeta::from_source(input.to_path_buf(), config)?;
-        Ok(meta.paths.dest)
-    }, quiet)
+    css::rebuild_tailwind(
+        config,
+        |input| {
+            let meta = AssetMeta::from_source(input.to_path_buf(), config)?;
+            Ok(meta.paths.dest)
+        },
+        quiet,
+    )
 }

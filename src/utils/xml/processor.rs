@@ -1,18 +1,16 @@
 use crate::config::SiteConfig;
 use crate::utils::slug::slugify_fragment;
-use crate::utils::svg::{compress_svgs_parallel, extract_svg_element, HtmlContext, Svg};
+use crate::utils::svg::{HtmlContext, Svg, compress_svgs_parallel, extract_svg_element};
 use anyhow::Result;
 use quick_xml::{
-    events::{BytesEnd, BytesStart, Event},
     Reader, Writer,
+    events::{BytesEnd, BytesStart, Event},
 };
 use std::io::Cursor;
 use std::path::Path;
 use std::str;
 
-use super::common::{
-    create_xml_reader, rebuild_elem, rebuild_elem_try, XmlWriter,
-};
+use super::common::{XmlWriter, create_xml_reader, rebuild_elem, rebuild_elem_try};
 use super::head::write_head_content;
 use super::link::process_link_value;
 

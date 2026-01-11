@@ -34,10 +34,10 @@
 
 use crate::{
     compiler::process_watched_files,
-    config::{cfg, reload_config, SiteConfig},
+    config::{SiteConfig, cfg, reload_config},
     log,
     logger::WatchStatus,
-    utils::category::{categorize_path, FileCategory},
+    utils::category::{FileCategory, categorize_path},
 };
 use anyhow::{Context, Result};
 use notify::{Event, EventKind, RecursiveMode, Watcher};
@@ -115,15 +115,19 @@ impl ContentCache {
 
         for &cat in WATCH_CATEGORIES {
             for path in cat.paths(config) {
-                if !path.exists() { continue; }
+                if !path.exists() {
+                    continue;
+                }
 
                 for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
                     let path = entry.path();
-                    if path.is_file() && !is_temp_file(path)
+                    if path.is_file()
+                        && !is_temp_file(path)
                         && let Ok(file) = std::fs::File::open(path)
-                            && let Ok(hash) = crate::utils::hash::compute_reader(file) {
-                                self.hashes.insert(path.to_path_buf(), hash);
-                            }
+                        && let Ok(hash) = crate::utils::hash::compute_reader(file)
+                    {
+                        self.hashes.insert(path.to_path_buf(), hash);
+                    }
                 }
             }
         }
@@ -233,7 +237,6 @@ impl Debouncer {
     }
 }
 
-
 /// Process file changes. Returns true if full rebuild succeeded (for cooldown).
 fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> bool {
     if paths.is_empty() {
@@ -306,9 +309,17 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
             }
             Err(e) => {
                 let context = if clean {
-                    dependency_triggers.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
+                    dependency_triggers
+                        .iter()
+                        .map(|p| rel(p))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 } else {
-                    incremental_targets.iter().map(|p| rel(p)).collect::<Vec<_>>().join(", ")
+                    incremental_targets
+                        .iter()
+                        .map(|p| rel(p))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 };
                 status.error(&format!("failed: {context}"), &e.to_string());
                 return false;
@@ -324,9 +335,10 @@ fn handle_changes(paths: &[PathBuf], status: &mut WatchStatus, root: &Path) -> b
             .collect();
 
         if !virtual_dependents.is_empty()
-            && let Err(e) = process_watched_files(&virtual_dependents, &cfg(), false) {
-                status.error("failed: site data update", &e.to_string());
-            }
+            && let Err(e) = process_watched_files(&virtual_dependents, &cfg(), false)
+        {
+            status.error("failed: site data update", &e.to_string());
+        }
     }
 
     // Evict stale entries from typst's comemo memoization cache
@@ -447,9 +459,9 @@ fn setup_watchers(watcher: &mut impl Watcher, config: &SiteConfig) -> Result<()>
 
         for path in cat.paths(config) {
             if path.exists() {
-                watcher
-                    .watch(&path, mode)
-                    .with_context(|| format!("Failed to watch {}: {}", cat.name(), path.display()))?;
+                watcher.watch(&path, mode).with_context(|| {
+                    format!("Failed to watch {}: {}", cat.name(), path.display())
+                })?;
             }
         }
     }
@@ -462,7 +474,6 @@ fn setup_watchers(watcher: &mut impl Watcher, config: &SiteConfig) -> Result<()>
 const fn is_relevant(event: &Event) -> bool {
     matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_))
 }
-
 
 // =============================================================================
 // Public API
@@ -502,10 +513,10 @@ pub fn watch_for_changes_blocking() -> Result<()> {
                 }
 
                 // Process changed files
-                if !result.changed.is_empty()
-                    && handle_changes(&result.changed, &mut status, &root) {
-                        debouncer.mark_rebuild();
-                    }
+                if !result.changed.is_empty() && handle_changes(&result.changed, &mut status, &root)
+                {
+                    debouncer.mark_rebuild();
+                }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             _ => {}

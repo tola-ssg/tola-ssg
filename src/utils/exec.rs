@@ -324,9 +324,7 @@ fn exec_with_pty(
         .map_err(|_| anyhow::anyhow!("Failed to join output reader thread"))?;
 
     if !status.success() {
-        let msg = format!(
-            "Command `{name}` failed with exit code: {status:?}\n{output_str}"
-        );
+        let msg = format!("Command `{name}` failed with exit code: {status:?}\n{output_str}");
         anyhow::bail!(msg);
     }
 

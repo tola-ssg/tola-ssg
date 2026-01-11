@@ -28,7 +28,12 @@ struct JsonCache {
 ///
 /// - Items with dates come before items without dates
 /// - Items with same date are sorted by title
-fn compare_by_date<T: AsRef<str>>(a_date: &Option<String>, b_date: &Option<String>, a_title: T, b_title: T) -> std::cmp::Ordering {
+fn compare_by_date<T: AsRef<str>>(
+    a_date: &Option<String>,
+    b_date: &Option<String>,
+    a_title: T,
+    b_title: T,
+) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match (b_date, a_date) {
         (Some(date_b), Some(date_a)) => date_a.cmp(date_b).reverse(),
@@ -92,10 +97,7 @@ impl SiteDataStore {
     /// Draft pages are excluded from the output.
     pub fn get_pages(&self) -> Vec<PageData> {
         let pages = self.pages.read();
-        let mut result: Vec<_> = pages.values()
-            .filter(|p| !p.draft)
-            .cloned()
-            .collect();
+        let mut result: Vec<_> = pages.values().filter(|p| !p.draft).cloned().collect();
         result.sort_by(|a, b| compare_by_date(&a.date, &b.date, &a.title, &b.title));
         result
     }
