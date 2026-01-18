@@ -21,8 +21,8 @@ use crate::compiler::pages::process_page;
 use crate::config::SiteConfig;
 use crate::data::virtual_fs;
 use crate::logger::ProgressBars;
-use crate::utils::category::{categorize_path, normalize_path, FileCategory};
-use anyhow::{bail, Result};
+use crate::utils::category::{FileCategory, categorize_path, normalize_path};
+use anyhow::{Result, bail};
 use rayon::prelude::*;
 use std::path::PathBuf;
 
@@ -40,11 +40,7 @@ use std::path::PathBuf;
 /// * `clean` - If true, skip up-to-date checks (used when dependencies changed)
 ///
 /// Returns the number of files processed on success, or an error if any file processing fails.
-pub fn process_watched_files(
-    files: &[PathBuf],
-    config: &SiteConfig,
-    clean: bool,
-) -> Result<usize> {
+pub fn process_watched_files(files: &[PathBuf], config: &SiteConfig, clean: bool) -> Result<usize> {
     let (content_files, asset_files) = categorize_files(files, config);
 
     let progress = ProgressBars::new_filtered(&[

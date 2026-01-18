@@ -390,10 +390,19 @@ where
 enum TypstElement {
     Space,
     Linebreak,
-    Text { text: String },
-    Strike { text: String },
-    Link { dest: String, body: Box<Self> },
-    Sequence { children: Vec<Self> },
+    Text {
+        text: String,
+    },
+    Strike {
+        text: String,
+    },
+    Link {
+        dest: String,
+        body: Box<Self>,
+    },
+    Sequence {
+        children: Vec<Self>,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -409,9 +418,7 @@ impl TypstElement {
             Self::Link { dest, body } => {
                 format!("<a href=\"{dest}\">{}</a>", body.to_html())
             }
-            Self::Sequence { children } => {
-                children.iter().map(Self::to_html).collect()
-            }
+            Self::Sequence { children } => children.iter().map(Self::to_html).collect(),
             Self::Unknown => String::new(),
         }
     }
@@ -806,7 +813,10 @@ mod tests {
         } else {
             panic!("Expected Link element");
         }
-        assert_eq!(elem.to_html(), r#"<a href="https://example.com">click here</a>"#);
+        assert_eq!(
+            elem.to_html(),
+            r#"<a href="https://example.com">click here</a>"#
+        );
     }
 
     #[test]
@@ -843,7 +853,10 @@ mod tests {
             ]
         }"#;
         let elem: TypstElement = serde_json::from_str(json).unwrap();
-        assert_eq!(elem.to_html(), r#"Start <a href="https://rust-lang.org">Rust</a> is great"#);
+        assert_eq!(
+            elem.to_html(),
+            r#"Start <a href="https://rust-lang.org">Rust</a> is great"#
+        );
     }
 
     // ========================================================================
@@ -864,7 +877,10 @@ mod tests {
 
     #[test]
     fn test_html_escape_mixed() {
-        assert_eq!(html_escape("<a href=\"#\">link & text</a>"), "&lt;a href=&quot;#&quot;&gt;link &amp; text&lt;/a&gt;");
+        assert_eq!(
+            html_escape("<a href=\"#\">link & text</a>"),
+            "&lt;a href=&quot;#&quot;&gt;link &amp; text&lt;/a&gt;"
+        );
     }
 
     #[test]
@@ -899,7 +915,10 @@ mod tests {
         }"#;
         let meta: ContentMeta = serde_json::from_str(json).unwrap();
         assert_eq!(meta.title, Some("Post".to_string()));
-        assert_eq!(meta.summary, Some(r#"This is a <a href="https://example.com">link</a> in summary"#.to_string()));
+        assert_eq!(
+            meta.summary,
+            Some(r#"This is a <a href="https://example.com">link</a> in summary"#.to_string())
+        );
     }
 
     #[test]
@@ -922,7 +941,10 @@ mod tests {
     fn test_content_meta_summary_with_html_escape() {
         let json = r#"{"summary": {"func": "text", "text": "Use <code> & \"quotes\""}}"#;
         let meta: ContentMeta = serde_json::from_str(json).unwrap();
-        assert_eq!(meta.summary, Some("Use &lt;code&gt; &amp; &quot;quotes&quot;".to_string()));
+        assert_eq!(
+            meta.summary,
+            Some("Use &lt;code&gt; &amp; &quot;quotes&quot;".to_string())
+        );
     }
 
     #[test]

@@ -21,21 +21,17 @@
 //! ```
 
 use crate::{
-    compiler::{
-        collect_all_files, collect_metadata, compile_pages_with_data,
-        process_asset, process_rel_asset,
-    },
     compiler::meta::Pages,
+    compiler::{
+        collect_all_files, collect_metadata, compile_pages_with_data, process_asset,
+        process_rel_asset,
+    },
     config::SiteConfig,
     data::virtual_fs,
     log,
     logger::ProgressBars,
     typst_lib,
-    utils::{
-        category::get_deps_mtime,
-        css,
-        git,
-    },
+    utils::{category::get_deps_mtime, css, git},
 };
 use anyhow::{Context, Result, anyhow};
 use gix::ThreadSafeRepository;

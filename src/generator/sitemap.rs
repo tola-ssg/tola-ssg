@@ -14,7 +14,12 @@
 //! </urlset>
 //! ```
 
-use crate::{compiler::meta::Pages, config::SiteConfig, log, utils::minify::{minify, MinifyType}};
+use crate::{
+    compiler::meta::Pages,
+    config::SiteConfig,
+    log,
+    utils::minify::{MinifyType, minify},
+};
 use anyhow::{Context, Result};
 use std::borrow::Cow;
 use std::fs;
@@ -133,7 +138,7 @@ fn escape_xml(s: &str) -> Cow<'_, str> {
             .replace('<', "&lt;")
             .replace('>', "&gt;")
             .replace('"', "&quot;")
-            .replace('\'', "&apos;")
+            .replace('\'', "&apos;"),
     )
 }
 

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use quick_xml::{
-    events::{BytesEnd, BytesStart, BytesText, Event},
     Reader, Writer,
+    events::{BytesEnd, BytesStart, BytesText, Event},
 };
 use std::borrow::Cow;
 use std::io::Cursor;

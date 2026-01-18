@@ -5,16 +5,12 @@ use std::io::Write;
 use std::path::Path;
 use std::time::SystemTime;
 
+use super::{OutputFormat, Svg};
 use crate::config::{ExtractSvgType, SiteConfig};
 use crate::{exec_with_stdin, log};
-use super::{Svg, OutputFormat};
 
 /// Compress multiple SVGs in parallel
-pub fn compress_svgs_parallel(
-    svgs: &[Svg],
-    html_path: &Path,
-    config: &SiteConfig,
-) -> Result<()> {
+pub fn compress_svgs_parallel(svgs: &[Svg], html_path: &Path, config: &SiteConfig) -> Result<()> {
     let output_dir = html_path.parent().context("Invalid html path")?;
     let log_prefix = get_log_prefix(html_path, config);
     let scale = config.get_scale();

@@ -2,11 +2,11 @@ use gix::{bstr::ByteSlice, glob::wildmatch};
 
 // Constants for gix::ignore::search::pattern::Mode (which is private)
 // See: https://github.com/Byron/gitoxide/blob/main/gix-ignore/src/search/pattern.rs
-const MODE_NO_SUB_DIR: u32 = 1 << 0;      // Pattern has no internal slash (matches basename unless absolute)
+const MODE_NO_SUB_DIR: u32 = 1 << 0; // Pattern has no internal slash (matches basename unless absolute)
 // const MODE_ENDS_WITH: u32 = 1 << 1;    // Pattern ends with something (not used here directly)
-const MODE_MUST_MATCH_DIR: u32 = 1 << 2;  // Pattern ends with slash (must match directory)
-const MODE_NEGATIVE: u32 = 1 << 3;        // Pattern starts with ! (negation)
-const MODE_ABSOLUTE: u32 = 1 << 4;        // Pattern starts with / (rooted at gitignore location)
+const MODE_MUST_MATCH_DIR: u32 = 1 << 2; // Pattern ends with slash (must match directory)
+const MODE_NEGATIVE: u32 = 1 << 3; // Pattern starts with ! (negation)
+const MODE_ABSOLUTE: u32 = 1 << 4; // Pattern starts with / (rooted at gitignore location)
 
 /// Matches paths against .gitignore patterns.
 ///
@@ -83,7 +83,12 @@ mod tests {
     fn test_gix_parse_behavior() {
         let gitignore = b"/root_only\nsub/dir\n*.log\ntemp/";
         for (pattern, _, _) in gix::ignore::parse(gitignore) {
-            println!("Pattern: {:?}, Mode: {:?} (bits: {:b})", pattern.text, pattern.mode, pattern.mode.bits());
+            println!(
+                "Pattern: {:?}, Mode: {:?} (bits: {:b})",
+                pattern.text,
+                pattern.mode,
+                pattern.mode.bits()
+            );
         }
     }
 

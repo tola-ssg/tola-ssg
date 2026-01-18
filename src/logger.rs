@@ -180,7 +180,11 @@ impl ProgressBars {
     /// }
     /// ```
     pub fn new_filtered(modules: &[(&'static str, usize)]) -> Option<Self> {
-        let filtered: Vec<_> = modules.iter().filter(|(_, count)| *count > 0).copied().collect();
+        let filtered: Vec<_> = modules
+            .iter()
+            .filter(|(_, count)| *count > 0)
+            .copied()
+            .collect();
         let total: usize = filtered.iter().map(|(_, c)| c).sum();
 
         if total <= 1 {
@@ -235,7 +239,12 @@ impl ProgressBars {
         let lines_up = (self.bars.len() - bar.row) as u16;
         execute!(stdout, cursor::MoveUp(lines_up)).ok();
         execute!(stdout, Clear(ClearType::CurrentLine)).ok();
-        write!(stdout, "{} [{}] {}", bar.prefix, progress_bar, progress_text).ok();
+        write!(
+            stdout,
+            "{} [{}] {}",
+            bar.prefix, progress_bar, progress_text
+        )
+        .ok();
         execute!(stdout, cursor::MoveDown(lines_up)).ok();
         write!(stdout, "\r").ok();
         stdout.flush().ok();
@@ -402,7 +411,10 @@ impl WatchStatus {
 
     /// Display unchanged message (dimmed).
     pub fn unchanged(&mut self, path: &str) {
-        self.display("".to_string(), &format!("unchanged: {path}").dimmed().to_string());
+        self.display(
+            "".to_string(),
+            &format!("unchanged: {path}").dimmed().to_string(),
+        );
     }
 
     /// Display error message (✗ prefix, red) with optional detail.
